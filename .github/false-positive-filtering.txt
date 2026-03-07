@@ -1,0 +1,18 @@
+HARD EXCLUSIONS:
+1. Prisma ORM queries are parameterized by default - do not report SQL injection through Prisma.
+2. Next.js App Router API routes use built-in body parsing - do not report JSON parsing vulnerabilities.
+3. React/TSX components are XSS-safe by default. Only report XSS if using dangerouslySetInnerHTML.
+4. JWT tokens are verified with jsonwebtoken library using proper secret validation.
+5. Stripe webhook signature verification is handled - do not report webhook tampering.
+6. The middleware.ts blocks all non-API POST requests - this is intentional, not a vulnerability.
+7. ComfyUI server communication is on a private network - do not report SSRF for internal ComfyUI calls.
+8. Environment variables and .env.local are trusted - do not report secrets in env config.
+9. SQLite database is local file-based - do not report network-level database attacks.
+
+PRECEDENTS:
+1. The hosted.ai API client uses a trusted internal API key - do not flag this as hardcoded secret.
+2. Admin auth and customer auth are separate JWT systems by design - different cookies and verification functions.
+3. Tenant portal auth (tenant-admin, tenant-customer) is a third separate JWT system - this is intentional.
+4. Cron endpoints accept CRON_SECRET for authentication - this is the intended auth mechanism.
+5. The /api/v1/* endpoints use API key auth (pk-*) - these are properly validated.
+6. Wallet operations use Stripe's negative balance convention - negative balance means credit, not debt.

@@ -1,0 +1,104 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+tests/e2e/.auth/
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# cron scheduler state
+.cron-state.json
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+/src/generated/prisma
+
+# Database files
+data/*.db
+data/*.db-journal
+data/*.db-wal
+
+# Session tracking files (development only)
+local_memory.md
+local_errors.md
+local_changelog.md
+
+# Archive folder for deleted files
+del_archive/
+
+# IDE configuration
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Additional security
+*.key
+*.cert
+*.crt
+
+# Claude Flow generated files
+.claude/settings.local.json
+.claude/DEPLOY.md
+.mcp.json
+claude-flow.config.json
+.swarm/
+.hive-mind/
+.claude-flow/
+memory/
+coordination/
+memory/claude-flow-data.json
+memory/sessions/*
+!memory/sessions/README.md
+memory/agents/*
+!memory/agents/README.md
+coordination/memory_bank/*
+coordination/subtasks/*
+coordination/orchestration/*
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+claude-flow
+# Removed Windows wrapper files per user request
+hive-mind-prompt-*.txt

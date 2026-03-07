@@ -1,0 +1,20 @@
+// Re-export from new auth module for backwards compatibility
+export {
+  getInvestors,
+  isInvestor,
+  isInvestorOwner,
+  addInvestor,
+  removeInvestor,
+  updateInvestorLogin,
+  getInvestorAssignedNodes,
+  setInvestorAssignedNodes,
+  getInvestorRevenueShare,
+  setInvestorRevenueShare,
+  generateInvestorToken,
+  verifyInvestorToken,
+  generateInvestorSessionToken,
+  verifyInvestorSessionToken,
+  generateAdminLoginAsInvestorToken,
+  verifyAdminLoginAsInvestorToken,
+  type Investor,
+} from "./auth/investor";

@@ -1,0 +1,1117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ActivityEvent {
+  id          String   @id @default(cuid())
+  customerId  String
+  type        String
+  description String
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model TeamMember {
+  id               String    @id @default(cuid())
+  email            String
+  name             String?
+  stripeCustomerId String
+  role             String    @default("member")
+  invitedAt        DateTime  @default(now())
+  acceptedAt       DateTime?
+  invitedBy        String?
+
+  @@unique([email, stripeCustomerId])
+  @@index([email])
+  @@index([stripeCustomerId])
+}
+
+model Investor {
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  addedBy             String
+  isOwner             Boolean   @default(false)
+  acceptedAt          DateTime?
+  lastLoginAt         DateTime?
+  assignedNodeIds     String    @default("[]")
+  revenueSharePercent Float?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([email])
+}
+
+model SSHKey {
+  id               String   @id @default(cuid())
+  stripeCustomerId String
+  name             String
+  publicKey        String
+  fingerprint      String
+  createdAt        DateTime @default(now())
+
+  @@unique([stripeCustomerId, fingerprint])
+  @@index([stripeCustomerId])
+}
+
+model PodMetadata {
+  id                   String    @id @default(cuid())
+  subscriptionId       String    @unique
+  stripeCustomerId     String
+  displayName          String?
+  notes                String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deployTime           DateTime?
+  hourlyRateCents      Int?
+  poolId               String?
+  prepaidAmountCents   Int?
+  prepaidUntil         DateTime?
+  productId            String?
+  metricsToken         String?
+  startupScript        String? // Custom startup script to run after pod starts
+  startupScriptStatus  String? // "pending", "running", "completed", "failed"
+  startupScriptOutput  String? // Output/error from script execution
+  storageAlertSent     Boolean   @default(false) // Whether 80% storage warning was sent
+  skypilotTags         String? // JSON tags for SkyPilot cluster tracking (e.g. {"skypilot-cluster-name": "my-cluster"})
+  billingType          String? // "hourly" or "monthly" - null for legacy pods
+  stripeSubscriptionId String? // Links monthly pod to the Stripe subscription that pays for it
+  sharedVolumeId       Int?    // hosted.ai shared volume ID for persistent workspace
+
+  @@index([stripeCustomerId])
+  @@index([prepaidUntil])
+  @@index([metricsToken])
+  @@index([stripeSubscriptionId])
+}
+
+model PodFailureAlert {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  podName        String
+  teamId         String
+  customerEmail  String?
+  poolName       String?
+  podStatus      String // The failed status that triggered the alert
+  zammadTicketId Int? // Zammad ticket ID if created
+  createdAt      DateTime @default(now())
+
+  @@unique([subscriptionId, podName]) // One alert per pod per subscription
+  @@index([teamId])
+  @@index([createdAt])
+}
+
+model HuggingFaceDeployment {
+  id               String   @id @default(cuid())
+  subscriptionId   String
+  stripeCustomerId String
+  hfItemId         String
+  hfItemType       String
+  hfItemName       String
+  deployScript     String
+  status           String   @default("pending")
+  deployOutput     String?
+  servicePort      Int?
+  webUiPort        Int?
+  openWebUI        Boolean  @default(false)
+  netdataPort      Int?
+  netdata          Boolean  @default(false)
+  errorMessage     String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([stripeCustomerId])
+  @@index([subscriptionId])
+  @@index([status])
+}
+
+model TwoFactorAuth {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  secret      String
+  verified    Boolean   @default(false)
+  backupCodes String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  lastUsedAt  DateTime?
+
+  @@index([email])
+}
+
+model AdminPin {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  pinHash        String
+  salt           String
+  expiresAt      DateTime
+  previousHashes String?  // JSON array of {salt, hash} for reuse prevention
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model AdminActivityEvent {
+  id          String   @id @default(cuid())
+  adminEmail  String
+  type        String
+  description String
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  @@index([adminEmail])
+  @@index([createdAt])
+  @@index([type])
+}
+
+model ReferralCode {
+  id               String          @id @default(cuid())
+  code             String          @unique
+  stripeCustomerId String          @unique
+  createdAt        DateTime        @default(now())
+  claims           ReferralClaim[]
+
+  @@index([stripeCustomerId])
+  @@index([code])
+}
+
+model ReferralClaim {
+  id                String       @id @default(cuid())
+  referralCodeId    String
+  refereeCustomerId String       @unique
+  refereeEmail      String
+  status            String       @default("pending")
+  qualifiedAt       DateTime?
+  creditedAt        DateTime?
+  referrerCredited  Boolean      @default(false)
+  refereeCredited   Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+  referralCode      ReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
+
+  @@index([referralCodeId])
+  @@index([status])
+}
+
+model Voucher {
+  id              String              @id @default(cuid())
+  code            String              @unique
+  name            String
+  description     String?
+  creditCents     Int
+  minTopupCents   Int?
+  maxRedemptions  Int?
+  redemptionCount Int                 @default(0)
+  maxPerCustomer  Int                 @default(1)
+  startsAt        DateTime?
+  expiresAt       DateTime?
+  active          Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  createdBy       String?
+  redemptions     VoucherRedemption[]
+
+  @@index([code])
+  @@index([active])
+}
+
+model VoucherRedemption {
+  id               String   @id @default(cuid())
+  voucherId        String
+  stripeCustomerId String
+  customerEmail    String
+  topupCents       Int
+  creditCents      Int
+  stripeSessionId  String?
+  createdAt        DateTime @default(now())
+  voucher          Voucher  @relation(fields: [voucherId], references: [id], onDelete: Cascade)
+
+  @@index([voucherId])
+  @@index([stripeCustomerId])
+  @@index([createdAt])
+}
+
+model PodSnapshot {
+  id                     String    @id @default(cuid())
+  stripeCustomerId       String
+  displayName            String
+  notes                  String?
+  snapshotType           String    @default("template")
+  originalSubscriptionId String?
+  poolId                 String
+  poolName               String?
+  regionId               String?
+  vgpus                  Int
+  instanceTypeId         String?
+  imageUuid              String?
+  persistentVolumeId     Int?
+  persistentVolumeName   String?
+  persistentVolumeSize   Int?
+  autoCreatedVolume      Boolean   @default(false)
+  storageBlockId         String?
+  hfItemId               String?
+  hfItemType             String?
+  hfItemName             String?
+  deployScript           String?
+  autoPreserved          Boolean   @default(false) // Auto-created on non-payment termination
+  expiresAt              DateTime? // When auto-preserved snapshot should be cleaned up (7 days)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([stripeCustomerId])
+  @@index([snapshotType])
+  @@index([createdAt])
+  @@index([expiresAt])
+}
+
+model SupportNotification {
+  id               String   @id @default(cuid())
+  ticketId         String // Zammad ticket ID (as string for compatibility)
+  stripeCustomerId String
+  customerEmail    String
+  lastArticleId    Int // Zammad article ID
+  lastArticleAt    DateTime
+  sentAt           DateTime @default(now())
+
+  @@unique([ticketId, lastArticleId])
+  @@index([ticketId])
+  @@index([stripeCustomerId])
+}
+
+model ApiKey {
+  id               String    @id @default(cuid())
+  name             String
+  keyPrefix        String
+  keyHash          String    @unique
+  stripeCustomerId String
+  teamId           String
+  scopes           String    @default("*")
+  lastUsedAt       DateTime?
+  expiresAt        DateTime?
+  rateLimitRpm     Int?      // Per-key RPM override (null = use customer default)
+  createdAt        DateTime  @default(now())
+  revokedAt        DateTime?
+
+  @@index([stripeCustomerId])
+  @@index([keyHash])
+}
+
+model ServiceProvider {
+  id                      String                    @id @default(cuid())
+  email                   String                    @unique
+  companyName             String
+  contactName             String
+  phone                   String?
+  website                 String?
+  verified                Boolean                   @default(false)
+  verifiedAt              DateTime?
+  verifiedBy              String?
+  estimatedGpuCount       Int?
+  gpuTypes                String?
+  regions                 String?
+  applicationType         String                    @default("gpu_provider") // "gpu_provider" or "white_label"
+  desiredDomain           String?
+  expectedCustomers       String?
+  status                  String                    @default("pending")
+  suspendedReason         String?
+  terminatedAt            DateTime?
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+  commercialEmail         String?
+  commercialPhone         String?
+  generalEmail            String?
+  supportEmail            String?
+  supportPhone            String?
+  commercialTerms         ProviderCommercialTerms[]
+  nodes                   ProviderNode[]
+  notifications           ProviderNotification[]
+  payouts                 ProviderPayout[]
+
+  @@index([status])
+  @@index([email])
+}
+
+model ProviderNode {
+  id                      String                @id @default(cuid())
+  providerId              String
+  hostname                String
+  ipAddress               String
+  sshPort                 Int                   @default(22)
+  sshUsername             String                @default("root")
+  requestedGpuTypeId      String?
+  gpuModel                String?
+  gpuCount                Int?
+  cpuModel                String?
+  cpuCores                Int?
+  ramGb                   Int?
+  storageGb               Int?
+  networkSpeedMbps        Int?
+  datacenter              String?
+  region                  String?
+  country                 String?
+  pricingTierId           String?
+  customProviderRateCents Int?
+  revenueSharePercent     Float?
+  selectedPayoutModel     String?
+  status                  String                @default("pending_validation")
+  statusMessage           String?
+  validatedAt             DateTime?
+  validationError         String?
+  osVersion               String?
+  approvedAt              DateTime?
+  approvedBy              String?
+  rejectedAt              DateTime?
+  rejectedBy              String?
+  rejectionReason         String?
+  hostedaiPoolId          String?
+  hostedaiNodeId          String?
+  gpuaasNodeId            Int?
+  gpuaasRegionId          Int?
+  gpuaasClusterId         Int?
+  gpuaasPoolId            Int?
+  gpuaasInitStatus        String?
+  gpuaasSshKeysInstalled  Boolean               @default(false)
+  externalServiceIp       String?
+  removalRequestedAt      DateTime?
+  removalScheduledFor     DateTime?
+  removalReason           String?
+  removedAt               DateTime?
+  lastHealthCheck         DateTime?
+  healthStatus            String?
+  createdAt               DateTime              @default(now())
+  updatedAt               DateTime              @updatedAt
+  deletionConfirmedAt     DateTime?
+  gpuaasSshKeys           String?
+  sshPassword             String?
+  poolSettings            PoolSettingsOverride?
+  pricingTier             ProviderPricingTier?  @relation(fields: [pricingTierId], references: [id])
+  requestedGpuType        AllowedGpuType?       @relation(fields: [requestedGpuTypeId], references: [id])
+  provider                ServiceProvider       @relation(fields: [providerId], references: [id])
+  usageRecords            ProviderNodeUsage[]
+
+  @@index([providerId])
+  @@index([status])
+  @@index([pricingTierId])
+}
+
+model ProviderPricingTier {
+  id                   String         @id @default(cuid())
+  name                 String
+  description          String?
+  gpuModel             String
+  providerRateCents    Int
+  customerRateCents    Int
+  isRevenueShare       Boolean        @default(false)
+  revenueSharePercent  Float?
+  minProviderRateCents Int?
+  active               Boolean        @default(true)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  nodes                ProviderNode[]
+
+  @@index([gpuModel])
+  @@index([active])
+}
+
+model ProviderNodeUsage {
+  id                    String       @id @default(cuid())
+  nodeId                String
+  periodStart           DateTime
+  periodEnd             DateTime
+  totalHours            Float
+  occupiedHours         Float
+  utilizationPercent    Float?
+  customerRevenueCents  Int
+  providerEarningsCents Int
+  packetMarginCents     Int
+  createdAt             DateTime     @default(now())
+  node                  ProviderNode @relation(fields: [nodeId], references: [id])
+
+  @@index([nodeId, periodStart])
+  @@index([periodStart])
+}
+
+model ProviderPayout {
+  id                 String          @id @default(cuid())
+  providerId         String
+  periodStart        DateTime
+  periodEnd          DateTime
+  grossEarningsCents Int
+  deductionsCents    Int             @default(0)
+  netPayoutCents     Int
+  breakdown          String?
+  status             String          @default("pending")
+  processedAt        DateTime?
+  paidAt             DateTime?
+  transactionRef     String?
+  failureReason      String?
+  invoiceNumber      String?
+  invoiceUrl         String?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  provider           ServiceProvider @relation(fields: [providerId], references: [id])
+
+  @@index([providerId])
+  @@index([status])
+  @@index([periodStart])
+}
+
+model ProviderNotification {
+  id         String          @id @default(cuid())
+  providerId String
+  type       String
+  subject    String
+  nodeId     String?
+  payoutId   String?
+  metadata   String?
+  sentAt     DateTime        @default(now())
+  provider   ServiceProvider @relation(fields: [providerId], references: [id])
+
+  @@index([providerId])
+  @@index([type])
+  @@index([sentAt])
+}
+
+model ProviderAdminActivity {
+  id         String   @id @default(cuid())
+  adminEmail String
+  action     String
+  providerId String?
+  nodeId     String?
+  payoutId   String?
+  details    String?
+  createdAt  DateTime @default(now())
+
+  @@index([adminEmail])
+  @@index([providerId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model AllowedGpuType {
+  id                         String         @id @default(cuid())
+  name                       String         @unique
+  shortName                  String
+  manufacturer               String         @default("NVIDIA")
+  matchPatterns              String
+  defaultProviderRateCents   Int
+  defaultCustomerRateCents   Int
+  defaultTermsType           String         @default("fixed")
+  defaultRevenueSharePercent Float?
+  payoutModelChoice          String         @default("fixed_only")
+  minVramGb                  Int?
+  minCudaCores               Int?
+  acceptingSubmissions       Boolean        @default(true)
+  displayOrder               Int            @default(0)
+  createdAt                  DateTime       @default(now())
+  updatedAt                  DateTime       @updatedAt
+  nodes                      ProviderNode[]
+
+  @@index([acceptingSubmissions])
+}
+
+model ProcessedStripeEvent {
+  id            String   @id @default(cuid())
+  stripeEventId String   @unique
+  eventType     String
+  processedAt   DateTime @default(now())
+  sessionId     String?
+  customerId    String?
+
+  @@index([stripeEventId])
+  @@index([sessionId])
+  @@index([customerId])
+  @@index([processedAt])
+}
+
+model PodMetricsHistory {
+  id             String   @id @default(cuid())
+  teamId         String
+  subscriptionId String
+  tflopsUsage    Float    @default(0)
+  vramUsageKb    Float    @default(0)
+  hoursUsed      Float    @default(0)
+  cost           Float    @default(0)
+  status         String?
+  gpuCount       Int      @default(1)
+  timestamp      DateTime @default(now())
+
+  @@index([teamId, timestamp])
+  @@index([subscriptionId, timestamp])
+  @@index([timestamp])
+}
+
+model GpuHardwareMetrics {
+  id                   String   @id @default(cuid())
+  subscriptionId       String
+  stripeCustomerId     String
+  teamId               String?
+  poolId               Int?
+  poolName             String?
+  gpuUtilization       Float
+  memoryUsedMb         Float
+  memoryTotalMb        Float
+  memoryPercent        Float
+  temperature          Float
+  powerDraw            Float
+  powerLimit           Float
+  fanSpeed             Float
+  cpuPercent           Float?
+  systemMemUsedMb      Float?
+  systemMemTotalMb     Float?
+  systemMemPercent     Float?
+  diskWorkspaceUsedMb  Float?
+  diskWorkspaceTotalMb Float?
+  diskWorkspacePercent Float?
+  diskRootUsedMb       Float?
+  diskRootTotalMb      Float?
+  diskRootPercent      Float?
+  timestamp            DateTime @default(now())
+
+  @@index([subscriptionId, timestamp])
+  @@index([stripeCustomerId, timestamp])
+  @@index([teamId, timestamp])
+  @@index([poolId, timestamp])
+  @@index([timestamp])
+}
+
+model PodUptimeDay {
+  id             String   @id @default(cuid())
+  subscriptionId String
+  date           String   // YYYY-MM-DD (UTC)
+  heartbeats     Int      @default(0)
+  firstSeen      DateTime
+  lastSeen       DateTime
+
+  @@unique([subscriptionId, date])
+  @@index([subscriptionId])
+  @@index([date])
+}
+
+model MetricsCache {
+  id        String   @id @default(cuid())
+  teamId    String   @unique
+  cacheData String
+  fetchedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teamId])
+  @@index([fetchedAt])
+}
+
+model SubscriptionLineage {
+  id                     String   @id @default(cuid())
+  teamId                 String
+  rootSubscriptionId     String
+  previousSubscriptionId String
+  newSubscriptionId      String   @unique
+  poolId                 String?
+  poolName               String?
+  reason                 String?
+  createdAt              DateTime @default(now())
+
+  @@index([teamId])
+  @@index([rootSubscriptionId])
+  @@index([previousSubscriptionId])
+  @@index([newSubscriptionId])
+}
+
+model ProviderCommercialTerms {
+  id                     String          @id @default(cuid())
+  providerId             String
+  gpuTypeName            String?
+  providerRateCents      Int?
+  customerRateCents      Int?
+  termsType              String?
+  revenueSharePercent    Float?
+  minGuaranteedRateCents Int?
+  notes                  String?
+  effectiveFrom          DateTime        @default(now())
+  effectiveUntil         DateTime?
+  createdBy              String
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+  provider               ServiceProvider @relation(fields: [providerId], references: [id])
+
+  @@unique([providerId, gpuTypeName])
+  @@index([providerId])
+}
+
+model PoolSettingsDefaults {
+  id              String   @id @default("default")
+  timeQuantumSec  Int      @default(90)
+  overcommitRatio Float    @default(1.0)
+  securityMode    String   @default("low")
+  updatedBy       String?
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+}
+
+model PoolSettingsOverride {
+  id              String        @id @default(cuid())
+  gpuaasPoolId    Int           @unique
+  nodeId          String?       @unique
+  poolName        String?
+  timeQuantumSec  Int?
+  overcommitRatio Float?
+  securityMode    String?
+  priority        Int?
+  maintenance     Boolean       @default(false)
+  notes           String?
+  createdBy       String
+  updatedBy       String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  node            ProviderNode? @relation(fields: [nodeId], references: [id])
+
+  @@index([nodeId])
+}
+
+model GpuProduct {
+  id                 String   @id @default(cuid())
+  name               String   @unique
+  description        String?
+  billingType        String   @default("hourly") // "hourly" or "monthly"
+  pricePerHourCents  Int
+  pricePerMonthCents Int?
+  stripeProductId    String?
+  stripePriceId      String?
+  poolIds            String   @default("[]")
+  displayOrder       Int      @default(0)
+  active             Boolean  @default(true)
+  featured           Boolean  @default(false)
+  badgeText          String?
+  vramGb             Int?
+  cudaCores          Int?
+  createdBy          String?
+  updatedBy          String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([active])
+  @@index([displayOrder])
+  @@index([billingType])
+}
+
+model GpuApp {
+  id                  String         @id @default(cuid())
+  slug                String         @unique
+  name                String
+  description         String
+  longDescription     String?
+  category            String
+  installScript       String
+  estimatedInstallMin Int            @default(5)
+  minVramGb           Int            @default(8)
+  recommendedVramGb   Int            @default(16)
+  typicalVramUsageGb  Int?
+  defaultPort         Int?
+  webUiPort           Int?
+  serviceType         String?
+  icon                String?
+  badgeText           String?
+  displayOrder        Int            @default(0)
+  active              Boolean        @default(true)
+  version             String?
+  docsUrl             String?
+  tags                String         @default("[]")
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+  installations       InstalledApp[]
+
+  @@index([category])
+  @@index([active])
+  @@index([displayOrder])
+}
+
+model InstalledApp {
+  id               String    @id @default(cuid())
+  subscriptionId   String
+  stripeCustomerId String
+  appId            String
+  status           String    @default("installing")
+  installProgress  Int       @default(0)
+  installOutput    String?
+  errorMessage     String?
+  port             Int?
+  webUiPort        Int?
+  externalUrl      String?
+  webUiUrl         String?
+  pid              Int?
+  startedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  app              GpuApp    @relation(fields: [appId], references: [id])
+
+  @@unique([subscriptionId, appId])
+  @@index([subscriptionId])
+  @@index([stripeCustomerId])
+  @@index([status])
+}
+
+model EmailTemplate {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  subject     String
+  htmlContent String
+  textContent String?
+  variables   String   @default("[]")
+  active      Boolean  @default(true)
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([slug])
+  @@index([active])
+}
+
+// ── Drip Campaign System ──
+
+model DripSequence {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String?
+  trigger     String // "signup-free", "signup-paid", "gpu-deployed", etc.
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  steps       DripStep[]
+  enrollments DripEnrollment[]
+
+  @@index([trigger])
+  @@index([active])
+}
+
+model DripStep {
+  id           String   @id @default(cuid())
+  sequenceId   String
+  stepOrder    Int
+  delayHours   Int // hours after enrollment (or previous step) to send
+  templateSlug String // references EmailTemplate slug
+  subject      String? // override template subject if set
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  sequence DripSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, stepOrder])
+  @@index([sequenceId])
+}
+
+model DripEnrollment {
+  id               String    @id @default(cuid())
+  sequenceId       String
+  stripeCustomerId String
+  email            String
+  customerName     String?
+  status           String    @default("active") // "active", "completed", "cancelled"
+  currentStep      Int       @default(0) // last completed step (0 = none sent yet)
+  enrolledAt       DateTime  @default(now())
+  lastSentAt       DateTime?
+  completedAt      DateTime?
+  cancelledAt      DateTime?
+  metadata         String? // JSON for extra context (e.g. signup_gpu)
+
+  sequence DripSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@unique([sequenceId, stripeCustomerId])
+  @@index([sequenceId, status])
+  @@index([stripeCustomerId])
+  @@index([status, lastSentAt])
+}
+
+model GamePlay {
+  id              String   @id @default(cuid())
+  email           String?
+  score           Int
+  linesCleared    Int
+  avgUtilization  Float
+  peakUtilization Float
+  duration        Int
+  level           Int
+  piecesPlaced    Int
+  won             Boolean  @default(false)
+  voucherClaimed  Boolean  @default(false)
+  voucherCode     String?
+  userAgent       String?
+  screenWidth     Int?
+  screenHeight    Int?
+  isMobile        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([won])
+  @@index([email])
+}
+
+model BudgetSettings {
+  id                    String    @id @default(cuid())
+  stripeCustomerId      String    @unique
+  monthlyLimitCents     Int?
+  dailyLimitCents       Int?
+  alertAt50Percent      Boolean   @default(true)
+  alertAt80Percent      Boolean   @default(true)
+  alertAt100Percent     Boolean   @default(true)
+  autoShutdownEnabled   Boolean   @default(false)
+  autoShutdownThreshold Int       @default(100)
+  lastAlertSentAt       DateTime?
+  lastAlertPercent      Int?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([stripeCustomerId])
+}
+
+model BudgetAlert {
+  id                String   @id @default(cuid())
+  stripeCustomerId  String
+  alertType         String
+  percentUsed       Int
+  currentSpendCents Int
+  limitCents        Int
+  sentAt            DateTime @default(now())
+
+  @@index([stripeCustomerId])
+  @@index([sentAt])
+}
+
+model CustomerSettings {
+  id                  String   @id @default(cuid())
+  stripeCustomerId    String   @unique
+  sessionTimeoutHours Int      @default(1) // 1-24 hours
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([stripeCustomerId])
+}
+
+
+model SpheronDeployment {
+  id                   String    @id @default(cuid())
+  spheronDeploymentId  String    @unique // Spheron's deployment ID
+  stripeCustomerId     String
+  teamId               String
+  name                 String?
+  provider             String // e.g. tensordock, voltagepark
+  gpuType              String // e.g. rtx-4090, h100
+  gpuCount             Int       @default(1)
+  region               String
+  operatingSystem      String
+  instanceType         String // DEDICATED, SPOT, BARE_METAL
+  offerId              String
+  status               String    @default("deploying") // deploying, running, failed, terminated
+  ipAddress            String?
+  sshUser              String?
+  sshCommand           String?
+  hourlyPriceCents     Int // Spheron price in cents
+  markupPercent        Int       @default(15) // Our markup percentage
+  totalHourlyRateCents Int // Final price to customer (price + markup)
+  lastBilledAt         DateTime? // When the last hourly charge was applied
+  // Kubernetes add-on fields
+  k8sEnabled           Boolean   @default(false)
+  k8sVersion           String? // e.g. "1.35"
+  k8sClusterId         String? // Spheron cluster ID for health checks
+  k8sKubeconfig        String? // Full kubeconfig YAML
+  k8sServiceLinks      String? // JSON object of service links
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  terminatedAt         DateTime?
+
+  @@index([stripeCustomerId])
+  @@index([teamId])
+  @@index([status])
+}
+
+model SpheronVolume {
+  id                    String    @id @default(cuid())
+  spheronVolumeId       String    @unique // Spheron's volume ID (e.g. "vol_abc123")
+  stripeCustomerId      String
+  teamId                String
+  name                  String
+  provider              String // e.g. "voltage-park"
+  sizeInGb              Int
+  status                String    @default("available") // available, attached, deleting, deleted
+  virtualIp             String? // Voltage Park NFS IP for mounting (e.g. "192.168.100.50")
+  hourlyPriceCents      Int // Spheron price in cents (per GB/hr * sizeInGb)
+  markupPercent         Int       @default(15)
+  totalHourlyRateCents  Int // Final price to customer
+  lastBilledAt          DateTime?
+  deleteWithInstance    Boolean   @default(false)
+  attachedDeploymentIds String? // JSON array of attached Spheron deployment IDs
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  deletedAt             DateTime?
+
+  @@index([stripeCustomerId])
+  @@index([teamId])
+  @@index([status])
+}
+
+
+// ============================================
+// Wallet Transactions - Local billing log
+// ============================================
+
+model WalletTransaction {
+  id               String   @id @default(cuid())
+  stripeCustomerId String
+  teamId           String?
+  type             String // "gpu_usage", "gpu_deploy", "storage", "stopped_reservation", "bare_metal", "token_inference", "refund"
+  amountCents      Int // Positive = debit (charge), Negative = credit (refund)
+  description      String
+  subscriptionId   String? // GPUaaS subscription ID (links charge to a specific pod)
+  poolId           Int? // GPUaaS pool ID (links charge to a specific GPU pool -> investor node)
+  gpuCount         Int?
+  hourlyRateCents  Int?
+  billingMinutes   Int?
+  syncCycleId      String? // Deduplication ID
+  metadata         String? // JSON for any extra context
+  createdAt        DateTime @default(now())
+
+  @@index([stripeCustomerId, createdAt])
+  @@index([teamId, createdAt])
+  @@index([poolId, createdAt])
+  @@index([subscriptionId, createdAt])
+  @@index([type, createdAt])
+  @@index([createdAt])
+  @@index([syncCycleId])
+}
+
+model CampaignBanner {
+  id              String    @id @default(cuid())
+  text            String
+  linkUrl         String?
+  linkText        String?
+  backgroundColor String    @default("#1a4fff")
+  textColor       String    @default("#ffffff")
+  active          Boolean   @default(true)
+  dismissible     Boolean   @default(true)
+  startsAt        DateTime?
+  expiresAt       DateTime?
+  displayOrder    Int       @default(0)
+  createdBy       String?
+  updatedBy       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([active, displayOrder])
+}
+
+// ─── Marketing: anonymous page-view tracking (cookie-free) ───
+model PageView {
+  id                  String   @id @default(cuid())
+  sessionId           String // random ID per browser session (sessionStorage)
+  page                String // pathname, e.g. "/", "/account", "/features"
+  referrer            String?
+  utmSource           String?
+  utmMedium           String?
+  utmCampaign         String?
+  utmContent          String?
+  utmTerm             String?
+  convertedCustomerId String? // filled on signup, links to Stripe customer
+  createdAt           DateTime @default(now())
+
+  @@index([utmSource])
+  @@index([utmCampaign])
+  @@index([createdAt])
+  @@index([sessionId])
+  @@index([convertedCustomerId])
+}
+
+// ─── Marketing: full customer lifecycle with attribution ───
+// One row per customer. Tracks attribution source + every milestone + running LTV.
+// Updated by signup API, webhook handlers, and cron jobs as events happen.
+model CustomerLifecycle {
+  id               String @id @default(cuid())
+  stripeCustomerId String @unique
+  email            String
+
+  // ── Attribution (set once at signup, never overwritten) ──
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+  landingPage String?
+  referrer    String?
+  sessionId   String? // links to PageView records
+
+  // ── Lifecycle milestones (timestamps, null = not reached yet) ──
+  signedUpAt       DateTime // when account was created
+  firstLoginAt     DateTime? // first dashboard access
+  firstApiCallAt   DateTime? // first inference API call
+  firstDepositAt   DateTime? // first wallet topup
+  firstGpuDeployAt DateTime? // first pod launched
+  subscribedAt     DateTime? // converted to monthly subscription
+  churnedAt        DateTime? // stopped paying / all pods terminated
+  reactivatedAt    DateTime? // came back after churn
+
+  // ── Financials (running totals, updated on each event) ──
+  totalDepositsCents Int    @default(0) // lifetime wallet deposits
+  totalSpendCents    Int    @default(0) // lifetime spend (GPU + inference)
+  depositCount       Int    @default(0) // number of topups
+  currentBillingType String @default("free") // free, hourly, monthly
+
+  // ── Engagement ──
+  lastActiveAt    DateTime? // last meaningful action
+  gpuHoursTotal   Float     @default(0) // lifetime GPU hours
+  inferenceTokens Int       @default(0) // lifetime tokens used
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([utmSource])
+  @@index([utmCampaign])
+  @@index([utmMedium])
+  @@index([signedUpAt])
+  @@index([currentBillingType])
+  @@index([totalDepositsCents])
+  @@index([churnedAt])
+}
+
+
+model AdminStatsSnapshot {
+  id              String   @id @default(cuid())
+  date            String   @unique // YYYY-MM-DD
+  totalCustomers  Int
+  activeGPUs      Int
+  mrrCents        Int
+  newThisWeek     Int
+  revenueWeekCents Int
+  createdAt       DateTime @default(now())
+}
+
+model CustomerCache {
+  id              String   @id // Stripe customer ID (cus_xxx)
+  email           String?
+  name            String?
+  stripeCreatedAt DateTime
+  balanceCents    Int      @default(0) // raw Stripe balance (negative = credit)
+  billingType     String?
+  teamId          String? // metadata.hostedai_team_id
+  productId       String? // metadata.packet_product_id
+  metadataJson    String? // full metadata JSON fallback
+  activePods      Int      @default(0) // live pod count from hosted.ai
+  isDeleted       Boolean  @default(false)
+  lastSyncedAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([email])
+  @@index([billingType])
+  @@index([teamId])
+  @@index([stripeCreatedAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  encrypted Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}

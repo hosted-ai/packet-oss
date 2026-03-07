@@ -1,0 +1,152 @@
+@import "tailwindcss";
+@plugin "@tailwindcss/typography";
+
+:root {
+  --background: #f7f8fb;
+  --foreground: #0b0f1c;
+  --panel: #ffffff;
+  --muted: #5b6476;
+  --line: #e4e7ef;
+  --blue: #1a4fff;
+  --blue-dark: #1238c9;
+  --teal: #18b6a8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+  position: relative;
+  min-height: 100vh;
+}
+
+/* Animated Mesh Gradient Background */
+body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 30%, rgba(26, 79, 255, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse 60% 40% at 80% 20%, rgba(24, 182, 168, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse 70% 60% at 70% 80%, rgba(26, 79, 255, 0.05) 0%, transparent 50%),
+    radial-gradient(ellipse 50% 40% at 10% 90%, rgba(24, 182, 168, 0.04) 0%, transparent 50%);
+  animation: meshShift 20s ease-in-out infinite;
+}
+
+/* Grid Pattern with Glow */
+body::after {
+  content: "";
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(26, 79, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(26, 79, 255, 0.03) 1px, transparent 1px);
+  background-size: 60px 60px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 0%, transparent 70%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 0%, transparent 70%);
+  animation: gridGlow 8s ease-in-out infinite;
+}
+
+@keyframes gridGlow {
+  0%, 100% {
+    opacity: 0.4;
+    mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 0%, transparent 70%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 30%, black 0%, transparent 70%);
+  }
+  50% {
+    opacity: 0.8;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 40%, black 0%, transparent 70%);
+    -webkit-mask-image: radial-gradient(ellipse 90% 70% at 50% 40%, black 0%, transparent 70%);
+  }
+}
+
+@keyframes meshShift {
+  0%, 100% {
+    background:
+      radial-gradient(ellipse 80% 50% at 20% 30%, rgba(26, 79, 255, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse 60% 40% at 80% 20%, rgba(24, 182, 168, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse 70% 60% at 70% 80%, rgba(26, 79, 255, 0.05) 0%, transparent 50%),
+      radial-gradient(ellipse 50% 40% at 10% 90%, rgba(24, 182, 168, 0.04) 0%, transparent 50%);
+  }
+  25% {
+    background:
+      radial-gradient(ellipse 70% 60% at 30% 50%, rgba(26, 79, 255, 0.07) 0%, transparent 50%),
+      radial-gradient(ellipse 80% 50% at 70% 30%, rgba(24, 182, 168, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse 60% 50% at 50% 70%, rgba(26, 79, 255, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse 40% 30% at 20% 80%, rgba(24, 182, 168, 0.05) 0%, transparent 50%);
+  }
+  50% {
+    background:
+      radial-gradient(ellipse 60% 40% at 50% 20%, rgba(26, 79, 255, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse 70% 50% at 30% 60%, rgba(24, 182, 168, 0.07) 0%, transparent 50%),
+      radial-gradient(ellipse 80% 40% at 80% 50%, rgba(26, 79, 255, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse 50% 50% at 60% 90%, rgba(24, 182, 168, 0.05) 0%, transparent 50%);
+  }
+  75% {
+    background:
+      radial-gradient(ellipse 80% 60% at 40% 40%, rgba(26, 79, 255, 0.05) 0%, transparent 50%),
+      radial-gradient(ellipse 50% 40% at 90% 60%, rgba(24, 182, 168, 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse 60% 50% at 20% 70%, rgba(26, 79, 255, 0.07) 0%, transparent 50%),
+      radial-gradient(ellipse 70% 40% at 70% 10%, rgba(24, 182, 168, 0.08) 0%, transparent 50%);
+  }
+}
+
+/* Ensure content stays above background */
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Hide animated background for dashboard */
+body:has(.no-animated-bg)::before,
+body:has(.no-animated-bg)::after {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    animation: none !important;
+  }
+}
+
+/* Shimmer animation for progress bars */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2s infinite;
+}
+
+/* Mobile safe area utilities */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

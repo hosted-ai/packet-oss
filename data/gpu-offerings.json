@@ -1,0 +1,108 @@
+{
+  "offerings": [
+    {
+      "id": "b200",
+      "name": "B200",
+      "fullName": "NVIDIA B200s",
+      "image": "/b200-hero.webp",
+      "hourlyPrice": 2.25,
+      "memory": "180GB HBM3e",
+      "soldOut": true,
+      "hero": {
+        "pill": "Sold Out",
+        "headline": "NVIDIA B200s",
+        "subhead": "$2.25/hour — Currently sold out.",
+        "description": "All B200 units are currently allocated. Join the waitlist to be notified when new capacity becomes available.",
+        "hourlyNote": "",
+        "monthlyNote": "",
+        "signals": ["Real B200 hardware", "Full performance", "Cancel anytime"]
+      },
+      "pricing": {
+        "title": "B200",
+        "subtitle": "180GB HBM3e",
+        "features": [
+          "NVLink 5.0 interconnect",
+          "Latest Blackwell architecture",
+          "Ideal for large-scale training",
+          "24/7 support included"
+        ]
+      },
+      "location": "US",
+      "sortOrder": 1,
+      "active": true
+    },
+    {
+      "id": "h200",
+      "name": "H200",
+      "fullName": "NVIDIA H200s",
+      "image": "/clusters/gpu_h200.webp",
+      "hourlyPrice": 1.50,
+      "memory": "141GB HBM3e",
+      "hero": {
+        "pill": "Available now",
+        "headline": "NVIDIA H200s",
+        "subhead": "$1.50/hour, on demand in US East.",
+        "description": "High-performance Hopper GPUs for demanding AI workloads. Instant setup, no contracts, raw SSH access.",
+        "hourlyNote": "",
+        "monthlyNote": "",
+        "signals": ["141GB HBM3e memory", "Full performance", "Cancel anytime"]
+      },
+      "pricing": {
+        "title": "H200",
+        "subtitle": "141GB HBM3e",
+        "features": [
+          "NVLink interconnect",
+          "Large language model training",
+          "High memory bandwidth",
+          "24/7 support included"
+        ]
+      },
+      "location": "US East",
+      "sortOrder": 2,
+      "active": true
+    },
+    {
+      "id": "rtx6000",
+      "name": "RTX 6000 Pro",
+      "fullName": "NVIDIA RTX 6000 Pro",
+      "image": "/clusters/gpu_rtx6000.webp",
+      "hourlyPrice": 0.66,
+      "memory": "96GB GDDR7",
+      "hero": {
+        "pill": "Best value",
+        "headline": "NVIDIA RTX 6000 Pro",
+        "subhead": "$0.66/hour, on demand in US West.",
+        "description": "Professional Blackwell GPUs at an unbeatable price. Perfect for inference, rendering, and development.",
+        "hourlyNote": "",
+        "monthlyNote": "",
+        "signals": ["96GB GDDR7 memory", "Full performance", "Cancel anytime"]
+      },
+      "pricing": {
+        "title": "RTX 6000 Pro",
+        "subtitle": "96GB GDDR7",
+        "features": [
+          "PCIe Gen5 interface",
+          "Professional visualization",
+          "Great for inference",
+          "24/7 support included"
+        ]
+      },
+      "location": "US West",
+      "sortOrder": 3,
+      "active": true,
+      "popular": true
+    }
+  ],
+  "proofSection": {
+    "stats": [
+      { "label": "GPUs deployed", "value": "1,000+", "note": "GPU hours served" },
+      { "label": "Deploy time", "value": "< 5 min", "note": "Average signup to SSH" },
+      { "label": "Uptime SLA", "value": "99.9%", "note": "Guaranteed uptime" },
+      { "label": "Support", "value": "24/7", "note": "Dedicated support team" }
+    ]
+  },
+  "carouselSettings": {
+    "autoRotateMs": 5000,
+    "pauseOnHover": true
+  }
+}

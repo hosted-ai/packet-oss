@@ -1,0 +1,695 @@
+/**
+ * GPU Tetris Game Styles
+ *
+ * Static CSS styles for the game. Dynamic styles that depend on game state
+ * are handled inline or in styled-jsx in the component.
+ */
+
+.gamePage {
+  position: relative;
+  background: #0a0a0f;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  border-radius: 16px;
+  margin: 24px auto;
+  width: fit-content;
+  padding: 20px;
+  border: 1px solid #1a1a2e;
+  overflow: hidden;
+}
+
+.soundBtn {
+  background: none;
+  border: 1px solid #333;
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* Stats Row */
+.statsRow {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  padding: 12px 16px;
+  background: #111;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.statItem {
+  text-align: center;
+}
+
+.statLabel {
+  font-size: 11px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.statValue {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.statValueTarget {
+  color: #22c55e;
+}
+
+/* Piece Preview */
+.pieceRowContainer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 12px;
+  padding: 10px 16px;
+  background: #0d0d12;
+  border-radius: 8px;
+}
+
+.piecePreview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.piecePreviewLabel {
+  font-size: 11px;
+  color: #666;
+  text-transform: uppercase;
+}
+
+.pieceGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pieceGridRow {
+  display: flex;
+  gap: 2px;
+}
+
+.pieceCell {
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+}
+
+.pieceName {
+  color: #64ffda;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dropIndicator {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dropArrow {
+  font-size: 24px;
+}
+
+.timerBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: #000;
+  font-weight: 900;
+  font-size: 18px;
+  margin-left: 8px;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+.bounceAnim {
+  animation: bounce 0.6s infinite;
+}
+
+/* Boards Container */
+.boardsContainer {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Mobile Controls */
+.mobileControls {
+  display: none;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.ctrlBtn {
+  width: 60px;
+  height: 60px;
+  font-size: 24px;
+  background: #1a1a2e;
+  border: 2px solid #333;
+  border-radius: 12px;
+  color: #fff;
+  cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+  .mobileControls {
+    display: flex;
+  }
+}
+
+/* Pause Overlay */
+.pauseOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 15, 0.95);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  border-radius: 16px;
+  cursor: pointer;
+}
+
+.pauseText {
+  font-size: 64px;
+  font-weight: 900;
+  color: #64ffda;
+}
+
+.pauseHint {
+  color: #888;
+  margin-top: 16px;
+}
+
+/* GPU Board */
+.gpuColumn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.gpuBoardWrapper {
+  position: relative;
+  background: linear-gradient(180deg, #12121a 0%, #0a0a10 100%);
+  border: 3px solid #2a2a4a;
+  border-radius: 10px;
+  padding: 6px;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+
+.gpuBoardWrapper.active {
+  border-color: #e94560;
+  box-shadow: 0 0 25px rgba(233, 69, 96, 0.4), 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.gpuBoardWrapper.optimal {
+  border-color: #22c55e;
+  box-shadow: 0 0 20px rgba(34, 197, 94, 0.3), 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.boardGrid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-rows: repeat(16, 18px);
+  gap: 1px;
+  background: transparent;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.boardRow {
+  display: grid;
+  grid-template-columns: repeat(8, 18px);
+  gap: 1px;
+}
+
+.cell {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  background: #151520;
+  border: 1px solid #2a2a3a;
+  border-radius: 2px;
+  box-sizing: border-box;
+}
+
+.cell.filled {
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+.cell.ghost {
+  background: transparent;
+  border-style: dashed;
+  border-width: 2px;
+  opacity: 0.4;
+}
+
+.gpuInfo {
+  margin-top: 8px;
+  text-align: center;
+}
+
+.gpuName {
+  font-size: 12px;
+  color: #888;
+}
+
+.gpuUtil {
+  font-size: 16px;
+  font-weight: 700;
+  color: #64ffda;
+}
+
+.gpuUtil.optimal {
+  color: #22c55e;
+}
+
+/* GPU Fan */
+.gpuFanBg {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 0;
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+.gpuFan {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  animation: spin 20s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.fanBlade {
+  position: absolute;
+  width: 60px;
+  height: 16px;
+  background: linear-gradient(90deg, #666 0%, #999 50%, #666 100%);
+  border-radius: 8px;
+  top: 50%;
+  left: 50%;
+  transform-origin: 0% 50%;
+}
+
+.fanBlade:nth-child(1) { transform: translateY(-50%) rotate(0deg); }
+.fanBlade:nth-child(2) { transform: translateY(-50%) rotate(60deg); }
+.fanBlade:nth-child(3) { transform: translateY(-50%) rotate(120deg); }
+.fanBlade:nth-child(4) { transform: translateY(-50%) rotate(180deg); }
+.fanBlade:nth-child(5) { transform: translateY(-50%) rotate(240deg); }
+.fanBlade:nth-child(6) { transform: translateY(-50%) rotate(300deg); }
+
+.fanCenter {
+  position: absolute;
+  width: 30px;
+  height: 30px;
+  background: radial-gradient(circle, #777 0%, #444 100%);
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid #888;
+}
+
+@media (max-width: 1100px) {
+  .cell {
+    width: 12px;
+    height: 12px;
+    min-width: 12px;
+    min-height: 12px;
+  }
+  .boardGrid {
+    grid-template-rows: repeat(16, 12px);
+    padding: 3px;
+  }
+  .boardRow {
+    grid-template-columns: repeat(8, 12px);
+  }
+  .boardsContainer {
+    gap: 6px;
+  }
+}
+
+/* Start Screen */
+.startScreen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 20px;
+  text-align: center;
+  min-width: 900px;
+}
+
+@media (max-width: 1100px) {
+  .startScreen {
+    min-width: 600px;
+  }
+}
+
+.title {
+  font-size: 42px;
+  font-weight: 900;
+  background: linear-gradient(135deg, #e94560, #64ffda);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  color: #888;
+  margin-bottom: 20px;
+  font-size: 16px;
+}
+
+.instructionsBox {
+  background: #111;
+  border: 1px solid #222;
+  border-radius: 12px;
+  padding: 16px 24px;
+  text-align: left;
+  max-width: 500px;
+  margin-bottom: 20px;
+}
+
+.instructionsBox h3 {
+  color: #64ffda;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+
+.instructionsBox ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 20px;
+}
+
+.instructionsBox li {
+  padding: 8px 0;
+  color: #aaa;
+  padding-left: 20px;
+  position: relative;
+}
+
+.instructionsBox li::before {
+  content: ">";
+  position: absolute;
+  left: 0;
+  color: #e94560;
+}
+
+.controlsList {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  color: #888;
+  font-size: 13px;
+}
+
+.controlsList kbd {
+  background: #222;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.startBtn {
+  padding: 16px 48px;
+  font-size: 18px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #e94560, #ff6b6b);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.startBtn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(233, 69, 96, 0.4);
+}
+
+.prizeBanner {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.15), rgba(254, 202, 87, 0.15));
+  border: 2px solid #22c55e;
+  border-radius: 12px;
+  padding: 12px 24px;
+  margin-bottom: 20px;
+  text-align: center;
+  animation: pulseGlow 2s ease-in-out infinite;
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 20px rgba(34, 197, 94, 0.3); }
+  50% { box-shadow: 0 0 40px rgba(34, 197, 94, 0.5); }
+}
+
+.prizeBanner h3 {
+  font-size: 24px;
+  font-weight: 800;
+  color: #22c55e;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.prizeBanner p {
+  color: #feca57;
+  font-size: 16px;
+  margin: 0;
+}
+
+.prizeValue {
+  font-weight: 700;
+  color: #fff;
+}
+
+/* Overlays and Modals */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: 20px;
+  border-radius: 16px;
+}
+
+.modal {
+  background: linear-gradient(180deg, #1a1a2e 0%, #0f0f18 100%);
+  border: 2px solid #64ffda;
+  border-radius: 16px;
+  padding: 40px 60px;
+  width: calc(100% - 40px);
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 80px rgba(100, 255, 218, 0.2);
+}
+
+.modalGameOver {
+  border-color: #ef4444;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 0 80px rgba(239, 68, 68, 0.2);
+}
+
+.modal h2 {
+  font-size: 32px;
+  margin-bottom: 16px;
+}
+
+.modalGameOver h2 {
+  color: #ef4444;
+}
+
+.bigNumber {
+  font-size: 64px;
+  font-weight: 900;
+  color: #22c55e;
+  margin: 24px 0;
+}
+
+.bigLabel {
+  font-size: 12px;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+.emailForm {
+  margin-top: 24px;
+  padding: 20px;
+  background: #0a0a0f;
+  border-radius: 8px;
+}
+
+.emailForm h3 {
+  color: #feca57;
+  margin-bottom: 8px;
+}
+
+.emailForm p {
+  color: #888;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.inputRow {
+  display: flex;
+  gap: 8px;
+}
+
+.inputRow input {
+  flex: 1;
+  padding: 12px;
+  background: #1a1a2e;
+  border: 1px solid #333;
+  border-radius: 6px;
+  color: #fff;
+}
+
+.inputRow button {
+  padding: 12px 24px;
+  background: #22c55e;
+  border: none;
+  border-radius: 6px;
+  color: #000;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.voucherBox {
+  margin-top: 24px;
+  padding: 20px;
+  background: rgba(34, 197, 94, 0.1);
+  border: 2px solid #22c55e;
+  border-radius: 8px;
+}
+
+.voucherCode {
+  font-size: 28px;
+  font-weight: 900;
+  font-family: monospace;
+  color: #feca57;
+  background: #0a0a0f;
+  padding: 16px;
+  margin: 16px 0;
+  border-radius: 6px;
+}
+
+.retryBtn {
+  margin-top: 24px;
+  padding: 14px 32px;
+  background: linear-gradient(135deg, #e94560, #ff6b6b);
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.errorMsg {
+  color: #ef4444;
+  margin-top: 12px;
+  font-size: 13px;
+}
+
+/* Mobile Warning */
+.mobileWarning {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  text-align: center;
+  min-height: 400px;
+}
+
+.mobileGpu {
+  font-size: 80px;
+  margin-bottom: 24px;
+  animation: overheat 1s ease-in-out infinite;
+}
+
+@keyframes overheat {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); filter: brightness(1.2); }
+}
+
+.mobileWarning h2 {
+  font-size: 28px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #ef4444, #feca57);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 16px;
+}
+
+.mobileWarning p {
+  color: #888;
+  font-size: 16px;
+  line-height: 1.6;
+  max-width: 340px;
+  margin-bottom: 12px;
+}
+
+.joke {
+  color: #64ffda;
+  font-size: 14px;
+  margin-top: 20px;
+  padding: 16px;
+  background: rgba(100, 255, 218, 0.1);
+  border-radius: 8px;
+  max-width: 340px;
+}
+
+.specs {
+  margin-top: 24px;
+  padding: 16px;
+  background: #111;
+  border-radius: 8px;
+  font-family: monospace;
+  font-size: 12px;
+  color: #666;
+  text-align: left;
+}
+
+.specs span {
+  color: #ef4444;
+}

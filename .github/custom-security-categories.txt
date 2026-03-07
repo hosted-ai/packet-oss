@@ -1,0 +1,31 @@
+**Multi-Tenant Isolation:**
+- Cross-tenant data access through API endpoints (tenant A accessing tenant B's data)
+- Tenant ID spoofing or injection in request headers
+- Shared resource leakage between tenants
+- Tenant admin accessing another tenant's customers or pods
+- JWT token reuse across tenant boundaries
+
+**Stripe Wallet Security:**
+- Wallet balance manipulation (negative credits, overflow)
+- Cost calculation bypass to get free GPU compute
+- Race conditions in balance deduction during concurrent requests
+- Stripe customer ID confusion between tenants
+- Unauthorized wallet top-up or credit injection
+
+**GPU Infrastructure Security:**
+- Command injection via pod startup scripts
+- SSH key injection to unauthorized instances
+- Pod metadata manipulation to access other customers' pods
+- Unauthorized GPU access through API key reuse
+- ComfyUI workflow injection (arbitrary node execution)
+
+**JWT Authentication Bypass:**
+- Token forgery across auth domains (admin vs customer vs tenant-admin vs tenant-customer)
+- Session token reuse between different auth systems
+- Missing token expiration validation
+- Token type confusion (using customer token as admin token)
+
+**API Key Security:**
+- API key (pk-*) privilege escalation
+- Key scope bypass (using key for unauthorized endpoints)
+- Missing API key validation on protected endpoints
