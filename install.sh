@@ -28,8 +28,8 @@ APP_PORT=3000
 SSH_WS_PORT=3002
 DB_NAME="packetdb_oss"
 DB_USER="packetos_user"
-REPO_URL="https://github.com/discod/packet-oss.git"
-BRANCH="${BRANCH:-main}"
+REPO_URL="https://github.com/t0uh33d/packet-oss"
+BRANCH="${BRANCH:-upgrade/hai-2.2}"
 DOMAIN="${DOMAIN:-}"
 
 # Colors
@@ -115,16 +115,22 @@ if [[ ! -f /etc/os-release ]]; then
 fi
 source /etc/os-release
 
-# Check Node.js
+# Check Node.js — install v20 if missing or too old
+NEED_NODE=false
 if ! command -v node &>/dev/null; then
-  fail "Node.js is not installed. Install Node.js 18+ first:
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    apt-get install -y nodejs"
+  NEED_NODE=true
+else
+  NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
+  if [[ "$NODE_VERSION" -lt 18 ]]; then
+    warn "Node.js 18+ required (found v${NODE_VERSION}), upgrading..."
+    NEED_NODE=true
+  fi
 fi
 
-NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
-if [[ "$NODE_VERSION" -lt 18 ]]; then
-  fail "Node.js 18+ required (found v${NODE_VERSION})"
+if $NEED_NODE; then
+  log "Installing Node.js 20..."
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  apt-get install -y -qq nodejs
 fi
 success "Node.js $(node -v)"
 
@@ -165,18 +171,47 @@ if [[ -z "$DOMAIN" ]]; then
   read -rp "  Domain: " DOMAIN
 fi
 
-# hosted.ai API
+# HostedAI API
 if [[ -z "${HOSTEDAI_API_URL:-}" ]]; then
   echo ""
-  echo "  hosted.ai API URL:"
-  echo "    - Same server:    http://localhost:5000 (recommended)"
-  echo "    - Remote server:  https://hai-server.example.com"
-  echo ""
-  read -rp "  HOSTEDAI_API_URL: " HOSTEDAI_API_URL
+  echo "  Is the HostedAI User Panel + Admin Panel installed on this server?"
+  read -rp "  Same node? [Y/n] " SAME_NODE
+  SAME_NODE="${SAME_NODE:-Y}"
+
+  if [[ "$SAME_NODE" =~ ^[Yy]$ ]]; then
+    HOSTEDAI_API_URL="http://localhost:8055"
+    GPUAAS_ADMIN_URL="http://localhost:8999"
+    success "Using local HostedAI APIs (user: :8055, admin: :8999)"
+  else
+    echo ""
+    echo "  HostedAI User Panel API URL (port 8055):"
+    echo "    Example: https://user-panel.example.com"
+    read -rp "  HOSTEDAI_API_URL: " HOSTEDAI_API_URL
+
+    echo ""
+    echo "  HostedAI Admin Panel API URL (port 8999):"
+    echo "    Example: https://admin-panel.example.com"
+    read -rp "  GPUAAS_ADMIN_URL: " GPUAAS_ADMIN_URL
+  fi
 fi
 
+# User Panel API key (generated in the HostedAI User Panel)
 if [[ -z "${HOSTEDAI_API_KEY:-}" ]]; then
-  read -rp "  HOSTEDAI_API_KEY (leave blank to configure later in admin UI): " HOSTEDAI_API_KEY
+  echo ""
+  echo "  HostedAI User Panel API key."
+  echo "  Generate one in the HostedAI User Panel, or configure later in admin UI."
+  read -rp "  HOSTEDAI_API_KEY (Enter to skip): " HOSTEDAI_API_KEY
+fi
+
+# Admin Panel credentials (login/password auth — no API key)
+echo ""
+echo "  HostedAI Admin Panel login credentials (used for pod management)."
+if [[ -z "${GPUAAS_ADMIN_USER:-}" ]]; then
+  read -rp "  GPUAAS_ADMIN_USER: " GPUAAS_ADMIN_USER
+fi
+if [[ -z "${GPUAAS_ADMIN_PASSWORD:-}" ]]; then
+  read -srp "  GPUAAS_ADMIN_PASSWORD: " GPUAAS_ADMIN_PASSWORD
+  echo ""
 fi
 
 # Stripe (optional)
@@ -189,14 +224,22 @@ if [[ -z "${ADMIN_EMAIL:-}" ]]; then
   read -rp "  Admin email (for SSL certificate and first login): " ADMIN_EMAIL
 fi
 
-# Generate secrets
+# Generate secrets (may be overridden by existing .env.local below)
 ADMIN_JWT_SECRET=$(openssl rand -hex 32)
 CUSTOMER_JWT_SECRET=$(openssl rand -hex 32)
 CRON_SECRET=$(openssl rand -hex 16)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
-
-# Database password
 DB_PASSWORD=$(openssl rand -hex 16)
+
+# If .env.local already exists, extract DB password from it so we don't
+# overwrite it with a new random one (ALTER USER must match .env.local)
+if [[ -f "${INSTALL_DIR}/.env.local" ]]; then
+  _EXISTING_DB_URL=$(grep "^DATABASE_URL=" "${INSTALL_DIR}/.env.local" 2>/dev/null | head -1 | sed 's/^DATABASE_URL=//' | tr -d '"' || true)
+  if [[ -n "$_EXISTING_DB_URL" ]]; then
+    DB_PASSWORD=$(echo "$_EXISTING_DB_URL" | sed 's|mysql://[^:]*:\([^@]*\)@.*|\1|')
+    log "Using existing database password from .env.local"
+  fi
+fi
 
 # Determine app URL
 if [[ -n "$DOMAIN" ]]; then
@@ -224,9 +267,10 @@ if ! command -v mariadb &>/dev/null; then
   DB_CLIENT="mysql"
 fi
 
-$DB_CLIENT -u root <<EOF
+sudo $DB_CLIENT -u root <<EOF
 CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
+ALTER USER '${DB_USER}'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
 GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'localhost';
 FLUSH PRIVILEGES;
 EOF
@@ -249,28 +293,94 @@ fi
 cd "$INSTALL_DIR"
 success "Application installed"
 
-# ── Step 4: Create .env.local ────────────────────────────────────────────────
+# ── Step 4: Create/update .env.local ─────────────────────────────────────────
 
-log "Writing configuration..."
+ENV_FILE="${INSTALL_DIR}/.env.local"
 
-cat > "${INSTALL_DIR}/.env.local" <<EOF
+# Helper: get existing value from .env.local (returns empty string if not set)
+get_existing() {
+  if [[ -f "$ENV_FILE" ]]; then
+    grep "^${1}=" "$ENV_FILE" 2>/dev/null | head -1 | sed "s/^${1}=//" | tr -d '"' || true
+  fi
+}
+
+if [[ -f "$ENV_FILE" ]]; then
+  log "Existing .env.local found — merging (preserving existing values)..."
+
+  # Preserve existing secrets and credentials — never overwrite these
+  ADMIN_JWT_SECRET=$(get_existing ADMIN_JWT_SECRET)
+  ADMIN_JWT_SECRET="${ADMIN_JWT_SECRET:-$(openssl rand -hex 32)}"
+
+  CUSTOMER_JWT_SECRET=$(get_existing CUSTOMER_JWT_SECRET)
+  CUSTOMER_JWT_SECRET="${CUSTOMER_JWT_SECRET:-$(openssl rand -hex 32)}"
+
+  CRON_SECRET=$(get_existing CRON_SECRET)
+  CRON_SECRET="${CRON_SECRET:-$(openssl rand -hex 16)}"
+
+  ENCRYPTION_KEY=$(get_existing ENCRYPTION_KEY)
+  ENCRYPTION_KEY="${ENCRYPTION_KEY:-$(openssl rand -hex 32)}"
+
+  # Preserve DB URL if set — extract password from it to keep DB user in sync
+  EXISTING_DB_URL=$(get_existing DATABASE_URL)
+  if [[ -n "$EXISTING_DB_URL" ]]; then
+    DB_URL_FINAL="$EXISTING_DB_URL"
+    # Extract password from URL: mysql://user:PASSWORD@host:port/db
+    DB_PASSWORD=$(echo "$EXISTING_DB_URL" | sed 's|mysql://[^:]*:\([^@]*\)@.*|\1|')
+  else
+    DB_URL_FINAL="mysql://${DB_USER}:${DB_PASSWORD}@localhost:3306/${DB_NAME}"
+  fi
+
+  # Preserve user-configured values
+  HOSTEDAI_API_URL=$(get_existing HOSTEDAI_API_URL)
+  HOSTEDAI_API_URL="${HOSTEDAI_API_URL:-${HOSTEDAI_API_URL}}"
+
+  HOSTEDAI_API_KEY=$(get_existing HOSTEDAI_API_KEY)
+  HOSTEDAI_API_KEY="${HOSTEDAI_API_KEY:-${HOSTEDAI_API_KEY}}"
+
+  GPUAAS_ADMIN_URL=$(get_existing GPUAAS_ADMIN_URL)
+  GPUAAS_ADMIN_URL="${GPUAAS_ADMIN_URL:-http://localhost:8999}"
+
+  GPUAAS_ADMIN_USER=$(get_existing GPUAAS_ADMIN_USER)
+  GPUAAS_ADMIN_USER="${GPUAAS_ADMIN_USER:-${GPUAAS_ADMIN_USER}}"
+
+  GPUAAS_ADMIN_PASSWORD=$(get_existing GPUAAS_ADMIN_PASSWORD)
+  GPUAAS_ADMIN_PASSWORD="${GPUAAS_ADMIN_PASSWORD:-${GPUAAS_ADMIN_PASSWORD}}"
+
+  STRIPE_SECRET_KEY=$(get_existing STRIPE_SECRET_KEY)
+  STRIPE_SECRET_KEY="${STRIPE_SECRET_KEY:-${STRIPE_SECRET_KEY}}"
+else
+  log "Writing new configuration..."
+  DB_URL_FINAL="mysql://${DB_USER}:${DB_PASSWORD}@localhost:3306/${DB_NAME}"
+fi
+
+# Back up existing .env.local before overwriting
+if [[ -f "$ENV_FILE" ]]; then
+  cp "$ENV_FILE" "${ENV_FILE}.bak.$(date +%Y%m%d%H%M%S)"
+fi
+
+cat > "$ENV_FILE" <<EOF
 # GPU Cloud Dashboard — Generated by install.sh on $(date -Iseconds)
 NEXT_PUBLIC_EDITION=oss
 EDITION=oss
 NEXT_PUBLIC_APP_URL=${APP_URL}
 
 # Database
-DATABASE_URL="mysql://${DB_USER}:${DB_PASSWORD}@localhost:3306/${DB_NAME}"
+DATABASE_URL="${DB_URL_FINAL}"
 
-# Auth secrets (auto-generated)
+# Auth secrets (auto-generated — preserved across re-installs)
 ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET}
 CUSTOMER_JWT_SECRET=${CUSTOMER_JWT_SECRET}
 CRON_SECRET=${CRON_SECRET}
 ENCRYPTION_KEY=${ENCRYPTION_KEY}
 
-# hosted.ai
+# HostedAI User Panel (port 8055)
 HOSTEDAI_API_URL=${HOSTEDAI_API_URL:-}
 HOSTEDAI_API_KEY=${HOSTEDAI_API_KEY:-}
+
+# HostedAI Admin Panel (port 8999) — cookie-based login auth
+GPUAAS_ADMIN_URL=${GPUAAS_ADMIN_URL:-http://localhost:8999}
+GPUAAS_ADMIN_USER=${GPUAAS_ADMIN_USER:-}
+GPUAAS_ADMIN_PASSWORD=${GPUAAS_ADMIN_PASSWORD:-}
 
 # Stripe (optional — configure in admin UI if not set here)
 STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
@@ -279,8 +389,8 @@ STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
 SSH_WS_PORT=${SSH_WS_PORT}
 EOF
 
-chown "${APP_USER}:${APP_USER}" "${INSTALL_DIR}/.env.local"
-chmod 600 "${INSTALL_DIR}/.env.local"
+chown "${APP_USER}:${APP_USER}" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
 success "Configuration written to .env.local"
 
 # ── Step 5: Install dependencies & build ─────────────────────────────────────
@@ -295,11 +405,11 @@ sudo -u "$APP_USER" node node_modules/prisma/build/index.js generate
 success "Prisma client generated"
 
 log "Pushing database schema..."
-sudo -u "$APP_USER" npx prisma db push
+sudo -u "$APP_USER" env DATABASE_URL="${DB_URL_FINAL}" npx prisma db push
 success "Database schema applied"
 
 log "Building application (this may take a few minutes)..."
-sudo -u "$APP_USER" pnpm build
+sudo -u "$APP_USER" env $(grep -v '^#' "${INSTALL_DIR}/.env.local" | xargs) pnpm build
 success "Application built"
 
 # ── Step 6: Create systemd service ──────────────────────────────────────────
@@ -317,7 +427,7 @@ Type=simple
 User=${APP_USER}
 Group=${APP_USER}
 WorkingDirectory=${INSTALL_DIR}
-ExecStart=$(which node) ${INSTALL_DIR}/node_modules/.bin/next start -H 127.0.0.1 -p ${APP_PORT}
+ExecStart=$(which npx) next start -H 127.0.0.1 -p ${APP_PORT}
 Restart=on-failure
 RestartSec=5
 StartLimitBurst=10

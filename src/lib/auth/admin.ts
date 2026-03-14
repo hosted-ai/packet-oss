@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import type { TenantConfig } from '@/lib/tenant/types';
 import { isOSS } from '@/lib/edition';
@@ -15,10 +16,108 @@ export interface Admin {
   email: string;
   addedAt: string;
   addedBy: string;
+  passwordHash?: string; // OSS password-based auth (scrypt)
 }
 
 interface AdminsData {
   admins: Admin[];
+}
+
+// ── Password hashing (Node built-in crypto.scrypt) ───────────────────────
+
+const SCRYPT_KEYLEN = 64;
+const SCRYPT_COST = 16384; // N
+const SCRYPT_BLOCK_SIZE = 8; // r
+const SCRYPT_PARALLELIZATION = 1; // p
+
+function hashPassword(password: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const salt = crypto.randomBytes(16).toString("hex");
+    crypto.scrypt(password, salt, SCRYPT_KEYLEN, {
+      N: SCRYPT_COST, r: SCRYPT_BLOCK_SIZE, p: SCRYPT_PARALLELIZATION,
+    }, (err, derivedKey) => {
+      if (err) return reject(err);
+      resolve(`${salt}:${derivedKey.toString("hex")}`);
+    });
+  });
+}
+
+function verifyPassword(password: string, stored: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const [salt, hash] = stored.split(":");
+    if (!salt || !hash) return resolve(false);
+    crypto.scrypt(password, salt, SCRYPT_KEYLEN, {
+      N: SCRYPT_COST, r: SCRYPT_BLOCK_SIZE, p: SCRYPT_PARALLELIZATION,
+    }, (err, derivedKey) => {
+      if (err) return reject(err);
+      resolve(crypto.timingSafeEqual(Buffer.from(hash, "hex"), derivedKey));
+    });
+  });
+}
+
+/**
+ * Set or update an admin's password (OSS mode only).
+ */
+export async function setAdminPassword(email: string, password: string): Promise<boolean> {
+  const data = readAdmins();
+  const admin = data.admins.find(a => a.email.toLowerCase() === email.toLowerCase());
+  if (!admin) return false;
+  admin.passwordHash = await hashPassword(password);
+  writeAdmins(data);
+  return true;
+}
+
+/**
+ * Verify an admin's password. Returns false if no password set or wrong.
+ */
+export async function verifyAdminPassword(email: string, password: string): Promise<boolean> {
+  const data = readAdmins();
+  const admin = data.admins.find(a => a.email.toLowerCase() === email.toLowerCase());
+  if (!admin?.passwordHash) return false;
+  return verifyPassword(password, admin.passwordHash);
+}
+
+/**
+ * Check if an admin has a password set (for OSS login flow).
+ */
+export function adminHasPassword(email: string): boolean {
+  const data = readAdmins();
+  const admin = data.admins.find(a => a.email.toLowerCase() === email.toLowerCase());
+  return !!admin?.passwordHash;
+}
+
+/**
+ * Check if this is the first-run state: OSS mode with no admins yet.
+ */
+export function isFirstRun(): boolean {
+  if (!isOSS()) return false;
+  const data = readAdmins();
+  return data.admins.length === 0;
+}
+
+/**
+ * Bootstrap first admin with a password (OSS mode only).
+ * Creates the admin and sets their password in one step.
+ */
+export async function bootstrapFirstAdminWithPassword(
+  email: string,
+  password: string
+): Promise<boolean> {
+  if (!isOSS()) return false;
+  const data = readAdmins();
+  if (data.admins.length > 0) return false;
+  if (!isAllowedAdminDomain(email)) return false;
+
+  const passwordHash = await hashPassword(password);
+  data.admins.push({
+    email: email.toLowerCase(),
+    addedAt: new Date().toISOString(),
+    addedBy: "system-bootstrap",
+    passwordHash,
+  });
+  writeAdmins(data);
+  console.log(`[OSS Bootstrap] First admin created with password: ${email}`);
+  return true;
 }
 
 function ensureAdminsFile(): void {

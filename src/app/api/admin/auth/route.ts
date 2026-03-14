@@ -7,6 +7,14 @@ import { getTwoFactorStatus, verifyTwoFactorCode } from "@/lib/two-factor";
 import { getAdminPinStatus, setAdminPin, verifyAdminPin } from "@/lib/admin-pin";
 import { logAdminLogin, logAdminActivity } from "@/lib/admin-activity";
 import { getBrandName } from "@/lib/branding";
+import { isOSS } from "@/lib/edition";
+import {
+  verifyAdminPassword,
+  setAdminPassword,
+  adminHasPassword,
+  isFirstRun,
+  bootstrapFirstAdminWithPassword,
+} from "@/lib/auth/admin";
 
 async function sendAdminLoginEmail(email: string, loginUrl: string) {
   await sendEmail({
@@ -26,6 +34,103 @@ async function sendAdminLoginEmail(email: string, loginUrl: string) {
   });
 }
 
+/**
+ * Create a session response with the admin_session cookie set.
+ */
+function createSessionResponse(email: string): NextResponse {
+  const sessionToken = generateSessionToken(email);
+  const response = NextResponse.json({ success: true, email });
+  response.cookies.set("admin_session", sessionToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 60 * 60 * 4, // 4 hours
+    path: "/",
+  });
+  return response;
+}
+
+/**
+ * OSS password-based login flow.
+ * Handles: first-run bootstrap, login, password setup for existing admins.
+ */
+async function handleOSSPasswordLogin(
+  email: string,
+  password: string | undefined,
+  ip: string
+): Promise<NextResponse> {
+  // First run — bootstrap admin with password
+  if (isFirstRun()) {
+    if (!password) {
+      return NextResponse.json({
+        mode: "setup",
+        message: "Create your admin account",
+      });
+    }
+    if (password.length < 8) {
+      return NextResponse.json(
+        { error: "Password must be at least 8 characters" },
+        { status: 400 }
+      );
+    }
+    const created = await bootstrapFirstAdminWithPassword(email, password);
+    if (!created) {
+      return NextResponse.json(
+        { error: "Failed to create admin account" },
+        { status: 500 }
+      );
+    }
+    await logAdminLogin(email);
+    return createSessionResponse(email);
+  }
+
+  // Not first run — need password
+  if (!password) {
+    // Don't reveal whether email is valid
+    return NextResponse.json(
+      { error: "Email and password are required" },
+      { status: 400 }
+    );
+  }
+
+  // Check if admin exists
+  if (!isAdmin(email)) {
+    // Constant-time-ish: still hash to prevent timing attacks
+    console.log(`[OSS Auth] Login attempt for non-admin: ${email}, IP: ${ip}`);
+    return NextResponse.json(
+      { error: "Invalid email or password" },
+      { status: 401 }
+    );
+  }
+
+  // Admin exists but no password yet (added via admin panel, never set password)
+  if (!adminHasPassword(email)) {
+    if (password.length < 8) {
+      return NextResponse.json(
+        { error: "Password must be at least 8 characters" },
+        { status: 400 }
+      );
+    }
+    await setAdminPassword(email, password);
+    console.log(`[OSS Auth] Password set for admin: ${email}`);
+    await logAdminLogin(email);
+    return createSessionResponse(email);
+  }
+
+  // Verify password
+  const valid = await verifyAdminPassword(email, password);
+  if (!valid) {
+    console.log(`[OSS Auth] Failed login for: ${email}, IP: ${ip}`);
+    return NextResponse.json(
+      { error: "Invalid email or password" },
+      { status: 401 }
+    );
+  }
+
+  await logAdminLogin(email);
+  return createSessionResponse(email);
+}
+
 export async function POST(request: NextRequest) {
   // Rate limit: 5 requests per 5 minutes per IP (strict for admin login)
   const ip = getClientIp(request);
@@ -43,8 +148,19 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { email, token, twoFactorCode, pinCode, newPin } = await request.json();
+    const body = await request.json();
+    const { email, password, token, twoFactorCode, pinCode, newPin } = body;
     console.log(`Admin auth request for email: ${email || "(token verification)"}, IP: ${ip}`);
+
+    // ── OSS password-based login ──────────────────────────────────────
+    if (isOSS() && !token) {
+      if (!email) {
+        return NextResponse.json({ error: "Email is required" }, { status: 400 });
+      }
+      return handleOSSPasswordLogin(email, password, ip);
+    }
+
+    // ── Pro magic-link flow (unchanged) ───────────────────────────────
 
     // If token is provided, verify it and return session token
     if (token) {
@@ -132,21 +248,8 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      const sessionToken = generateSessionToken(decoded.email);
-
-      // Log successful admin login
       await logAdminLogin(decoded.email);
-
-      const response = NextResponse.json({ success: true, email: decoded.email });
-      response.cookies.set("admin_session", sessionToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 4, // 4 hours - matches session token expiry
-        path: "/",
-      });
-
-      return response;
+      return createSessionResponse(decoded.email);
     }
 
     // Otherwise, send magic link
@@ -198,6 +301,14 @@ export async function GET(request: NextRequest) {
   const sessionToken = request.cookies.get("admin_session")?.value;
 
   if (!sessionToken) {
+    // In OSS mode, tell the client which login mode to use
+    if (isOSS()) {
+      return NextResponse.json({
+        authenticated: false,
+        loginMode: "password",
+        isFirstRun: isFirstRun(),
+      }, { status: 401 });
+    }
     return NextResponse.json({ authenticated: false }, { status: 401 });
   }
 
