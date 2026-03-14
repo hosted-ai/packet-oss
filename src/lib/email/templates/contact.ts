@@ -1,5 +1,6 @@
 import { sendEmailDirect } from "../client";
 import { escapeHtml, emailLayout, emailText, emailDetailBox } from "../utils";
+import { getBrandName } from "@/lib/branding";
 
 export async function sendContactEmail(params: {
   name: string;
@@ -24,15 +25,15 @@ export async function sendContactEmail(params: {
       <p style="margin: 0 0 10px 0; font-weight: 600; color: #5b6476; font-size: 13px;">Message:</p>
       <p style="margin: 0; white-space: pre-wrap; font-size: 14px; color: #0b0f1c;">${safeMessage}</p>
     </div>
-    ${emailText('<span style="font-size: 13px; color: #5b6476;">This message was sent from the contact form.</span>')}
+    ${emailText(`<span style="font-size: 13px; color: #5b6476;">This message was sent from the ${getBrandName()} contact form.</span>`)}
   `;
 
   await sendEmailDirect({
-    to: process.env.SALES_EMAIL || process.env.ADMIN_BCC_EMAIL || "sales@example.com",
+    to: "sales@hosted.ai",
     reply_to: email,
-    subject: `[GPU Cloud] New inquiry from ${safeName}${safeCompany ? ` (${safeCompany})` : ""}`,
+    subject: `[${getBrandName()}] New inquiry from ${safeName}${safeCompany ? ` (${safeCompany})` : ""}`,
     html: emailLayout({ preheader: `New inquiry from ${name}`, body }),
-    text: `New Contact Form Submission from GPU Cloud
+    text: `New Contact Form Submission from ${getBrandName()}
 
 Name: ${name}
 Email: ${email}
@@ -41,6 +42,6 @@ Message:
 ${message}
 
 ---
-Sent from contact form`,
+Sent from ${getBrandName()} contact form`,
   });
 }

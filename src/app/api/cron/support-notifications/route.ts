@@ -11,6 +11,7 @@ import { getStripe } from "@/lib/stripe";
 import { generateCustomerToken } from "@/lib/customer-auth";
 import { resolvePrimaryCustomer } from "@/lib/customer-resolver";
 import { verifyCronAuth } from "@/lib/cron-auth";
+import { getAppUrl } from "@/lib/branding";
 
 // Sanitize text for email (remove problematic characters)
 function sanitizeForEmail(text: string): string {
@@ -20,7 +21,7 @@ function sanitizeForEmail(text: string): string {
     .trim();
 }
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://example.com";
+const APP_URL = getAppUrl();
 
 export async function GET(request: NextRequest) {
   // Verify cron secret (fail-closed with timing-safe comparison)
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
       error?: string;
     }> = [];
 
-    // Get all tickets from Zammad (filtered to GPU Cloud groups only)
+    // Get all tickets from Zammad (filtered to platform groups only)
     const tickets = await getAllTickets({ state: "all", page: 1, perPage: 100 });
 
     // Filter to only open tickets

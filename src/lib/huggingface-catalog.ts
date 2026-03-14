@@ -1,5 +1,5 @@
 /**
- * Curated Hugging Face catalog for GPU Cloud
+ * Curated Hugging Face catalog for GPU cloud platform
  * Contains popular models, Docker images, and Spaces templates
  */
 

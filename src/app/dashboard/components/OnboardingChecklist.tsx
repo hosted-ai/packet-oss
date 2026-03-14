@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { getBrandName } from "@/lib/branding";
 
 interface OnboardingStep {
   id: string;
@@ -104,7 +105,7 @@ export function OnboardingChecklist({
             </svg>
           </div>
           <div>
-            <h3 className="font-semibold text-[var(--ink)] text-sm">Get started with GPU Cloud</h3>
+            <h3 className="font-semibold text-[var(--ink)] text-sm">Get started with {getBrandName()}</h3>
             <p className="text-xs text-[var(--muted)]">{completedCount} of {steps.length} complete</p>
           </div>
         </div>

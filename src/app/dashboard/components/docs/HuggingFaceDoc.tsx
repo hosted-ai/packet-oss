@@ -54,7 +54,7 @@ export function HuggingFaceDoc() {
       <p>Your model will be ready in 5-10 minutes (depending on model size).</p>
 
       <h2 id="recommended-models">Recommended Models</h2>
-      <p>These models are tested and optimized for GPU Cloud deployment:</p>
+      <p>These models are tested and optimized for deployment on this platform:</p>
 
       <h3>General Purpose</h3>
       <table>
@@ -540,7 +540,7 @@ watch -n 1 nvidia-smi`}</code>
 
       <h2>Need Help?</h2>
       <p>
-        Contact us at <a href="mailto:support@example.com">support@example.com</a>
+        Reach out via the <strong>Support</strong> tab in your dashboard
       </p>
     </div>
   );

@@ -6,6 +6,7 @@
 
 import { sendEmail } from "../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButton, emailInfoBox, emailSuccessBox, emailDetailBox, emailMuted, emailSignoff, plainTextFooter } from "../utils";
+import { getBrandName, getSupportEmail } from "@/lib/branding";
 
 // Re-export functions from split files for backward compatibility
 export * from "./provider/node-emails";
@@ -30,7 +31,7 @@ export async function sendProviderLoginEmail(params: {
     ${emailSignoff()}
   `;
 
-  const html = emailLayout({ preheader: "Login to your provider dashboard", body, portalLabel: "Provider Portal" });
+  const html = emailLayout({ preheader: `Login to your ${getBrandName()} provider dashboard`, body, portalLabel: "Provider Portal" });
 
   const text = `Login to Your Provider Dashboard
 
@@ -42,12 +43,12 @@ ${params.loginUrl}
 
 This link will expire in 15 minutes. If you didn't request this login link, you can safely ignore this email.
 
-The ${process.env.NEXT_PUBLIC_BRAND_NAME || "GPU Cloud"} Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({
     to: params.to,
-    subject: "Login to Provider Portal",
+    subject: `Login to ${getBrandName()} Provider Portal`,
     html,
     text,
   });
@@ -67,8 +68,8 @@ export async function sendProviderApplicationReceivedEmail(params: {
   const isWhiteLabel = params.applicationType === "white_label";
 
   const introText = isWhiteLabel
-    ? `Thank you for your interest in launching a White Label GPU cloud! We've received your application for <strong>${safeCompanyName}</strong>.`
-    : `Thank you for applying to become a provider! We've received your application for <strong>${safeCompanyName}</strong>.`;
+    ? `Thank you for your interest in launching a White Label GPU cloud with ${getBrandName()}! We've received your application for <strong>${safeCompanyName}</strong>.`
+    : `Thank you for applying to become a provider on ${getBrandName()}! We've received your application for <strong>${safeCompanyName}</strong>.`;
 
   const stepsHtml = isWhiteLabel
     ? `<tr><td style="padding: 4px 0; font-size: 14px; color: #0b0f1c;">1. Our team will review your application (usually within 24 hours)</td></tr>
@@ -88,7 +89,7 @@ export async function sendProviderApplicationReceivedEmail(params: {
 
   const subject = isWhiteLabel
     ? `White Label Application Received - ${params.companyName}`
-    : "Welcome - Application Received";
+    : `Welcome to ${getBrandName()} - Application Received`;
 
   const body = `
     ${emailGreeting(safeContactName)}
@@ -99,24 +100,24 @@ export async function sendProviderApplicationReceivedEmail(params: {
         ${stepsHtml}
       </table>
     `)}
-    ${emailText(`If you have any questions, feel free to reply to this email or contact us at <a href="mailto:${process.env.SUPPORT_EMAIL || "support@example.com"}" style="color: #1a4fff;">${process.env.SUPPORT_EMAIL || "support@example.com"}</a>.`)}
+    ${emailText('If you have any questions, feel free to reply to this email or contact us at <a href="mailto:${getSupportEmail()}" style="color: #1a4fff;">${getSupportEmail()}</a>.')}
     ${emailSignoff()}
   `;
 
   const html = emailLayout({ preheader: `Application received for ${params.companyName}`, body, portalLabel: isWhiteLabel ? "White Label" : "Provider Portal" });
 
-  const text = `${isWhiteLabel ? "White Label Application Received" : "Welcome - Application Received!"}
+  const text = `${isWhiteLabel ? "White Label Application Received" : `Welcome to ${getBrandName()}!`}
 
 Hi ${params.contactName},
 
-${isWhiteLabel ? `Thank you for your interest in launching a White Label GPU cloud! We've received your application for ${params.companyName}.` : `Thank you for applying to become a provider! We've received your application for ${params.companyName}.`}
+${isWhiteLabel ? `Thank you for your interest in launching a White Label GPU cloud with ${getBrandName()}! We've received your application for ${params.companyName}.` : `Thank you for applying to become a provider on ${getBrandName()}! We've received your application for ${params.companyName}.`}
 
 What happens next?
 ${stepsText}
 
-If you have any questions, feel free to reply to this email or contact us at ${process.env.SUPPORT_EMAIL || "support@example.com"}.
+If you have any questions, feel free to reply to this email or contact us at ${getSupportEmail()}.
 
-The ${process.env.NEXT_PUBLIC_BRAND_NAME || "GPU Cloud"} Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({
@@ -171,7 +172,7 @@ export async function sendProviderApprovedEmail(params: {
 
   const subject = isWhiteLabel
     ? `Your White Label Platform is Approved - ${params.companyName}`
-    : "Your Provider Account is Approved!";
+    : `Your ${getBrandName()} Provider Account is Approved!`;
 
   const body = `
     ${emailSuccessBox(`<p style="margin: 0; font-size: 16px; color: #065f46;"><strong>Your Application is Approved!</strong></p>`)}
@@ -185,7 +186,7 @@ export async function sendProviderApprovedEmail(params: {
         ${stepsHtml}
       </table>
     `)}
-    ${emailText(`If you have any questions, our team is here to help at <a href="mailto:${process.env.SUPPORT_EMAIL || "support@example.com"}" style="color: #1a4fff;">${process.env.SUPPORT_EMAIL || "support@example.com"}</a>.`)}
+    ${emailText('If you have any questions, our team is here to help at <a href="mailto:${getSupportEmail()}" style="color: #1a4fff;">${getSupportEmail()}</a>.')}
     ${emailSignoff()}
   `;
 
@@ -203,9 +204,9 @@ ${params.loginUrl}
 
 ${stepsText}
 
-If you have any questions, our team is here to help at ${process.env.SUPPORT_EMAIL || "support@example.com"}.
+If you have any questions, our team is here to help at ${getSupportEmail()}.
 
-The ${process.env.NEXT_PUBLIC_BRAND_NAME || "GPU Cloud"} Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({
@@ -235,9 +236,9 @@ export async function sendProviderRejectedEmail(params: {
 
   const body = `
     ${emailGreeting(safeContactName)}
-    ${emailText(`Thank you for your interest in becoming a provider. After reviewing your application for <strong>${safeCompanyName}</strong>, we're unable to approve it at this time.`)}
+    ${emailText(`Thank you for your interest in becoming a provider on ${getBrandName()}. After reviewing your application for <strong>${safeCompanyName}</strong>, we're unable to approve it at this time.`)}
     ${reasonBlock}
-    ${emailText(`If you believe this was in error or would like to discuss further, please reply to this email or contact us at <a href="mailto:${process.env.SUPPORT_EMAIL || "support@example.com"}" style="color: #1a4fff;">${process.env.SUPPORT_EMAIL || "support@example.com"}</a>.`)}
+    ${emailText('If you believe this was in error or would like to discuss further, please reply to this email or contact us at <a href="mailto:${getSupportEmail()}" style="color: #1a4fff;">${getSupportEmail()}</a>.')}
     ${emailSignoff()}
   `;
 
@@ -247,17 +248,17 @@ export async function sendProviderRejectedEmail(params: {
 
 Hi ${params.contactName},
 
-Thank you for your interest in becoming a provider. After reviewing your application for ${params.companyName}, we're unable to approve it at this time.
+Thank you for your interest in becoming a provider on ${getBrandName()}. After reviewing your application for ${params.companyName}, we're unable to approve it at this time.
 
 ${params.reason ? `Reason: ${params.reason}\n` : ""}
-If you believe this was in error or would like to discuss further, please reply to this email or contact us at ${process.env.SUPPORT_EMAIL || "support@example.com"}.
+If you believe this was in error or would like to discuss further, please reply to this email or contact us at ${getSupportEmail()}.
 
-The ${process.env.NEXT_PUBLIC_BRAND_NAME || "GPU Cloud"} Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({
     to: params.to,
-    subject: "Provider Application Update",
+    subject: `${getBrandName()} Provider Application Update`,
     html,
     text,
   });

@@ -12,7 +12,7 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 ### How to Report
 
-1. **Email**: Send details to security@example.com
+1. **Email**: Send details to security@hosted.ai
 2. **Include**:
    - Description of the vulnerability
    - Steps to reproduce
@@ -41,7 +41,8 @@ The following environment variables are critical for security. See `.env.example
 
 | Variable | Purpose |
 |----------|---------|
-| `ADMIN_JWT_SECRET` | Secret for signing JWT tokens (customer, admin, investor) |
+| `ADMIN_JWT_SECRET` | Secret for signing admin JWT tokens |
+| `CUSTOMER_JWT_SECRET` | Secret for signing customer JWT tokens |
 | `STRIPE_SECRET_KEY` | Stripe API key - never expose to client |
 | `STRIPE_WEBHOOK_SECRET` | Validates incoming Stripe webhooks |
 | `HOSTEDAI_API_KEY` | hosted.ai API authentication |
@@ -53,28 +54,7 @@ The following environment variables are critical for security. See `.env.example
 2. **Rotate keys regularly**: Especially after team member departures
 3. **Use environment-specific keys**: Different keys for dev/staging/production
 4. **Limit access**: Only grant production access to those who need it
-
-## Known Vulnerabilities
-
-### Transitive Dependency: qs (via stripe)
-
-**Status**: Unfixable (waiting for upstream fix)
-
-| Severity | Package | Issue |
-|----------|---------|-------|
-| High | qs <6.14.1 | DoS via memory exhaustion (GHSA-6rw7-vpxm-498p) |
-
-**Mitigation**:
-- This vulnerability is in the `stripe` package's dependency tree
-- The qs library is used for query string parsing
-- **Impact**: Limited - only affects Stripe webhook parsing, not user-facing APIs
-- **Mitigation**: Stripe webhooks have signature verification and rate limiting
-- **Resolution**: Will be fixed when Stripe updates their qs dependency
-
-To check for vulnerabilities:
-```bash
-pnpm audit
-```
+5. **Use Platform Settings**: Sensitive keys stored in the database are encrypted with AES-256-GCM
 
 ## Security Features
 
@@ -93,7 +73,7 @@ pnpm audit
 
 ### Data Protection
 
-- **SQLite with WAL**: Local database with write-ahead logging
+- **Encrypted Settings**: Sensitive platform settings encrypted with AES-256-GCM
 - **No PII in Logs**: Sensitive data redacted from console output
 - **HTTPS Only**: All production traffic encrypted
 
@@ -107,4 +87,4 @@ pnpm audit
 
 | Date | Auditor | Scope | Result |
 |------|---------|-------|--------|
-| 2025-01-01 | Internal | Dependency scan | 1 transitive vuln (documented above) |
+| 2025-01-01 | Internal | Dependency scan | Clean |

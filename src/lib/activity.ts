@@ -1,14 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-// Lazy initialization to avoid build-time connection issues
-let prisma: PrismaClient | null = null;
-
-function getPrisma(): PrismaClient {
-  if (!prisma) {
-    prisma = new PrismaClient();
-  }
-  return prisma;
-}
+import { prisma } from "@/lib/prisma";
 
 // Event types for customer activity
 export type ActivityEventType =
@@ -43,7 +33,7 @@ export type ActivityEventType =
   | "wallet_topup"
   | "voucher_redeemed"
   | "budget_set"
-  // Inference events
+  // Token Factory events
   | "inference"
   | "batch_created"
   | "batch_cancelled"
@@ -93,8 +83,7 @@ export async function logActivity(
   metadata?: Record<string, unknown>
 ): Promise<ActivityEvent> {
   try {
-    const db = getPrisma();
-    const event = await db.activityEvent.create({
+    const event = await prisma.activityEvent.create({
       data: {
         customerId,
         type,
@@ -129,8 +118,7 @@ export async function getActivityEvents(
   limit: number = 100
 ): Promise<ActivityEvent[]> {
   try {
-    const db = getPrisma();
-    const events = await db.activityEvent.findMany({
+    const events = await prisma.activityEvent.findMany({
       where: { customerId },
       orderBy: { createdAt: "desc" },
       take: limit,
@@ -389,7 +377,7 @@ export function logBudgetSet(
   return logActivity(customerId, "budget_set", `Budget set: ${formatted}/month`, { budgetCents });
 }
 
-// Inference events
+// Token Factory events
 export function logBatchCreated(
   customerId: string,
   batchId: string,
@@ -468,8 +456,7 @@ export async function getFirstGpuLaunch(
   customerId: string
 ): Promise<{ timestamp: number } | null> {
   try {
-    const db = getPrisma();
-    const event = await db.activityEvent.findFirst({
+    const event = await prisma.activityEvent.findFirst({
       where: {
         customerId,
         type: "gpu_launched",
@@ -589,9 +576,8 @@ export async function getAllFirstGpuLaunches(): Promise<
   Map<string, number>
 > {
   try {
-    const db = getPrisma();
     // Get the earliest gpu_launched event per customerId
-    const events = await db.activityEvent.findMany({
+    const events = await prisma.activityEvent.findMany({
       where: { type: "gpu_launched" },
       orderBy: { createdAt: "asc" },
     });

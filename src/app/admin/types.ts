@@ -42,6 +42,45 @@ export interface Investor {
   revenueSharePercent?: number | null;
 }
 
+export interface TieredPricing {
+  month1?: number;
+  month3?: number;
+  month6?: number;
+  month12?: number;
+  month24?: number;
+  month36?: number;
+}
+
+export interface ClusterOffer {
+  id: string;
+  name: string;
+  description: string;
+  image?: string;
+  gpuType: string;
+  gpuCount: number;
+  gpuMemory?: string;
+  specs: {
+    cpu?: string;
+    memory?: string;
+    storage?: string;
+    network?: string;
+    ethernet?: string;
+    nodeCount?: number;
+    totalGpuMemory?: string;
+    interconnect?: string;
+    platform?: string;
+  };
+  pricing: TieredPricing;
+  location: string;
+  region?: string;
+  availability: "available" | "limited" | "coming_soon";
+  featured: boolean;
+  sortOrder: number;
+  highlights?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface PricingConfig {
   hourlyRateCents: number;
   storagePricePerGBHourCents: number;
@@ -50,6 +89,44 @@ export interface PricingConfig {
   stoppedInstanceRatePercent: number;
   updatedAt?: string;
   updatedBy?: string;
+}
+
+export interface Quote {
+  id: string;
+  token: string;
+  quoteNumber: string;
+  customerName: string;
+  customerEmail: string;
+  customerCompany?: string;
+  customerPhone?: string;
+  gpuType: string;
+  gpuCount: number;
+  gpuMemory?: string;
+  specs: {
+    cpu?: string;
+    memory?: string;
+    storage?: string;
+    network?: string;
+    ethernet?: string;
+    nodeCount?: number;
+    totalGpuMemory?: string;
+    interconnect?: string;
+    platform?: string;
+  };
+  pricing: TieredPricing;
+  location: string;
+  notes?: string;
+  startsAt?: string;
+  expiresAt: string;
+  status: "pending" | "accepted" | "declined" | "expired" | "converted";
+  createdAt: string;
+  updatedAt: string;
+  customerResponse?: {
+    action: "accepted" | "declined" | "question";
+    message?: string;
+    respondedAt: string;
+  };
+  reminderSentAt?: string;
 }
 
 export interface AdminActivity {
@@ -61,7 +138,134 @@ export interface AdminActivity {
   created: number;
 }
 
-export type AdminTab = "platform-settings" | "customers" | "admins" | "investors" | "referrals" | "vouchers" | "activity" | "settings" | "qa" | "providers" | "landing" | "game" | "products" | "pods" | "emails" | "drip" | "nodes" | "pools" | "business" | "skypilot" | "support" | "node-revenue" | "banners" | "marketing" | "uptime" | "payouts";
+export type AdminTab = "customers" | "admins" | "investors" | "clusters" | "quotes" | "referrals" | "vouchers" | "activity" | "settings" | "calculator" | "qa" | "providers" | "landing" | "game" | "products" | "pods" | "emails" | "drip" | "nodes" | "pools" | "business" | "demand" | "batches" | "token-providers" | "skypilot" | "support" | "spheron" | "node-revenue" | "banners" | "marketing" | "tenants" | "pixel-factory" | "uptime" | "payouts" | "platform-settings";
+
+/**
+ * Admin tabs that are only available in the Pro edition.
+ * In the OSS build these tabs are hidden from the sidebar and their
+ * render branches are skipped.
+ */
+export const PREMIUM_ADMIN_TABS: ReadonlySet<AdminTab> = new Set([
+  "clusters",
+  "quotes",
+  "calculator",
+  "demand",
+  "batches",
+  "token-providers",
+  "spheron",
+  "pixel-factory",
+  "tenants",
+]);
+
+/**
+ * Admin tabs that are only available in the OSS (self-hosted) edition.
+ * In the Pro build these tabs are hidden from the sidebar and their
+ * render branches are skipped.
+ */
+export const OSS_ONLY_ADMIN_TABS: ReadonlySet<AdminTab> = new Set([
+  "platform-settings",
+]);
+
+// Infrastructure Request types (demand for GPU supply)
+export interface TargetPricing {
+  month1?: number;
+  month3?: number;
+  month6?: number;
+  month12?: number;
+  month24?: number;
+  month36?: number;
+}
+
+export interface InfrastructureRequest {
+  id: string;
+  title: string;
+  description: string;
+  gpuType: string;
+  gpuCountMin: number;
+  gpuCountMax?: number;
+  gpuMemoryMin?: string;
+  nodeCountMin: number;
+  nodeCountMax?: number;
+  specs: {
+    cpuMin?: string;
+    memoryMin?: string;
+    storageMin?: string;
+    networkMin?: string;
+    interconnect?: string;
+  };
+  targetPricing: TargetPricing;
+  preferredContractLength: keyof TargetPricing;
+  minContractLength: keyof TargetPricing;
+  preferredLocations: string[];
+  acceptableLocations?: string[];
+  neededBy?: string;
+  urgency: "low" | "medium" | "high" | "critical";
+  status: "active" | "paused" | "fulfilled" | "expired";
+  featured: boolean;
+  sortOrder: number;
+  responseCount: number;
+  internalNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InfrastructureRequestFormData {
+  title: string;
+  description: string;
+  gpuType: string;
+  gpuCountMin: number;
+  gpuCountMax: number | null;
+  gpuMemoryMin: string;
+  nodeCountMin: number;
+  nodeCountMax: number | null;
+  specs: {
+    cpuMin: string;
+    memoryMin: string;
+    storageMin: string;
+    networkMin: string;
+    interconnect: string;
+  };
+  targetPricing: TargetPricing;
+  preferredContractLength: keyof TargetPricing;
+  minContractLength: keyof TargetPricing;
+  preferredLocations: string[];
+  acceptableLocations: string[];
+  neededBy: string;
+  urgency: "low" | "medium" | "high" | "critical";
+  status: "active" | "paused" | "fulfilled" | "expired";
+  featured: boolean;
+  sortOrder: number;
+  internalNotes: string;
+}
+
+export const EMPTY_INFRASTRUCTURE_REQUEST_FORM: InfrastructureRequestFormData = {
+  title: "",
+  description: "",
+  gpuType: "",
+  gpuCountMin: 8,
+  gpuCountMax: null,
+  gpuMemoryMin: "",
+  nodeCountMin: 1,
+  nodeCountMax: null,
+  specs: {
+    cpuMin: "",
+    memoryMin: "",
+    storageMin: "",
+    networkMin: "",
+    interconnect: "",
+  },
+  targetPricing: {},
+  preferredContractLength: "month12",
+  minContractLength: "month6",
+  preferredLocations: [],
+  acceptableLocations: [],
+  neededBy: "",
+  urgency: "medium",
+  status: "active",
+  featured: false,
+  sortOrder: 0,
+  internalNotes: "",
+};
 
 // GPU Product types for pricing/product management
 export interface GpuProduct {
@@ -270,6 +474,116 @@ export interface GpuType {
   displayOrder: number;
   minVramGb: number | null;
 }
+
+export interface ClusterFormData {
+  name: string;
+  description: string;
+  image: string;
+  gpuType: string;
+  gpuCount: number;
+  gpuMemory: string;
+  specs: {
+    cpu: string;
+    memory: string;
+    storage: string;
+    network: string;
+    ethernet: string;
+    interconnect: string;
+    platform: string;
+    nodeCount?: number;
+  };
+  pricing: TieredPricing;
+  location: string;
+  region: string;
+  availability: "available" | "limited" | "coming_soon";
+  featured: boolean;
+  sortOrder: number;
+  highlights: string[];
+}
+
+export interface QuoteFormData {
+  customerName: string;
+  customerEmail: string;
+  customerCompany: string;
+  customerPhone: string;
+  gpuType: string;
+  gpuCount: number;
+  gpuMemory: string;
+  specs: {
+    cpu: string;
+    memory: string;
+    storage: string;
+    network: string;
+    ethernet: string;
+    interconnect: string;
+    platform: string;
+    nodeCount: number;
+  };
+  pricing: TieredPricing;
+  location: string;
+  notes: string;
+  startsAt: string;
+  expiresAt: string;
+  sendEmail: boolean;
+}
+
+export interface EmailPreview {
+  to: string;
+  subject: string;
+  html: string;
+  quoteUrl: string;
+}
+
+export const EMPTY_QUOTE_FORM: QuoteFormData = {
+  customerName: "",
+  customerEmail: "",
+  customerCompany: "",
+  customerPhone: "",
+  gpuType: "",
+  gpuCount: 1,
+  gpuMemory: "",
+  specs: {
+    cpu: "",
+    memory: "",
+    storage: "",
+    network: "",
+    ethernet: "",
+    interconnect: "",
+    platform: "",
+    nodeCount: 1,
+  },
+  pricing: {},
+  location: "",
+  notes: "",
+  startsAt: "",
+  expiresAt: "",
+  sendEmail: true,
+};
+
+export const EMPTY_CLUSTER_FORM: ClusterFormData = {
+  name: "",
+  description: "",
+  image: "",
+  gpuType: "",
+  gpuCount: 1,
+  gpuMemory: "",
+  specs: {
+    cpu: "",
+    memory: "",
+    storage: "",
+    network: "",
+    ethernet: "",
+    interconnect: "",
+    platform: "",
+  },
+  pricing: {},
+  location: "",
+  region: "",
+  availability: "available",
+  featured: false,
+  sortOrder: 0,
+  highlights: [],
+};
 
 // Pool Settings types
 export interface PoolSettingsDefaults {

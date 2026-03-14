@@ -44,9 +44,7 @@ export function BlackwellModal({
         const found = (Array.isArray(products) ? products : []).find(
           (p: BlackwellProduct) =>
             p.billingType === "monthly" &&
-            p.stripePriceId &&
-            (p.name.toLowerCase().includes("blackwell") ||
-              p.name.toLowerCase().includes("rtx pro 6000"))
+            p.stripePriceId
         );
         setBlackwellProduct(found || null);
       } catch {

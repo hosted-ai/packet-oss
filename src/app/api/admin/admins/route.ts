@@ -3,9 +3,12 @@ import { verifySessionToken, getAdmins, addAdmin, removeAdmin, isAdmin, generate
 import { sendEmail } from "@/lib/email";
 import { logAdminAdded, logAdminRemoved, logAdminInviteResent, logAdminActivity } from "@/lib/admin-activity";
 import { resetAdminPin } from "@/lib/admin-pin";
+import { getBrandName } from "@/lib/branding";
 
-// Add admin emails that are allowed to reset other admins' PINs
-const PIN_RESET_ALLOWED_EMAILS: string[] = [];
+const PIN_RESET_ALLOWED_EMAILS = (process.env.PIN_RESET_ALLOWED_EMAILS || "")
+  .split(",")
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
 
 export async function GET(request: NextRequest) {
   // Verify admin session
@@ -20,7 +23,8 @@ export async function GET(request: NextRequest) {
   }
 
   const admins = getAdmins();
-  return NextResponse.json({ admins });
+  const canResetPin = PIN_RESET_ALLOWED_EMAILS.includes(session.email.toLowerCase());
+  return NextResponse.json({ admins, canResetPin });
 }
 
 export async function POST(request: NextRequest) {
@@ -54,7 +58,7 @@ export async function POST(request: NextRequest) {
 
     await sendEmail({
       to: email,
-      subject: "You've been invited as an admin - GPU Cloud",
+      subject: `You've been invited as an admin - ${getBrandName()}`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -64,10 +68,10 @@ export async function POST(request: NextRequest) {
           </head>
           <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="text-align: center; margin-bottom: 30px;">
-              <h1 style="color: #000; margin: 0;">GPU Cloud Admin</h1>
+              <h1 style="color: #000; margin: 0;">${getBrandName()} Admin</h1>
             </div>
 
-            <p>You've been invited to join the GPU Cloud admin dashboard by ${session.email}.</p>
+            <p>You've been invited to join the ${getBrandName()} admin dashboard by ${session.email}.</p>
 
             <p>Click the button below to accept the invitation and log in:</p>
 
@@ -83,7 +87,7 @@ export async function POST(request: NextRequest) {
           </body>
         </html>
       `,
-      text: `You've been invited to join the GPU Cloud admin dashboard by ${session.email}.\n\nClick the link below to accept the invitation:\n\n${loginUrl}\n\nThis link expires in 15 minutes.`,
+      text: `You've been invited to join the ${getBrandName()} admin dashboard by ${session.email}.\n\nClick the link below to accept the invitation:\n\n${loginUrl}\n\nThis link expires in 15 minutes.`,
     });
 
     console.log(`Admin invite sent by ${session.email} to ${email}`);
@@ -165,7 +169,7 @@ export async function PATCH(request: NextRequest) {
 
     await sendEmail({
       to: email,
-      subject: "You've been invited as an admin - GPU Cloud",
+      subject: `You've been invited as an admin - ${getBrandName()}`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -175,10 +179,10 @@ export async function PATCH(request: NextRequest) {
           </head>
           <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="text-align: center; margin-bottom: 30px;">
-              <h1 style="color: #000; margin: 0;">GPU Cloud Admin</h1>
+              <h1 style="color: #000; margin: 0;">${getBrandName()} Admin</h1>
             </div>
 
-            <p>You've been invited to join the GPU Cloud admin dashboard.</p>
+            <p>You've been invited to join the ${getBrandName()} admin dashboard.</p>
 
             <p>Click the button below to accept the invitation and log in:</p>
 
@@ -194,7 +198,7 @@ export async function PATCH(request: NextRequest) {
           </body>
         </html>
       `,
-      text: `You've been invited to join the GPU Cloud admin dashboard.\n\nClick the link below to accept the invitation:\n\n${loginUrl}\n\nThis link expires in 15 minutes.`,
+      text: `You've been invited to join the ${getBrandName()} admin dashboard.\n\nClick the link below to accept the invitation:\n\n${loginUrl}\n\nThis link expires in 15 minutes.`,
     });
 
     console.log(`Admin invite resent by ${session.email} to ${email}`);
@@ -209,7 +213,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-// PUT - Reset an admin's PIN (restricted to emails in PIN_RESET_ALLOWED_EMAILS)
+// PUT - Reset an admin's PIN (restricted to PIN_RESET_ALLOWED_EMAILS env var)
 export async function PUT(request: NextRequest) {
   const sessionToken = request.cookies.get("admin_session")?.value;
   if (!sessionToken) {

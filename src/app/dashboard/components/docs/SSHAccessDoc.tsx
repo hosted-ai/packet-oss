@@ -170,7 +170,7 @@ chmod 600 ~/.ssh/id_ed25519
 chmod 644 ~/.ssh/id_ed25519.pub`}</code></pre>
 
       <h2>Need Help?</h2>
-      <p>Contact us at <a href="mailto:support@example.com">support@example.com</a></p>
+      <p>Reach out via the <strong>Support</strong> tab in your dashboard.</p>
     </div>
   );
 }

@@ -12,7 +12,7 @@ python -m vllm.entrypoints.openai.api_server \
 ```
 
 ### Step 2: Expose in Dashboard
-1. Go to https://YOUR_DOMAIN/dashboard
+1. Go to https://packet.ai/dashboard
 2. Expand your GPU card
 3. Scroll to **"Exposed Services"**
 4. Click **"+ Expose Port"**
@@ -290,13 +290,13 @@ gunicorn app:app --bind 0.0.0.0:8080 --workers 4
 - **Full Documentation**: `/docs/service-exposure.md`
 - **Use Cases**: `/docs/service-exposure-use-cases.md`
 - **API Reference**: See "API Reference" section in main docs
-- **Support**: https://YOUR_DOMAIN/support
+- **Support**: https://packet.ai/support
 
 ---
 
 ## 🎓 3-Minute Video Tutorial
 
-**Coming soon**: Watch a live walkthrough at https://YOUR_DOMAIN/tutorials/service-exposure
+**Coming soon**: Watch a live walkthrough at https://packet.ai/tutorials/service-exposure
 
 ---
 

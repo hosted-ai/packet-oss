@@ -2,9 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
-import type { Stats, Customer, Admin, PricingConfig, AdminActivity, AdminTab } from "../types";
+import type { Stats, Customer, Admin, ClusterOffer, Quote, PricingConfig, AdminActivity, AdminTab } from "../types";
+import { PREMIUM_ADMIN_TABS, OSS_ONLY_ADMIN_TABS } from "../types";
+import { isPro, isOSS } from "@/lib/edition";
 
-const VALID_ADMIN_TABS: AdminTab[] = ["platform-settings", "customers", "admins", "investors", "referrals", "vouchers", "activity", "settings", "qa", "providers", "landing", "game", "products", "pods", "emails", "drip", "nodes", "pools", "business", "skypilot", "support", "node-revenue", "banners", "marketing", "uptime", "payouts"];
+const ALL_ADMIN_TABS: AdminTab[] = ["customers", "admins", "investors", "clusters", "quotes", "referrals", "vouchers", "activity", "settings", "calculator", "qa", "providers", "landing", "game", "products", "pods", "emails", "drip", "nodes", "pools", "business", "demand", "batches", "token-providers", "skypilot", "support", "spheron", "node-revenue", "banners", "marketing", "tenants", "pixel-factory", "uptime", "payouts", "platform-settings"];
+
+const VALID_ADMIN_TABS: AdminTab[] = ALL_ADMIN_TABS.filter((tab) => {
+  if (PREMIUM_ADMIN_TABS.has(tab)) return isPro();
+  if (OSS_ONLY_ADMIN_TABS.has(tab)) return isOSS();
+  return true;
+});
 
 export function useAdminData() {
   const router = useRouter();
@@ -22,6 +30,9 @@ export function useAdminData() {
   });
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [admins, setAdmins] = useState<Admin[]>([]);
+  const [canResetPin, setCanResetPin] = useState(false);
+  const [clusterOffers, setClusterOffers] = useState<ClusterOffer[]>([]);
+  const [quotes, setQuotes] = useState<Quote[]>([]);
   const [pricing, setPricing] = useState<PricingConfig | null>(null);
   const [activities, setActivities] = useState<AdminActivity[]>([]);
   const [activitiesLoading, setActivitiesLoading] = useState(false);
@@ -84,9 +95,11 @@ export function useAdminData() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [statsRes, adminsRes, pricingRes] = await Promise.all([
+      const [statsRes, adminsRes, clustersRes, quotesRes, pricingRes] = await Promise.all([
         fetch("/api/admin/stats"),
         fetch("/api/admin/admins"),
+        fetch("/api/admin/cluster-offers"),
+        fetch("/api/admin/quotes"),
         fetch("/api/admin/pricing"),
       ]);
 
@@ -96,6 +109,15 @@ export function useAdminData() {
       if (adminsRes.ok) {
         const data = await adminsRes.json();
         setAdmins(data.admins);
+        setCanResetPin(data.canResetPin ?? false);
+      }
+      if (clustersRes.ok) {
+        const data = await clustersRes.json();
+        setClusterOffers(data.offers || []);
+      }
+      if (quotesRes.ok) {
+        const data = await quotesRes.json();
+        setQuotes(data.quotes || []);
       }
       if (pricingRes.ok) {
         const data = await pricingRes.json();
@@ -210,6 +232,9 @@ export function useAdminData() {
     stats,
     customers,
     admins,
+    canResetPin,
+    clusterOffers,
+    quotes,
     pricing,
     activities,
     activitiesLoading,
@@ -224,6 +249,8 @@ export function useAdminData() {
     setSearch,
     setActiveTab,
     setCustomers,
+    setClusterOffers,
+    setQuotes,
     setPricing,
     loadData,
     loadCustomers,

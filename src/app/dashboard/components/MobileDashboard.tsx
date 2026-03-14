@@ -28,7 +28,7 @@ export function MobileHeader({ balance, userName, onMenuOpen, onTopUp }: MobileH
         <Link href="/" className="flex items-center gap-1.5">
           <Image
             src="/packet-logo.png"
-            alt="GPU Cloud"
+            alt="Logo"
             width={100}
             height={36}
             className="h-8 w-auto"
@@ -62,6 +62,11 @@ export function MobileNav({ activeTab, onTabChange, hasUnreadSupport }: MobileNa
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
       </svg>
     )},
+    { id: "tokenfactory", label: "Tokens", icon: (
+      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+      </svg>
+    )},
     { id: "billing", label: "Billing", icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
@@ -85,7 +90,7 @@ export function MobileNav({ activeTab, onTabChange, hasUnreadSupport }: MobileNa
       <div className="flex items-center justify-around py-2">
         {tabs.map((tab) => {
           const isActive = activeTab === tab.id ||
-            (tab.id === "more" && ["huggingface", "apps", "storage", "metrics", "support", "referrals", "team"].includes(activeTab));
+            (tab.id === "more" && ["huggingface", "apps", "storage", "metrics", "support", "referrals", "team", "baremetal"].includes(activeTab));
 
           return (
             <button
@@ -191,6 +196,12 @@ export function MobileMenuSheet({
               <span className="font-medium text-[var(--ink)]">Storage</span>
             </button>
 
+            <button onClick={() => handleTabClick("baremetal")} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-50 transition-colors">
+              <svg className="w-5 h-5 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+              </svg>
+              <span className="font-medium text-[var(--ink)]">Bare Metal</span>
+            </button>
 
             <button onClick={() => handleTabClick("metrics")} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-50 transition-colors">
               <svg className="w-5 h-5 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -214,7 +225,7 @@ export function MobileMenuSheet({
             <div className="my-4 border-t border-[var(--line)]" />
             <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider px-3 mb-2">Help</p>
 
-            <a href="https://example.com/docs" target="_blank" rel="noopener noreferrer" className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-50 transition-colors">
+            <a href="/dashboard?tab=docs" className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-50 transition-colors">
               <svg className="w-5 h-5 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
               </svg>
@@ -321,6 +332,14 @@ export function MobileMoreSheet({ isOpen, onClose, onTabChange, hasUnreadSupport
               <span className="text-xs font-medium text-[var(--ink)]">Storage</span>
             </button>
 
+            <button onClick={() => handleTabClick("baremetal")} className="flex flex-col items-center gap-2 p-4 rounded-2xl hover:bg-zinc-50 transition-colors">
+              <div className="w-10 h-10 bg-teal-100 rounded-xl flex items-center justify-center">
+                <svg className="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                </svg>
+              </div>
+              <span className="text-xs font-medium text-[var(--ink)]">Bare Metal</span>
+            </button>
 
             <button onClick={() => handleTabClick("metrics")} className="flex flex-col items-center gap-2 p-4 rounded-2xl hover:bg-zinc-50 transition-colors">
               <div className="w-10 h-10 bg-emerald-100 rounded-xl flex items-center justify-center">

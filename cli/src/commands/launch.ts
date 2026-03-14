@@ -14,14 +14,14 @@ export const launchCommand = new Command("launch")
   .option("-w, --wait", "Wait for instance to be ready")
   .action(async (options) => {
     if (!getApiKey()) {
-      console.log(chalk.yellow("\n  Not logged in. Run 'packet login' first.\n"));
+      console.log(chalk.yellow("\n  Not logged in. Run 'gpu-cloud login' first.\n"));
       process.exit(1);
     }
 
     if (!options.gpu) {
-      console.log(chalk.cyan("\n  Usage: packet launch --gpu <type> [--setup <preset>]\n"));
-      console.log(chalk.gray("  Run 'packet gpus' to see available GPU types."));
-      console.log(chalk.gray("  Run 'packet setup list' to see auto-setup presets.\n"));
+      console.log(chalk.cyan("\n  Usage: gpu-cloud launch --gpu <type> [--setup <preset>]\n"));
+      console.log(chalk.gray("  Run 'gpu-cloud gpus' to see available GPU types."));
+      console.log(chalk.gray("  Run 'gpu-cloud setup list' to see auto-setup presets.\n"));
       process.exit(1);
     }
 
@@ -33,7 +33,7 @@ export const launchCommand = new Command("launch")
         for (const p of SETUP_PRESETS) {
           console.log(chalk.gray(`    ${p.id.padEnd(15)} ${p.icon} ${p.name}`));
         }
-        console.log(chalk.gray("\n  Run 'packet setup list' for details.\n"));
+        console.log(chalk.gray("\n  Run 'gpu-cloud setup list' for details.\n"));
         process.exit(1);
       }
     }
@@ -52,7 +52,7 @@ export const launchCommand = new Command("launch")
 
       if (!product) {
         spinner.fail(`GPU type '${options.gpu}' not found`);
-        console.log(chalk.gray("\n  Run 'packet gpus' to see available types.\n"));
+        console.log(chalk.gray("\n  Run 'gpu-cloud gpus' to see available types.\n"));
         process.exit(1);
       }
 
@@ -153,7 +153,7 @@ export const launchCommand = new Command("launch")
 
               if (setupPreset) {
                 console.log(chalk.cyan(`\n  Auto-setup (${setupPreset.name}) is running in the background.`));
-                console.log(chalk.gray(`  Check progress: packet logs ${subId}`));
+                console.log(chalk.gray(`  Check progress: gpu-cloud logs ${subId}`));
                 if (setupPreset.defaultPort) {
                   console.log(chalk.gray(`  Service will be available on port ${setupPreset.defaultPort} when ready.`));
                 }
@@ -167,11 +167,11 @@ export const launchCommand = new Command("launch")
         }
 
         if (!ready) {
-          waitSpinner.warn("Instance is still starting. Check status with 'packet ps'");
+          waitSpinner.warn("Instance is still starting. Check status with 'gpu-cloud ps'");
         }
       } else {
         console.log(chalk.gray("\n  Use --wait to wait for SSH access"));
-        console.log(chalk.gray(`  Or run: packet ssh ${subId}`));
+        console.log(chalk.gray(`  Or run: gpu-cloud ssh ${subId}`));
       }
 
       console.log();

@@ -45,6 +45,9 @@ export interface ProviderDetails {
   commercialPhone: string | null;
   generalEmail: string | null;
   nodes: ProviderNode[];
+  // Token Factory revenue share (null = use default)
+  tokenRevenueSharePercent: number | null;
+  tokenRevenueShareDefault: number;
   stats: {
     totalNodes: number;
     activeNodes: number;
@@ -85,6 +88,8 @@ export function ProviderDetailsModal({
     estimatedGpuCount: provider.estimatedGpuCount?.toString() || "",
     gpuTypes: provider.gpuTypes.join(", "),
     regions: provider.regions.join(", "),
+    // Token Factory revenue share (empty = use default)
+    tokenRevenueSharePercent: provider.tokenRevenueSharePercent?.toString() || "",
   });
 
   const getStatusBadge = (status: string) => {
@@ -115,6 +120,10 @@ export function ProviderDetailsModal({
         estimatedGpuCount: editForm.estimatedGpuCount ? parseInt(editForm.estimatedGpuCount, 10) : null,
         gpuTypes: editForm.gpuTypes.split(",").map(s => s.trim()).filter(Boolean),
         regions: editForm.regions.split(",").map(s => s.trim()).filter(Boolean),
+        // Token Factory revenue share (empty string = use default/null)
+        tokenRevenueSharePercent: editForm.tokenRevenueSharePercent
+          ? parseFloat(editForm.tokenRevenueSharePercent)
+          : null,
       };
 
       const success = await onUpdate(provider.id, updates);
@@ -307,6 +316,29 @@ export function ProviderDetailsModal({
                 </div>
               </div>
 
+              <div>
+                <h3 className="text-sm font-semibold text-[#0b0f1c] mb-3">Token Factory Revenue</h3>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div>
+                    <label className="block text-xs text-[#5b6476] mb-1">
+                      Revenue Share % (leave empty for default: {provider.tokenRevenueShareDefault}%)
+                    </label>
+                    <input
+                      type="number"
+                      value={editForm.tokenRevenueSharePercent}
+                      onChange={(e) => setEditForm({ ...editForm, tokenRevenueSharePercent: e.target.value })}
+                      className="w-full px-3 py-2 border border-[#e4e7ef] rounded-lg text-sm"
+                      min="0"
+                      max="100"
+                      step="0.1"
+                      placeholder={`Default: ${provider.tokenRevenueShareDefault}%`}
+                    />
+                    <p className="text-xs text-[#5b6476] mt-1">
+                      The percentage of Token Factory token revenue this provider receives.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
           ) : (
             /* View Mode */

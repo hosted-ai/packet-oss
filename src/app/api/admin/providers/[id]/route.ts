@@ -7,6 +7,7 @@ import {
   sendProviderRejectedEmail,
 } from "@/lib/email/templates/provider";
 import { generateAdminLoginAsToken, generateProviderLoginToken } from "@/lib/auth/provider";
+import { getBrandName, getAppUrl } from "@/lib/branding";
 
 const updateProviderSchema = z.object({
   // Status changes
@@ -29,6 +30,8 @@ const updateProviderSchema = z.object({
   estimatedGpuCount: z.number().int().nullable().optional(),
   gpuTypes: z.array(z.string()).optional(),
   regions: z.array(z.string()).optional(),
+  // Token Factory revenue share
+  tokenRevenueSharePercent: z.number().min(0).max(100).nullable().optional(),
 });
 
 /**
@@ -83,6 +86,16 @@ export async function GET(
       );
     }
 
+    // Get Token Factory provider config (custom revenue share)
+    const inferenceProviderConfig = await prisma.inferenceProviderConfig.findUnique({
+      where: { providerId: id },
+    });
+
+    // Get global default revenue share
+    const globalConfig = await prisma.inferencePricingConfig.findUnique({
+      where: { id: "default" },
+    });
+
     // Calculate stats
     const activeNodes = provider.nodes.filter((n) => n.status === "active");
     const totalGpus = activeNodes.reduce((sum, n) => sum + (n.gpuCount || 0), 0);
@@ -100,6 +113,9 @@ export async function GET(
           ...provider,
           gpuTypes: provider.gpuTypes ? JSON.parse(provider.gpuTypes) : [],
           regions: provider.regions ? JSON.parse(provider.regions) : [],
+          // Token Factory revenue share (custom or null for default)
+          tokenRevenueSharePercent: inferenceProviderConfig?.revenueSharePercent ?? null,
+          tokenRevenueShareDefault: globalConfig?.tokenProviderRevenueSharePercent ?? 50,
         },
         stats: {
           totalNodes: provider.nodes.length,
@@ -192,7 +208,7 @@ export async function PUT(
 
         // Generate login URL and send approval email
         const loginToken = generateProviderLoginToken(provider.email);
-        const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://example.com";
+        const appUrl = getAppUrl();
         const loginUrl = `${appUrl}/providers/verify?token=${loginToken}`;
 
         await sendProviderApprovedEmail({
@@ -208,7 +224,7 @@ export async function PUT(
           data: {
             providerId: provider.id,
             type: "approval",
-            subject: "Your GPU Cloud Provider Application Has Been Approved",
+            subject: `Your ${getBrandName()} Provider Application Has Been Approved`,
           },
         });
       }
@@ -239,7 +255,7 @@ export async function PUT(
         data: {
           providerId: provider.id,
           type: "rejection",
-          subject: "Your GPU Cloud Provider Application Status",
+          subject: `Your ${getBrandName()} Provider Application Status`,
         },
       });
     }
@@ -249,6 +265,27 @@ export async function PUT(
       where: { id },
       data: updateData,
     });
+
+    // Handle Token Factory revenue share update
+    if (updates.tokenRevenueSharePercent !== undefined) {
+      if (updates.tokenRevenueSharePercent === null) {
+        // Remove custom config - use global default
+        await prisma.inferenceProviderConfig.deleteMany({
+          where: { providerId: id },
+        });
+      } else {
+        // Create or update custom revenue share
+        await prisma.inferenceProviderConfig.upsert({
+          where: { providerId: id },
+          update: { revenueSharePercent: updates.tokenRevenueSharePercent },
+          create: {
+            providerId: id,
+            revenueSharePercent: updates.tokenRevenueSharePercent,
+            createdBy: session.email,
+          },
+        });
+      }
+    }
 
     // Determine action type for logging
     let actionType = "edit_provider";

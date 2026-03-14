@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { sendContactEmail } from "@/lib/email";
 import { rateLimit, getClientIp } from "@/lib/ratelimit";
-import { syncContactLeadToPipedrive } from "@/lib/pipedrive";
+import { isPro } from "@/lib/edition";
 
 const contactSchema = z.object({
   name: z.string().trim().min(2, "Name is required (at least 2 characters)").max(200),
@@ -45,13 +45,17 @@ export async function POST(request: NextRequest) {
       message,
     });
 
-    // Sync lead to Pipedrive (async, don't block response)
-    syncContactLeadToPipedrive({
-      name,
-      email: email.toLowerCase(),
-      company,
-      message,
-    }).catch((err) => console.error("[Pipedrive] Contact sync failed:", err));
+    // Sync lead to Pipedrive (async, don't block response — Pro only)
+    if (isPro()) {
+      import("@/lib/pipedrive").then(({ syncContactLeadToPipedrive }) =>
+        syncContactLeadToPipedrive({
+          name,
+          email: email.toLowerCase(),
+          company,
+          message,
+        })
+      ).catch((err) => console.error("[Pipedrive] Contact sync failed:", err));
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

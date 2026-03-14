@@ -29,7 +29,7 @@ export function InferencePlaygroundDoc() {
 
       <h3>Accessing the Playground</h3>
       <ol>
-        <li>Navigate to your GPU Cloud Dashboard</li>
+        <li>Navigate to your dashboard</li>
         <li>Select a GPU instance with a deployed model</li>
         <li>Click the <strong>&quot;Playground&quot;</strong> tab</li>
         <li>The playground loads automatically with your model</li>
@@ -233,7 +233,7 @@ Assistant: For your Python-based stack, consider...`}</code>
       <h2>Need Help?</h2>
       <p>
         Contact us at{" "}
-        <a href="mailto:support@example.com">support@example.com</a>
+        our support team via the <strong>Support</strong> tab
       </p>
     </div>
   );

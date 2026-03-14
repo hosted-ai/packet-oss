@@ -1,14 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
 import { getStripe } from "@/lib/stripe";
-import { unsubscribeFromPool, getPoolSubscriptions } from "@/lib/hostedai";
+import { unsubscribeFromPool, getPoolSubscriptions, deleteInstance } from "@/lib/hostedai";
 import { logGPUTerminated } from "@/lib/activity";
 import { prisma } from "@/lib/prisma";
 import { sendGpuTerminatedEmail } from "@/lib/email";
 import { generateCustomerToken } from "@/lib/customer-auth";
 import { cacheCustomer } from "@/lib/customer-cache";
 import Stripe from "stripe";
-// Pricing now comes from PodMetadata.hourlyRateCents (set at deploy time from GpuProduct)
+
+// Check if the ID looks like an HAI 2.2 instance (i-{uuid}) vs numeric (legacy pool subscription)
+function isInstanceId(id: string): boolean {
+  return /^i-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
 
 // GET - Get pod metadata (display name, notes)
 export async function GET(
@@ -30,15 +34,16 @@ export async function GET(
       );
     }
 
-    const { id: subscriptionId } = await params;
+    const { id } = await params;
 
-    // Get metadata for this subscription
-    const metadata = await prisma.podMetadata.findUnique({
-      where: { subscriptionId },
-    });
+    // Look up by instanceId (HAI 2.2) or subscriptionId (legacy)
+    const metadata = isInstanceId(id)
+      ? await prisma.podMetadata.findFirst({ where: { instanceId: id } })
+      : await prisma.podMetadata.findUnique({ where: { subscriptionId: id } });
 
     return NextResponse.json({
-      subscriptionId,
+      subscriptionId: isInstanceId(id) ? metadata?.subscriptionId : id,
+      instanceId: isInstanceId(id) ? id : metadata?.instanceId,
       displayName: metadata?.displayName || null,
       notes: metadata?.notes || null,
     });
@@ -71,10 +76,9 @@ export async function PATCH(
       );
     }
 
-    const { id: subscriptionId } = await params;
+    const { id } = await params;
     const { displayName, notes } = await request.json();
 
-    // Validate input
     if (displayName !== undefined && typeof displayName !== "string") {
       return NextResponse.json(
         { error: "displayName must be a string" },
@@ -88,15 +92,35 @@ export async function PATCH(
       );
     }
 
-    // Upsert the metadata
+    // HAI 2.2: look up by instanceId, then upsert
+    if (isInstanceId(id)) {
+      const existing = await prisma.podMetadata.findFirst({ where: { instanceId: id } });
+      if (existing) {
+        const updated = await prisma.podMetadata.update({
+          where: { id: existing.id },
+          data: {
+            ...(displayName !== undefined && { displayName: displayName || null }),
+            ...(notes !== undefined && { notes: notes || null }),
+          },
+        });
+        return NextResponse.json({
+          success: true,
+          instanceId: id,
+          displayName: updated.displayName,
+          notes: updated.notes,
+        });
+      }
+    }
+
+    // Legacy: upsert by subscriptionId
     const metadata = await prisma.podMetadata.upsert({
-      where: { subscriptionId },
+      where: { subscriptionId: id },
       update: {
         ...(displayName !== undefined && { displayName: displayName || null }),
         ...(notes !== undefined && { notes: notes || null }),
       },
       create: {
-        subscriptionId,
+        subscriptionId: id,
         stripeCustomerId: payload.customerId,
         displayName: displayName || null,
         notes: notes || null,
@@ -105,7 +129,7 @@ export async function PATCH(
 
     return NextResponse.json({
       success: true,
-      subscriptionId,
+      subscriptionId: id,
       displayName: metadata.displayName,
       notes: metadata.notes,
     });
@@ -153,7 +177,94 @@ export async function DELETE(
       );
     }
 
-    const { id: subscriptionId } = await params;
+    const { id } = await params;
+
+    // === HAI 2.2: Unified instance deletion ===
+    if (isInstanceId(id)) {
+      console.log("[HAI 2.2] Deleting instance:", id);
+
+      // Get metadata for billing reconciliation
+      const podMetadata = await prisma.podMetadata.findFirst({
+        where: { instanceId: id },
+      });
+
+      const displayName = podMetadata?.displayName || undefined;
+
+      // Billing reconciliation for hourly instances
+      if (podMetadata?.prepaidUntil && podMetadata?.hourlyRateCents) {
+        try {
+          const now = new Date();
+          const prepaidUntil = new Date(podMetadata.prepaidUntil);
+          const hourlyRateCents = podMetadata.hourlyRateCents;
+          const billingIntervalMs = 30 * 60 * 1000;
+
+          if (now < prepaidUntil) {
+            const periodStartMs = prepaidUntil.getTime() - billingIntervalMs;
+            const usedMs = now.getTime() - periodStartMs;
+            const unusedMs = Math.max(0, billingIntervalMs - usedMs);
+            const unusedHours = unusedMs / (1000 * 60 * 60);
+            const creditBackCents = Math.round(unusedHours * hourlyRateCents);
+
+            if (creditBackCents > 0) {
+              const unusedMins = Math.round(unusedMs / 60000);
+              await stripe.customers.createBalanceTransaction(payload.customerId, {
+                amount: -creditBackCents,
+                currency: "usd",
+                description: `GPU early termination credit: ${unusedMins} mins unused`,
+                metadata: { instance_id: id },
+              });
+              console.log(`[Billing] Credited back $${(creditBackCents / 100).toFixed(2)} for early termination`);
+            }
+          } else {
+            const unbilledMs = now.getTime() - prepaidUntil.getTime();
+            const unbilledHours = unbilledMs / (1000 * 60 * 60);
+            if (unbilledHours > (1 / 60)) {
+              const finalChargeCents = Math.round(unbilledHours * hourlyRateCents);
+              if (finalChargeCents > 0) {
+                const unbilledMins = Math.round(unbilledHours * 60);
+                await stripe.customers.createBalanceTransaction(payload.customerId, {
+                  amount: finalChargeCents,
+                  currency: "usd",
+                  description: `GPU final usage: ${unbilledMins} mins after prepaid period`,
+                  metadata: { instance_id: id },
+                });
+                console.log(`[Billing] Charged $${(finalChargeCents / 100).toFixed(2)} for final unbilled usage`);
+              }
+            }
+          }
+        } catch (billingErr) {
+          console.error("[Billing] Error during reconciliation:", billingErr);
+        }
+      }
+
+      // Clean up PodMetadata
+      if (podMetadata) {
+        await prisma.podMetadata.delete({ where: { id: podMetadata.id } }).catch(() => {});
+      }
+
+      // Delete the instance via HAI 2.2 API
+      await deleteInstance(id);
+
+      await logGPUTerminated(payload.customerId, "GPU Instance", displayName, id);
+
+      try {
+        const dashboardToken = generateCustomerToken(payload.email.toLowerCase(), payload.customerId);
+        const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${dashboardToken}`;
+        await sendGpuTerminatedEmail({
+          to: customer.email!,
+          customerName: customer.name || customer.email!.split("@")[0],
+          poolName: displayName || "GPU Instance",
+          dashboardUrl,
+        });
+      } catch (emailErr) {
+        console.error("Failed to send GPU terminated email:", emailErr);
+      }
+
+      return NextResponse.json({ success: true, message: "Instance deleted successfully" });
+    }
+
+    // === Legacy: Pool subscription termination ===
+    const subscriptionId = id;
 
     // Get subscription info for logging
     let poolName = "GPU Pool";

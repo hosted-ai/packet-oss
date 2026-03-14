@@ -51,7 +51,7 @@ function TerminalContent() {
           port: String(data.port || 22),
           username: data.username,
           userpassword: data.password || "",
-          header: "GPU Cloud GPU Terminal",
+          header: "GPU Terminal",
           headerBackground: "#059669",
         };
 

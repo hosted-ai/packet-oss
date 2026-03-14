@@ -8,6 +8,7 @@
 import { sendEmail } from "./client";
 import { emailLayout, emailGreeting, emailText, emailWarningBox, emailButton, emailMuted, emailSignoff, plainTextFooter } from "./utils";
 import { getStripe } from "@/lib/stripe";
+import { getBrandName, getDashboardUrl } from "@/lib/branding";
 
 interface StorageAlertParams {
   subscriptionId: string;
@@ -57,7 +58,7 @@ export async function sendStorageAlert(params: StorageAlertParams): Promise<void
     <div style="background-color: #f7f8fb; border: 1px solid #e4e7ef; border-radius: 6px; padding: 12px; margin: 0 0 20px 0;">
       <code style="font-size: 13px; color: #0b0f1c;">du -sh /workspace/* | sort -rh | head -20</code>
     </div>
-    ${emailButton("Open Dashboard", `${process.env.NEXT_PUBLIC_APP_URL || "https://localhost:3000"}/dashboard`)}
+    ${emailButton("Open Dashboard", `${getDashboardUrl()}/dashboard`)}
     ${emailMuted("This is a one-time alert. You won't receive another for this instance.")}
     ${emailSignoff()}
   `;
@@ -73,11 +74,11 @@ When storage fills up, writes will fail — this can corrupt notebooks, break pi
 To free space, SSH into your instance and run:
   du -sh /workspace/* | sort -rh | head -20
 
-Dashboard: ${process.env.NEXT_PUBLIC_APP_URL || "https://localhost:3000"}/dashboard
+Dashboard: ${getDashboardUrl()}/dashboard
 
 This is a one-time alert for this instance.
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({ to: email, subject, html, text });

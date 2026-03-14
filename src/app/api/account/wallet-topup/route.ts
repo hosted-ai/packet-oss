@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken } from "@/lib/customer-auth";
+import { verifyCustomerToken, generateCustomerToken } from "@/lib/customer-auth";
 import { getStripe } from "@/lib/stripe";
 import { validateVoucher } from "@/lib/voucher";
 
@@ -79,6 +79,11 @@ export async function POST(request: NextRequest) {
       description += ` + $${(validatedVoucher.creditCents / 100).toFixed(0)} bonus`;
     }
 
+    // Generate a fresh token for the return URL so the user stays authenticated
+    // after Stripe redirects back (the dashboard requires ?token= in the URL).
+    // Use 2-hour expiry to allow time for checkout completion.
+    const returnToken = generateCustomerToken(payload.email, payload.customerId, 2);
+
     // Create checkout session for one-time payment
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
@@ -109,8 +114,8 @@ export async function POST(request: NextRequest) {
         customer_id: payload.customerId,
         voucher_code: validatedVoucher?.code || "",
       },
-      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?topup=success&amount=${amountCents}${validatedVoucher ? `&bonus=${validatedVoucher.creditCents}` : ""}${launchProductId ? `&launchProduct=${encodeURIComponent(launchProductId)}` : ""}`,
-      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?topup=canceled`,
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${returnToken}&topup=success&amount=${amountCents}${validatedVoucher ? `&bonus=${validatedVoucher.creditCents}` : ""}${launchProductId ? `&launchProduct=${encodeURIComponent(launchProductId)}` : ""}`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${returnToken}&topup=canceled`,
     });
 
     return NextResponse.json({

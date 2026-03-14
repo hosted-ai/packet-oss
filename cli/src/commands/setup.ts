@@ -34,18 +34,18 @@ if ! command -v code-server &> /dev/null; then
 fi
 pkill -f code-server 2>/dev/null || true
 sleep 1
-mkdir -p ~/.packet-logs
+mkdir -p ~/.gpu-cloud-logs
 echo "Starting code-server..."
-export PASSWORD=packet
-nohup code-server --bind-addr 0.0.0.0:8080 --auth password > ~/.packet-logs/code-server.log 2>&1 &
+export PASSWORD=gpu-cloud
+nohup code-server --bind-addr 0.0.0.0:8080 --auth password > ~/.gpu-cloud-logs/code-server.log 2>&1 &
 sleep 3
 if pgrep -f "code-server" > /dev/null; then
     echo "=== VS Code Ready ==="
     echo "Access at: http://<your-pod-ip>:8080"
-    echo "Password: packet"
+    echo "Password: gpu-cloud"
 else
     echo "ERROR: code-server failed to start"
-    cat ~/.packet-logs/code-server.log
+    cat ~/.gpu-cloud-logs/code-server.log
     exit 1
 fi`,
   },
@@ -65,19 +65,19 @@ pip install --quiet jupyterlab numpy pandas matplotlib seaborn scikit-learn
 pkill -f jupyter 2>/dev/null || true
 sleep 1
 mkdir -p /workspace 2>/dev/null || mkdir -p ~/workspace
-mkdir -p ~/.packet-logs
+mkdir -p ~/.gpu-cloud-logs
 WORKDIR="/workspace"
 [ -d "/workspace" ] || WORKDIR="$HOME/workspace"
 echo "Starting Jupyter Lab..."
-nohup $HOME/.local/bin/jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --NotebookApp.token='packet' --NotebookApp.password='' --notebook-dir="$WORKDIR" > ~/.packet-logs/jupyter.log 2>&1 &
+nohup $HOME/.local/bin/jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --NotebookApp.token='gpu-cloud' --NotebookApp.password='' --notebook-dir="$WORKDIR" > ~/.gpu-cloud-logs/jupyter.log 2>&1 &
 sleep 5
 if pgrep -f "jupyter-lab" > /dev/null || pgrep -f "jupyter lab" > /dev/null; then
     echo "=== Jupyter Lab Ready ==="
     echo "Access at: http://<your-pod-ip>:8888"
-    echo "Token: packet"
+    echo "Token: gpu-cloud"
 else
     echo "ERROR: Jupyter Lab failed to start"
-    cat ~/.packet-logs/jupyter.log
+    cat ~/.gpu-cloud-logs/jupyter.log
     exit 1
 fi`,
   },
@@ -98,19 +98,19 @@ pip install --quiet jupyterlab numpy pandas matplotlib seaborn scikit-learn tran
 pkill -f jupyter 2>/dev/null || true
 sleep 1
 mkdir -p /workspace 2>/dev/null || mkdir -p ~/workspace
-mkdir -p ~/.packet-logs
+mkdir -p ~/.gpu-cloud-logs
 WORKDIR="/workspace"
 [ -d "/workspace" ] || WORKDIR="$HOME/workspace"
 echo "Starting Jupyter Lab..."
-nohup $HOME/.local/bin/jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --NotebookApp.token='packet' --NotebookApp.password='' --notebook-dir="$WORKDIR" > ~/.packet-logs/jupyter.log 2>&1 &
+nohup $HOME/.local/bin/jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --NotebookApp.token='gpu-cloud' --NotebookApp.password='' --notebook-dir="$WORKDIR" > ~/.gpu-cloud-logs/jupyter.log 2>&1 &
 sleep 5
 if pgrep -f "jupyter-lab" > /dev/null || pgrep -f "jupyter lab" > /dev/null; then
     echo "=== Jupyter + PyTorch Ready ==="
     echo "Access at: http://<your-pod-ip>:8888"
-    echo "Token: packet"
+    echo "Token: gpu-cloud"
 else
     echo "ERROR: Jupyter Lab failed to start"
-    cat ~/.packet-logs/jupyter.log
+    cat ~/.gpu-cloud-logs/jupyter.log
     exit 1
 fi`,
   },
@@ -133,13 +133,13 @@ fi
 WORKSPACE_DIR="/workspace"
 [ -d "/workspace" ] || WORKSPACE_DIR="$HOME/workspace"
 mkdir -p "$WORKSPACE_DIR/home" 2>/dev/null || true
-if [ ! -f "$WORKSPACE_DIR/home/.packet-init" ]; then
+if [ ! -f "$WORKSPACE_DIR/home/.gpu-cloud-init" ]; then
     echo "First run - copying home directory to workspace..."
     cp -r $HOME/. "$WORKSPACE_DIR/home/" 2>/dev/null || true
-    touch "$WORKSPACE_DIR/home/.packet-init"
+    touch "$WORKSPACE_DIR/home/.gpu-cloud-init"
 fi
-if ! grep -q "packet-persist" ~/.bashrc 2>/dev/null; then
-    echo '# packet-persist marker' >> ~/.bashrc
+if ! grep -q "gpu-cloud-persist" ~/.bashrc 2>/dev/null; then
+    echo '# gpu-cloud-persist marker' >> ~/.bashrc
     echo "export PATH=\\"$WORKSPACE_DIR/bin:\\$PATH\\"" >> ~/.bashrc
     mkdir -p "$WORKSPACE_DIR/bin"
 fi
@@ -162,14 +162,14 @@ echo "Your files in /workspace persist across restarts"`,
 set -e
 echo "=== Setting up Full Development Environment ==="
 export PATH="$HOME/.local/bin:$PATH"
-mkdir -p ~/.packet-logs
+mkdir -p ~/.gpu-cloud-logs
 mkdir -p /workspace 2>/dev/null || mkdir -p ~/workspace
 echo "Step 1/3: Setting up persistent workspace..."
 if [ -d "/workspace" ]; then
     mkdir -p /workspace/home
-    if [ ! -f "/workspace/home/.packet-init" ]; then
+    if [ ! -f "/workspace/home/.gpu-cloud-init" ]; then
         cp -r $HOME/. /workspace/home/ 2>/dev/null || true
-        touch /workspace/home/.packet-init
+        touch /workspace/home/.gpu-cloud-init
     fi
 fi
 echo "Step 2/3: Installing VS Code..."
@@ -182,17 +182,17 @@ pkill -f code-server 2>/dev/null || true
 pkill -f jupyter 2>/dev/null || true
 sleep 1
 echo "Starting code-server..."
-export PASSWORD=packet
-nohup code-server --bind-addr 0.0.0.0:8080 --auth password > ~/.packet-logs/code-server.log 2>&1 &
+export PASSWORD=gpu-cloud
+nohup code-server --bind-addr 0.0.0.0:8080 --auth password > ~/.gpu-cloud-logs/code-server.log 2>&1 &
 WORKDIR="/workspace"
 [ -d "/workspace" ] || WORKDIR="$HOME/workspace"
 echo "Starting Jupyter Lab..."
-nohup $HOME/.local/bin/jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --NotebookApp.token='packet' --NotebookApp.password='' --notebook-dir="$WORKDIR" > ~/.packet-logs/jupyter.log 2>&1 &
+nohup $HOME/.local/bin/jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --NotebookApp.token='gpu-cloud' --NotebookApp.password='' --notebook-dir="$WORKDIR" > ~/.gpu-cloud-logs/jupyter.log 2>&1 &
 sleep 5
 echo ""
 echo "=== Full Dev Environment Ready ==="
-pgrep -f "code-server" > /dev/null && echo "VS Code:    http://<pod-ip>:8080  (password: packet)" || echo "VS Code:    FAILED"
-(pgrep -f "jupyter-lab" > /dev/null || pgrep -f "jupyter lab" > /dev/null) && echo "Jupyter:    http://<pod-ip>:8888  (token: packet)" || echo "Jupyter:    FAILED"`,
+pgrep -f "code-server" > /dev/null && echo "VS Code:    http://<pod-ip>:8080  (password: gpu-cloud)" || echo "VS Code:    FAILED"
+(pgrep -f "jupyter-lab" > /dev/null || pgrep -f "jupyter lab" > /dev/null) && echo "Jupyter:    http://<pod-ip>:8888  (token: gpu-cloud)" || echo "Jupyter:    FAILED"`,
   },
 ];
 
@@ -223,8 +223,8 @@ export const setupCommand = new Command("setup")
         }
 
         console.log(chalk.gray("  Usage:"));
-        console.log(chalk.gray("    packet launch --gpu rtx-pro-6000 --setup vscode   Launch with auto-setup"));
-        console.log(chalk.gray("    packet setup vscode <instance-id>                  Setup existing instance\n"));
+        console.log(chalk.gray("    gpu-cloud launch --gpu rtx-pro-6000 --setup vscode   Launch with auto-setup"));
+        console.log(chalk.gray("    gpu-cloud setup vscode <instance-id>                  Setup existing instance\n"));
       })
   )
   .action(async (preset, id) => {
@@ -235,20 +235,20 @@ export const setupCommand = new Command("setup")
     }
 
     if (!getApiKey()) {
-      console.log(chalk.yellow("\n  Not logged in. Run 'packet login' first.\n"));
+      console.log(chalk.yellow("\n  Not logged in. Run 'gpu-cloud login' first.\n"));
       process.exit(1);
     }
 
     if (!id) {
-      console.log(chalk.yellow(`\n  Please specify an instance ID: packet setup ${preset} <id>\n`));
-      console.log(chalk.gray("  Run 'packet ps' to see your instances.\n"));
+      console.log(chalk.yellow(`\n  Please specify an instance ID: gpu-cloud setup ${preset} <id>\n`));
+      console.log(chalk.gray("  Run 'gpu-cloud ps' to see your instances.\n"));
       process.exit(1);
     }
 
     const setupPreset = SETUP_PRESETS.find((p) => p.id === preset);
     if (!setupPreset) {
       console.log(chalk.red(`\n  Unknown preset: '${preset}'\n`));
-      console.log(chalk.gray("  Run 'packet setup list' to see available presets.\n"));
+      console.log(chalk.gray("  Run 'gpu-cloud setup list' to see available presets.\n"));
       process.exit(1);
     }
 
@@ -264,7 +264,7 @@ export const setupCommand = new Command("setup")
       const pod = connInfo.pods?.find((p) => p.pod_status === "Running" && p.ssh);
       if (!pod?.ssh) {
         spinner.fail("Instance not ready for SSH");
-        console.log(chalk.gray("\n  The instance must be running. Check: packet ps\n"));
+        console.log(chalk.gray("\n  The instance must be running. Check: gpu-cloud ps\n"));
         process.exit(1);
       }
 
@@ -331,7 +331,7 @@ export const setupCommand = new Command("setup")
       if (setupPreset.portsToExpose && setupPreset.portsToExpose.length > 0) {
         console.log(chalk.cyan("\n  Services:"));
         for (const p of setupPreset.portsToExpose) {
-          const cred = p.name === "vscode" ? "password: packet" : "token: packet";
+          const cred = p.name === "vscode" ? "password: gpu-cloud" : "token: gpu-cloud";
           console.log(chalk.gray(`    ${p.name.padEnd(10)} port ${p.port}  (${cred})`));
         }
       }

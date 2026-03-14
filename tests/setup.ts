@@ -4,7 +4,7 @@ import '@testing-library/jest-dom/vitest';
 // Mock environment variables
 process.env.ADMIN_JWT_SECRET = 'test-admin-jwt-secret-key-for-testing';
 process.env.CUSTOMER_JWT_SECRET = 'test-customer-jwt-secret-key-for-testing';
-process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test_db';
+process.env.DATABASE_URL = 'mysql://test:test@localhost:3306/packetai_test';
 process.env.STRIPE_SECRET_KEY = 'sk_test_123456789';
 process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_123456789';
 process.env.NEXT_PUBLIC_API_URL = 'http://localhost:3000';

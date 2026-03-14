@@ -1,14 +1,4 @@
-import { PrismaClient } from "@prisma/client";
-
-// Lazy initialization to avoid build-time connection issues
-let prisma: PrismaClient | null = null;
-
-function getPrisma(): PrismaClient {
-  if (!prisma) {
-    prisma = new PrismaClient();
-  }
-  return prisma;
-}
+import { prisma } from "@/lib/prisma";
 
 // Admin activity event types
 export type AdminActivityType =
@@ -57,8 +47,7 @@ export async function logAdminActivity(
   metadata?: Record<string, unknown>
 ): Promise<AdminActivity> {
   try {
-    const db = getPrisma();
-    const event = await db.adminActivityEvent.create({
+    const event = await prisma.adminActivityEvent.create({
       data: {
         adminEmail,
         type,
@@ -94,8 +83,7 @@ export async function getAdminActivities(
   limit: number = 100
 ): Promise<AdminActivity[]> {
   try {
-    const db = getPrisma();
-    const events = await db.adminActivityEvent.findMany({
+    const events = await prisma.adminActivityEvent.findMany({
       orderBy: { createdAt: "desc" },
       take: limit,
     });

@@ -8,7 +8,7 @@ import {
 } from "@/lib/email/templates/midnight-status";
 import type { CustomerCache } from "@prisma/client";
 
-const STATUS_EMAIL_TO = process.env.STATUS_EMAIL_TO || process.env.ADMIN_BCC_EMAIL || "";
+const STATUS_EMAIL_TO = "partners@hosted.ai";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -84,6 +84,15 @@ async function collectSnapshot(
     where: { status: { in: ["active", "approved"] } },
   });
 
+  // Token Factory inference requests
+  const tokenInferenceRequests = await prisma.inferenceUsage.count({
+    where: { createdAt: { gte: dayStart, lte: dayEnd } },
+  });
+  const tokenUsageAgg = await prisma.inferenceUsage.aggregate({
+    where: { createdAt: { gte: dayStart, lte: dayEnd } },
+    _sum: { inputTokens: true, outputTokens: true },
+  });
+
   // Voucher redemptions
   const voucherRedemptions = await prisma.voucherRedemption.count({
     where: { createdAt: { gte: dayStart, lte: dayEnd } },
@@ -105,6 +114,9 @@ async function collectSnapshot(
     walletBalanceCents,
     activeProviders,
     activeNodes,
+    tokenInferenceRequests,
+    tokenInputTokens: Number(tokenUsageAgg._sum.inputTokens ?? 0),
+    tokenOutputTokens: Number(tokenUsageAgg._sum.outputTokens ?? 0),
     voucherRedemptions,
     referralClaims,
   };
@@ -138,7 +150,7 @@ async function calculateMRR(
  * POST /api/cron/midnight-status-email
  *
  * Collects daily KPIs, compares to the same day last week,
- * includes 7-day trend history, and emails the report to STATUS_EMAIL_TO.
+ * includes 7-day trend history, and emails the report to partners@hosted.ai.
  *
  * Authentication: Requires CRON_SECRET header or Authorization bearer token.
  * Schedule: Run at midnight UTC daily via external cron (e.g. Vercel Cron, GitHub Actions).
@@ -147,10 +159,6 @@ export async function POST(request: NextRequest) {
   try {
     const authError = verifyCronAuth(request);
     if (authError) return authError;
-
-    if (!STATUS_EMAIL_TO) {
-      return NextResponse.json({ skipped: true, reason: "STATUS_EMAIL_TO not configured" });
-    }
 
     console.log("[Midnight Status] Starting daily status email generation...");
 

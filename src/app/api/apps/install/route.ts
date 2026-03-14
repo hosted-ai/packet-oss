@@ -31,6 +31,7 @@ async function executeSSHCommandWithPassword(
   validateSSHParams({ host, port, username });
 
   return new Promise((resolve) => {
+    // Pass script via stdin ("bash -s") to avoid script text in SSH command line
     const args = [
       "-e",
       "ssh",
@@ -38,9 +39,12 @@ async function executeSSHCommandWithPassword(
       "-o", "UserKnownHostsFile=/dev/null",
       "-o", "LogLevel=ERROR",
       "-o", "ConnectTimeout=10",
+      "-o", "ServerAliveInterval=15",
+      "-o", "ServerAliveCountMax=20",
+      "-o", "TCPKeepAlive=yes",
       "-p", String(port),
       `${username}@${host}`,
-      command,
+      "bash -s",
     ];
 
     let stdout = "";
@@ -51,6 +55,10 @@ async function executeSSHCommandWithPassword(
       timeout: timeoutMs,
       env: { ...process.env, SSHPASS: password },
     });
+
+    // Write the script to stdin
+    proc.stdin.write(command);
+    proc.stdin.end();
 
     proc.stdout.on("data", (data) => {
       stdout += data.toString();
@@ -267,6 +275,9 @@ export async function POST(request: NextRequest) {
   // Start installation in background
   (async () => {
     try {
+      console.log(`[AppInstall] Starting ${appSlug} on ${host}:${port} (sub: ${subscriptionId})`);
+      console.log(`[AppInstall] Script length: ${app.installScript.length} chars`);
+
       // Update progress
       await prisma.installedApp.update({
         where: { id: installation.id },
@@ -275,6 +286,7 @@ export async function POST(request: NextRequest) {
 
       // Step 1: Get or create server SSH key
       const { publicKey, privateKeyPath } = await getOrCreateServerSSHKey();
+      console.log(`[AppInstall] SSH key ready, injecting into pod...`);
 
       await prisma.installedApp.update({
         where: { id: installation.id },
@@ -285,7 +297,7 @@ export async function POST(request: NextRequest) {
       const keyInjection = await injectSSHKey(host, port, username, password, publicKey);
       if (!keyInjection.success) {
         // Fall back to password-based install if key injection fails
-        console.warn(`Key injection failed, falling back to password auth: ${keyInjection.error}`);
+        console.warn(`[AppInstall] Key injection failed, falling back to password auth: ${keyInjection.error}`);
         await prisma.installedApp.update({
           where: { id: installation.id },
           data: { installProgress: 15, installOutput: "Connecting to pod (fallback mode)..." },
@@ -300,6 +312,8 @@ export async function POST(request: NextRequest) {
           app.installScript,
           app.estimatedInstallMin * 60 * 1000 * 2
         );
+
+        console.log(`[AppInstall] Password-auth result: exit=${result.exitCode}, output=${result.output.slice(0, 500)}`);
 
         if (result.success) {
           const portMatch = result.output.match(/PORT=(\d+)/);
@@ -330,6 +344,7 @@ export async function POST(request: NextRequest) {
         return;
       }
 
+      console.log(`[AppInstall] Key injected, running install script via key auth...`);
       await prisma.installedApp.update({
         where: { id: installation.id },
         data: { installProgress: 20, installOutput: "Running install script..." },
@@ -344,6 +359,8 @@ export async function POST(request: NextRequest) {
         app.installScript,
         app.estimatedInstallMin * 60 * 1000 * 2 // Double the estimate for safety
       );
+
+      console.log(`[AppInstall] Key-auth result: exit=${result.exitCode}, output=${result.output.slice(0, 500)}`);
 
       if (result.success) {
         // Parse output for port info
@@ -373,6 +390,7 @@ export async function POST(request: NextRequest) {
         });
       }
     } catch (error) {
+      console.error(`[AppInstall] Exception:`, error);
       await prisma.installedApp.update({
         where: { id: installation.id },
         data: {

@@ -1,7 +1,7 @@
 /**
  * GPUaaS Admin API
  *
- * Client library for the admin-console.example.com API.
+ * Client library for the GPUaaS admin API.
  * Used to manage GPU infrastructure for service providers.
  *
  * @example

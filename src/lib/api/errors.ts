@@ -1,7 +1,5 @@
 // API Error Codes and Handlers
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-
 export const ErrorCodes = {
   // Authentication
   INVALID_API_KEY: "INVALID_API_KEY",
@@ -46,20 +44,20 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 
-  static invalidApiKey(message = `Invalid API key. Please check your API key at ${APP_URL}/dashboard and ensure you're using the correct key format (pk_live_xxx).`) {
+  static invalidApiKey(message = `Invalid API key. Please check your API key at ${process.env.NEXT_PUBLIC_APP_URL || ""}/dashboard and ensure you're using the correct key format (pk_live_xxx).`) {
     return new ApiError(ErrorCodes.INVALID_API_KEY, message, 401);
   }
 
   static expiredApiKey() {
-    return new ApiError(ErrorCodes.EXPIRED_API_KEY, `API key has expired. Please generate a new key at ${APP_URL}/dashboard`, 401);
+    return new ApiError(ErrorCodes.EXPIRED_API_KEY, `API key has expired. Please generate a new key at ${process.env.NEXT_PUBLIC_APP_URL || ""}/dashboard`, 401);
   }
 
   static revokedApiKey() {
-    return new ApiError(ErrorCodes.REVOKED_API_KEY, `API key has been revoked. Please generate a new key at ${APP_URL}/dashboard`, 401);
+    return new ApiError(ErrorCodes.REVOKED_API_KEY, `API key has been revoked. Please generate a new key at ${process.env.NEXT_PUBLIC_APP_URL || ""}/dashboard`, 401);
   }
 
   static missingApiKey() {
-    return new ApiError(ErrorCodes.MISSING_API_KEY, `API key is required. Add 'Authorization: Bearer pk_live_xxx' header. Get your key at ${APP_URL}/dashboard`, 401);
+    return new ApiError(ErrorCodes.MISSING_API_KEY, `API key is required. Add 'Authorization: Bearer pk_live_xxx' header. Get your key at ${process.env.NEXT_PUBLIC_APP_URL || ""}/dashboard`, 401);
   }
 
   static insufficientScope(required: string) {

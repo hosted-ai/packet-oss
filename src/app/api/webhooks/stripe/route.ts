@@ -13,13 +13,14 @@ import {
 } from "@/lib/hostedai";
 import { sendWelcomeEmail } from "@/lib/email";
 import { generateCustomerToken } from "@/lib/customer-auth";
-import { syncCustomerToPipedrive } from "@/lib/pipedrive";
+import { isPro } from "@/lib/edition";
 import { checkAndProcessReferralQualification } from "@/lib/referral";
 import { recordFirstDeposit, recordSubscription, recordChurn, recordReactivation, addSpend } from "@/lib/lifecycle";
 import { processVoucherRedemption } from "@/lib/voucher";
 import { sendOnboardingEvent } from "@/lib/email/onboarding-events";
 import { prisma } from "@/lib/prisma";
 import { cacheCustomer } from "@/lib/customer-cache";
+import { getBrandName } from "@/lib/branding";
 import Stripe from "stripe";
 import crypto from "crypto";
 
@@ -322,6 +323,7 @@ async function handleWalletTopup(
   }
 
   console.log(`Processing wallet top-up for ${customerId}: $${amountTotal / 100}${voucherCode ? ` (voucher: ${voucherCode})` : ""}`);
+  console.log("Session metadata:", JSON.stringify(session.metadata));
 
   // IDEMPOTENCY CHECK: Verify no balance transaction already exists for this session
   const existingTxn = await hasExistingBalanceTransaction(stripe, customerId, session.id);
@@ -377,8 +379,8 @@ async function handleWalletTopup(
       }
     }
   } catch (upgradeErr) {
-    console.error(`[Webhook] Failed to upgrade billing_type for ${customerId}:`, upgradeErr);
-    // Non-fatal - customer has their credit, billing_type can be fixed manually
+    console.error(`[Webhook] Failed to upgrade/provision for ${customerId}:`, upgradeErr);
+    // Non-fatal - customer has their credit, billing_type/team can be fixed manually
   }
 
   // Process voucher code if one was applied
@@ -462,8 +464,14 @@ async function handleCheckoutCompleted(
   const productId = session.metadata?.gpu_product_id || session.metadata?.packet_product_id;
   const billingType = session.metadata?.billing_type || "hourly";
 
+  console.log("=== STRIPE CHECKOUT COMPLETED ===");
+  console.log(`Session ID: ${session.id}`);
+  console.log(`Customer Email: ${customerEmail}`);
+  console.log(`Product ID: ${productId}`);
+  console.log(`Billing Type: ${billingType}`);
+
   if (!customerEmail) {
-    console.error("Missing customer email in checkout session");
+    console.error("❌ FATAL: Missing customer email");
     throw new Error("Missing required checkout session data");
   }
 
@@ -479,6 +487,8 @@ async function handleCheckoutCompleted(
   // Use original deposit if available (includes voucher), otherwise use amount paid
   let depositAmount = originalDepositCents > 0 ? originalDepositCents : (amountPaid || 10000);
 
+  console.log(`Payment breakdown: paid=$${amountPaid / 100}, voucher=$${voucherCreditCents / 100}, total credit=$${depositAmount / 100}`);
+
   // Try to fetch product from database if we have an ID
   if (productId) {
     try {
@@ -487,12 +497,15 @@ async function handleCheckoutCompleted(
       });
       if (dbProduct) {
         productName = dbProduct.name;
-        console.log(`Product found in database: ${productName}`);
+        console.log(`✅ Product found in database: ${productName}`);
       }
     } catch (err) {
       console.log(`Product lookup failed, using metadata name: ${productName}`);
     }
   }
+
+  console.log(`✅ Product: ${productName} (${billingType})`);
+  console.log(`Policy IDs: Using DEFAULT_POLICIES`);
 
   // Get customer name from Stripe checkout session (billing details)
   // Fall back to email prefix if name not provided
@@ -506,10 +519,13 @@ async function handleCheckoutCompleted(
   // Keep full name for display/onboarding
   const displayName = rawName.trim();
 
+  console.log(`Customer name: ${customerName} (display: ${displayName})`);
+
   // For payment mode (hourly), session.customer may be null - find or create customer
   let customerId = session.customer as string | null;
 
   if (!customerId) {
+    console.log("No customer ID in session, searching/creating Stripe customer...");
     // Check if customer already exists
     const existingCustomers = await stripe.customers.list({
       email: customerEmail,
@@ -518,19 +534,19 @@ async function handleCheckoutCompleted(
 
     if (existingCustomers.data.length > 0) {
       customerId = existingCustomers.data[0].id;
-      console.log(`Found existing customer: ${customerId}`);
+      console.log(`✅ Found existing customer: ${customerId}`);
     } else {
       // Create new customer
       const newCustomer = await stripe.customers.create({
         email: customerEmail,
         name: customerName,
         metadata: {
-          source: "gpu-cloud",
+          source: getBrandName(),
         },
       });
       cacheCustomer(newCustomer).catch(() => {});
       customerId = newCustomer.id;
-      console.log(`Created new customer: ${customerId}`);
+      console.log(`✅ Created new customer: ${customerId}`);
     }
 
     // Attach the payment method from checkout for future auto-refills
@@ -549,11 +565,11 @@ async function handleCheckoutCompleted(
           },
         });
         cacheCustomer(updatedWithPM as Stripe.Customer).catch(() => {});
-        console.log(`Attached payment method to customer ${customerId}`);
+        console.log(`✅ Attached payment method to customer ${customerId}`);
       }
     }
   } else {
-    console.log(`Using existing customer: ${customerId}`);
+    console.log(`✅ Using existing customer: ${customerId}`);
   }
 
   // Monthly subscriptions skip wallet entirely — they are recurring Stripe subscriptions
@@ -597,7 +613,7 @@ async function handleCheckoutCompleted(
             billing_type: "monthly",
             primary_stripe_customer_id: primaryCustomer.id,
             gpu_product_id: productId || "",
-            source: "gpu-cloud",
+            source: getBrandName(),
           },
         });
         cacheCustomer(updatedMonthly as Stripe.Customer).catch(() => {});
@@ -636,14 +652,18 @@ async function handleCheckoutCompleted(
           console.error("Failed to send monthly welcome email (non-fatal):", emailError);
         }
 
-        // Sync to Pipedrive
-        syncCustomerToPipedrive({
-          name: displayName,
-          email: customerEmail,
-          productName: productName,
-          billingType: "monthly",
-          stripeCustomerId: customerId,
-        }).catch((err) => console.error("[Pipedrive] Monthly customer sync failed:", err));
+        // Sync to Pipedrive (Pro only)
+        if (isPro()) {
+          import("@/lib/pipedrive").then(({ syncCustomerToPipedrive }) =>
+            syncCustomerToPipedrive({
+              name: displayName,
+              email: customerEmail,
+              productName: productName,
+              billingType: "monthly",
+              stripeCustomerId: customerId,
+            })
+          ).catch((err) => console.error("[Pipedrive] Monthly customer sync failed:", err));
+        }
 
         // Track lifecycle milestone (subscription)
         recordSubscription(primaryCustomer.id).catch(() => {});
@@ -663,7 +683,7 @@ async function handleCheckoutCompleted(
           },
         });
 
-        console.log(`Monthly subscription linked: ${customerEmail} -> Primary ${primaryCustomer.id}, Monthly ${customerId}, Team ${existingTeamId}`);
+        console.log(`=== MONTHLY SUBSCRIPTION LINKED: ${customerEmail} -> Primary ${primaryCustomer.id}, Monthly ${customerId}, Team ${existingTeamId} ===`);
         return; // Skip the normal team creation below — we reused the existing team
       }
     } catch (linkError) {
@@ -691,7 +711,7 @@ async function handleCheckoutCompleted(
           checkout_session_id: session.id,
         },
       });
-      console.log(`Added $${depositAmount / 100} credit to customer ${customerId}`);
+      console.log(`✅ Added $${depositAmount / 100} credit to customer ${customerId}`);
 
       // Mark event as processed AFTER successful balance transaction
       await markEventProcessed(eventId, "checkout.session.completed", session.id, customerId);
@@ -731,10 +751,10 @@ async function handleCheckoutCompleted(
               data: { redemptionCount: { increment: 1 } },
             }),
           ]);
-          console.log(`Recorded voucher redemption: ${voucherCode} for $${voucherCreditCents / 100}`);
+          console.log(`✅ Recorded voucher redemption: ${voucherCode} for $${voucherCreditCents / 100}`);
         }
       } catch (voucherError) {
-        console.error("Failed to record voucher redemption (non-fatal):", voucherError);
+        console.error("❌ WARNING: Failed to record voucher redemption (non-fatal):", voucherError);
       }
     }
 
@@ -757,13 +777,15 @@ async function handleCheckoutCompleted(
   const generatedPassword = generateSecurePassword();
 
   const teamName = `${customerName}-${billingType}-${Date.now()}`;
+  console.log(`Team name: ${teamName}`);
 
+  console.log("=== CREATING HOSTED.AI TEAM ===");
   let team: { id: string; name: string };
 
   try {
     team = await createTeam({
       name: teamName,
-      description: `GPU Cloud - ${productName} (${billingType})`,
+      description: `${getBrandName()} - ${productName} (${billingType})`,
       color: "#6366F1", // Must be UPPERCASE hex
       members: [
         {
@@ -782,25 +804,34 @@ async function handleCheckoutCompleted(
       image_policy_id: DEFAULT_POLICIES.image,
     });
 
-    console.log(`SUCCESS: Created team ${team.id} (${team.name}) with user ${customerEmail}`);
+    console.log(`✅ SUCCESS: Created team ${team.id} (${team.name}) with user ${customerEmail}`);
 
     // CRITICAL: Add team to resource policy's teams array
     // Without this, the team cannot access GPU pools (error: "unable to retrieve resource access permissions")
     try {
       await syncTeamsToDefaultPolicy([team.id]);
-      console.log(`Added team ${team.id} to default resource policy`);
+      console.log(`✅ Added team ${team.id} to default resource policy`);
     } catch (policyError) {
-      console.error(`Failed to add team to resource policy:`, policyError);
+      console.error(`⚠️ WARNING: Failed to add team to resource policy:`, policyError);
       // Don't throw - team is created, they just might have access issues until manually fixed
     }
   } catch (error) {
-    console.error("Failed to create hosted.ai team:", error instanceof Error ? error.message : String(error));
+    console.error("❌ FATAL: Failed to create hosted.ai team");
+    console.error("Error details:", error);
+    console.error("Error message:", error instanceof Error ? error.message : String(error));
+    console.error("Team creation params:", {
+      name: teamName,
+      email: customerEmail,
+      role: ROLES.teamAdmin,
+      policies: DEFAULT_POLICIES,
+    });
     throw new Error(`Failed to create hosted.ai team: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // Create one-time login token for hosted.ai with team context
   // User is already pre-onboarded during team creation (password + pre_onboard: true)
   // So OTL should NOT include user_details - this makes shouldOnboard=false
+  console.log("=== CREATING ONE-TIME LOGIN ===");
   try {
     const otl = await createOneTimeLogin({
       email: customerEmail,
@@ -810,9 +841,9 @@ async function handleCheckoutCompleted(
       // NO preOnboard/userName/password - user is already onboarded via team creation
     });
 
-    console.log(`Created OTL for ${customerEmail}: ${otl.url}`);
+    console.log(`✅ Created OTL for ${customerEmail}: ${otl.url}`);
   } catch (error) {
-    console.error("Failed to create OTL (non-fatal):", error);
+    console.error("❌ WARNING: Failed to create OTL (non-fatal):", error);
     // Don't throw - OTL is optional, user can still log in with password
   }
 
@@ -820,7 +851,10 @@ async function handleCheckoutCompleted(
   const token = generateCustomerToken(customerEmail.toLowerCase(), customerId);
   const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${token}`;
 
+  console.log(`Dashboard URL: ${dashboardUrl.split("?")[0]}?token=***`);
+
   // Send welcome email with dashboard link
+  console.log("=== SENDING WELCOME EMAIL ===");
   try {
     await sendWelcomeEmail({
       to: customerEmail,
@@ -830,13 +864,14 @@ async function handleCheckoutCompleted(
       walletBalance: billingType !== "monthly" && depositAmount > 0 ? `$${(depositAmount / 100).toFixed(0)}` : undefined,
     });
 
-    console.log(`Sent welcome email to ${customerEmail}`);
+    console.log(`✅ Sent welcome email to ${customerEmail}`);
   } catch (error) {
-    console.error("Failed to send welcome email (non-fatal):", error);
+    console.error("❌ WARNING: Failed to send welcome email (non-fatal):", error);
     // Don't throw - email failure shouldn't stop provisioning
   }
 
   // Store team_id and billing type in Stripe customer metadata
+  console.log("=== UPDATING STRIPE CUSTOMER METADATA ===");
   try {
     const updatedWithTeam = await stripe.customers.update(customerId, {
       metadata: {
@@ -847,9 +882,9 @@ async function handleCheckoutCompleted(
     });
     cacheCustomer(updatedWithTeam as Stripe.Customer).catch(() => {});
 
-    console.log(`Updated Stripe customer ${customerId} metadata with team ID ${team.id}`);
+    console.log(`✅ Updated Stripe customer ${customerId} metadata with team ID ${team.id}`);
   } catch (error) {
-    console.error("Failed to update Stripe metadata (non-fatal):", error);
+    console.error("❌ WARNING: Failed to update Stripe metadata (non-fatal):", error);
     // Don't throw - metadata update failure shouldn't stop provisioning
   }
 
@@ -860,16 +895,21 @@ async function handleCheckoutCompleted(
     recordFirstDeposit(customerId, depositAmount).catch(() => {});
   }
 
-  console.log(`Provisioning complete: ${customerEmail} (${customerId}) -> Team ${team.id}`);
+  console.log("=== PROVISIONING COMPLETE ===");
+  console.log(`Summary: Customer ${customerEmail} (${customerId}) -> Team ${team.id}`);
 
-  // Sync customer to Pipedrive (async, don't block webhook response)
-  syncCustomerToPipedrive({
-    name: displayName,
-    email: customerEmail,
-    productName: productName,
-    billingType,
-    stripeCustomerId: customerId,
-  }).catch((err) => console.error("[Pipedrive] Customer sync failed:", err));
+  // Sync customer to Pipedrive (async, don't block webhook response — Pro only)
+  if (isPro()) {
+    import("@/lib/pipedrive").then(({ syncCustomerToPipedrive }) =>
+      syncCustomerToPipedrive({
+        name: displayName,
+        email: customerEmail,
+        productName: productName,
+        billingType,
+        stripeCustomerId: customerId,
+      })
+    ).catch((err) => console.error("[Pipedrive] Customer sync failed:", err));
+  }
 }
 
 async function handleSubscriptionCanceled(

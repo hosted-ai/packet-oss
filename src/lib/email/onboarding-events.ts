@@ -1,7 +1,7 @@
 /**
  * Onboarding Event Emails
  *
- * Sends structured notification emails to ONBOARDING_EMAIL whenever
+ * Sends structured notification emails to onboarding@hosted.ai whenever
  * key customer events happen (signup, subscription, topup, GPU launch,
  * support ticket). This gives the AI support system real-time context.
  *
@@ -10,7 +10,7 @@
 
 import { sendEmailDirect } from "./client";
 
-const ONBOARDING_EMAIL = process.env.ONBOARDING_EMAIL || process.env.ADMIN_BCC_EMAIL || "";
+const ONBOARDING_EMAIL = "onboarding@hosted.ai";
 
 interface OnboardingEvent {
   type: string;
@@ -81,7 +81,6 @@ function buildPlainText(event: OnboardingEvent): string {
  * Send an onboarding event email. Safe to call from anywhere — never throws.
  */
 export function sendOnboardingEvent(event: OnboardingEvent): void {
-  if (!ONBOARDING_EMAIL) return; // Skip if no onboarding email configured
   sendEmailDirect({
     to: ONBOARDING_EMAIL,
     subject: `[${event.type}] ${event.email}`,

@@ -3,6 +3,13 @@
 import { useState, useEffect } from "react";
 import { Plus, Pencil, Trash2, Check, X, GripVertical, Loader2, HardDrive, RefreshCw } from "lucide-react";
 import type { GpuProduct } from "../types";
+import { isPro } from "@/lib/edition";
+import dynamic from "next/dynamic";
+
+// Token Factory pricing is a premium feature — excluded in OSS build
+const TokenFactoryPricingSection = isPro()
+  ? dynamic(() => import("./TokenFactoryPricingSection").then(m => ({ default: m.TokenFactoryPricingSection })))
+  : () => null;
 
 interface Pool {
   id: number;
@@ -529,6 +536,9 @@ export function ProductsTab() {
           </tbody>
         </table>
       </div>
+
+      {/* Token Factory Pricing */}
+      <TokenFactoryPricingSection />
 
       {/* Create/Edit Modal */}
       {showCreateModal && (

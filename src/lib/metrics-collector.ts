@@ -75,7 +75,7 @@ export async function installMetricsCollector(
 
   // The metrics collector script
   const collectorScript = `#!/bin/bash
-# GPU Cloud GPU Metrics Collector
+# GPU Metrics Collector
 # Sends GPU metrics to dashboard every 60 seconds
 
 ENDPOINT="${METRICS_ENDPOINT}"
@@ -129,21 +129,21 @@ done
 
   // Install command - creates the script and starts it via systemd
   const installCommand = `
-mkdir -p /opt/packet-metrics
-cat > /opt/packet-metrics/collect.sh << 'SCRIPT_EOF'
+mkdir -p /opt/gpu-metrics
+cat > /opt/gpu-metrics/collect.sh << 'SCRIPT_EOF'
 ${collectorScript}
 SCRIPT_EOF
-chmod +x /opt/packet-metrics/collect.sh
+chmod +x /opt/gpu-metrics/collect.sh
 
 # Create systemd service
-cat > /etc/systemd/system/packet-metrics.service << 'SERVICE_EOF'
+cat > /etc/systemd/system/gpu-metrics.service << 'SERVICE_EOF'
 [Unit]
-Description=GPU Cloud GPU Metrics Collector
+Description=GPU Metrics Collector
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/opt/packet-metrics/collect.sh
+ExecStart=/opt/gpu-metrics/collect.sh
 Restart=always
 RestartSec=10
 
@@ -153,8 +153,8 @@ SERVICE_EOF
 
 # Start the service
 systemctl daemon-reload
-systemctl enable packet-metrics
-systemctl start packet-metrics
+systemctl enable gpu-metrics
+systemctl start gpu-metrics
 echo "METRICS_INSTALLED"
 `;
 

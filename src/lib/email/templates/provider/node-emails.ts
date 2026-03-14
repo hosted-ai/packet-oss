@@ -6,8 +6,9 @@
 
 import { sendEmail } from "../../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButton, emailSuccessBox, emailWarningBox, emailDetailBox, emailMuted, emailSignoff, plainTextFooter } from "../../utils";
+import { getBrandName, getAppUrl } from "@/lib/branding";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://example.com";
+const APP_URL = getAppUrl();
 
 /**
  * Send email when a node is approved
@@ -64,7 +65,7 @@ We'll send you another email once provisioning is complete and your server is li
 
 View your dashboard: ${APP_URL}/providers/dashboard
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({
@@ -92,7 +93,7 @@ export async function sendNodeLiveEmail(params: {
       <p style="margin: 0; font-size: 16px; color: #065f46;"><strong>Your Server is Live!</strong></p>
       <p style="margin: 8px 0 0 0; font-size: 14px; color: #065f46;">${params.gpuCount}x ${safeGpuModel} — now available for customers</p>
     `)}
-    ${emailText(`Great news! Your server <strong>${safeNodeName}</strong> is now live on the GPU Cloud marketplace.`)}
+    ${emailText(`Great news! Your server <strong>${safeNodeName}</strong> is now live on the ${getBrandName()} marketplace.`)}
     ${emailText("Customers can now rent your GPUs. You'll start earning revenue as soon as they're used!")}
     ${emailButton("View Dashboard", `${APP_URL}/providers/dashboard`)}
     ${emailSignoff()}
@@ -102,7 +103,7 @@ export async function sendNodeLiveEmail(params: {
 
   const text = `Your Server is Live!
 
-Great news! Your server ${params.nodeName} is now live on the GPU Cloud marketplace.
+Great news! Your server ${params.nodeName} is now live on the ${getBrandName()} marketplace.
 
 ${params.gpuCount}x ${params.gpuModel} — now available for customers
 
@@ -110,7 +111,7 @@ Customers can now rent your GPUs. You'll start earning revenue as soon as they'r
 
 View your dashboard: ${APP_URL}/providers/dashboard
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({
@@ -158,7 +159,7 @@ If you'd like to cancel this removal request, you can do so from your dashboard 
 
 View your dashboard: ${APP_URL}/providers/dashboard
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({
@@ -183,9 +184,9 @@ export async function sendProviderServerVacatedEmail(params: {
     ${emailSuccessBox(`<p style="margin: 0; font-size: 15px; color: #065f46;"><strong>Server Ready for Removal</strong></p>`)}
     ${emailGreeting("there")}
     ${emailText(`All customers have moved their workloads off your server <strong>${safeNodeName}</strong>.`)}
-    ${emailText("You can now proceed with removing the server from the GPU Cloud network whenever you're ready.")}
+    ${emailText(`You can now proceed with removing the server from the ${getBrandName()} network whenever you're ready.`)}
     ${emailButton("Complete Removal", `${APP_URL}/providers/dashboard`)}
-    ${emailMuted("Simply visit your provider dashboard and complete the removal process. Once removed, the server will no longer be part of the GPU Cloud network.")}
+    ${emailMuted(`Simply visit your provider dashboard and complete the removal process. Once removed, the server will no longer be part of the ${getBrandName()} network.`)}
     ${emailSignoff()}
   `;
 
@@ -197,13 +198,13 @@ Hi there,
 
 All customers have moved their workloads off your server ${params.nodeName}.
 
-You can now proceed with removing the server from the GPU Cloud network whenever you're ready.
+You can now proceed with removing the server from the ${getBrandName()} network whenever you're ready.
 
 Complete the removal: ${APP_URL}/providers/dashboard
 
-Simply visit your provider dashboard and complete the removal process. Once removed, the server will no longer be part of the GPU Cloud network.
+Simply visit your provider dashboard and complete the removal process. Once removed, the server will no longer be part of the ${getBrandName()} network.
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({

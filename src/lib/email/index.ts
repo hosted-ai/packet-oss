@@ -9,6 +9,7 @@
  * - Welcome: New customer onboarding emails
  * - Contact: Contact form submissions
  * - GPU Events: GPU launch, termination, and deployment notifications
+ * - Quotes: Custom quote requests and responses
  *
  * @module email
  *
@@ -52,6 +53,14 @@ export {
   sendHfDeploymentStartedEmail,
 } from "./templates/gpu-events";
 
+// Template functions - Quotes
+// OSS stub — original: export {   sendQuoteEmail,   sendQuoteResponseNotification,   sendQuoteReminderEmail,   generateQuoteEmailHtml,   type QuoteEmailParams, } from "./templates/quotes";
+export function sendQuoteEmail(..._args: unknown[]) { return undefined as any; }
+export function sendQuoteResponseNotification(..._args: unknown[]) { return undefined as any; }
+export function sendQuoteReminderEmail(..._args: unknown[]) { return undefined as any; }
+export function generateQuoteEmailHtml(..._args: unknown[]) { return undefined as any; }
+export type QuoteEmailParams = Record<string, never>;
+
 // Template functions - Support
 export { sendSupportReplyNotification } from "./templates/support";
 
@@ -61,6 +70,10 @@ export {
   sendAutoShutdownNotificationEmail,
   sendNegativeBalanceShutdownEmail,
 } from "./templates/budget";
+
+// Template functions - Batch Jobs
+// OSS stub — original: export { sendBatchCompletionEmail } from "./templates/batch";
+export function sendBatchCompletionEmail(..._args: unknown[]) { return undefined as any; }
 
 // Template functions - Pod Failure Alerts
 export { sendPodFailureAlertEmail } from "./templates/pod-failure";

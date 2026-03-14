@@ -10,6 +10,7 @@ import {
   isTeamMember,
   ensureOwnerRecord,
 } from "@/lib/team-members";
+import { getBrandName } from "@/lib/branding";
 
 // Send invite email to new team member
 async function sendTeamInviteEmail(params: {
@@ -25,7 +26,7 @@ async function sendTeamInviteEmail(params: {
 
   await sendEmail({
     to,
-    subject: `${safeInviterName} invited you to GPU Cloud`,
+    subject: `${safeInviterName} invited you to ${getBrandName()}`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -35,12 +36,12 @@ async function sendTeamInviteEmail(params: {
         </head>
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.7; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #000; margin: 0; font-size: 28px;">GPU Cloud</h1>
+            <h1 style="color: #000; margin: 0; font-size: 28px;">${getBrandName()}</h1>
           </div>
 
           <h2 style="color: #000; font-size: 22px;">You're invited!</h2>
 
-          <p style="font-size: 16px;">${safeInviterName} (${escapeHtml(inviterEmail)}) has invited you to join their team on GPU Cloud.</p>
+          <p style="font-size: 16px;">${safeInviterName} (${escapeHtml(inviterEmail)}) has invited you to join their team on ${getBrandName()}.</p>
 
           <p style="font-size: 15px;">As a team member, you'll be able to:</p>
           <ul style="font-size: 15px; color: #555; padding-left: 20px;">
@@ -73,14 +74,14 @@ async function sendTeamInviteEmail(params: {
           </p>
 
           <p style="color: #999; font-size: 13px; text-align: center; margin-top: 15px;">
-            <strong>The GPU Cloud Team</strong>
+            <strong>The ${getBrandName()} Team</strong>
           </p>
         </body>
       </html>
     `,
     text: `You're invited!
 
-${inviterName} (${inviterEmail}) has invited you to join their team on GPU Cloud.
+${inviterName} (${inviterEmail}) has invited you to join their team on ${getBrandName()}.
 
 As a team member, you'll be able to:
 - View and manage GPU instances
@@ -96,7 +97,7 @@ This invitation link is valid for 1 hour. After that, just ask your team admin t
 
 Didn't expect this email? Someone may have entered your email by mistake. You can safely ignore it.
 
-The GPU Cloud Team`,
+The ${getBrandName()} Team`,
   });
 }
 

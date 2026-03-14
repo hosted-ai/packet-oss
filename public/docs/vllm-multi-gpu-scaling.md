@@ -5,7 +5,7 @@
 
 ## Overview
 
-This document covers vLLM-specific scaling for LLM inference at GPU Cloud Platform.
+This document covers vLLM-specific scaling for LLM inference at Packet.ai.
 
 **Related:** For multi-node clusters (Ray), see [Ray Cluster Management](./ray-cluster-management.md)
 
@@ -193,7 +193,7 @@ ray start --block --address=${HEAD_IP}:6379
 
 ---
 
-## What GPU Cloud Platform Has Implemented (Software Layer)
+## What Packet.ai Has Implemented (Software Layer)
 
 ### 1. Single-Node Multi-GPU Support ✅ COMPLETE
 
@@ -264,7 +264,7 @@ This means multi-node vLLM via Ray is possible without any infrastructure change
 
 ## Multi-Node Implementation Plan (Future Work)
 
-With team networking confirmed, here's what GPU Cloud Platform would need to implement:
+With team networking confirmed, here's what Packet.ai would need to implement:
 
 ### Step 1: Get Pod Internal IPs
 

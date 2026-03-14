@@ -2,20 +2,6 @@
  * Type definitions for hosted.ai API
  */
 
-// Default policy IDs from the console.example.com instance
-export const DEFAULT_POLICIES = {
-  pricing: "582592e0-fb6b-4ca2-903f-dd1d88278c59", // Default Policy - Zero Cost
-  resource: "06cf8cc7-6b89-4302-8107-fb22c3f15e2e", // UK Resource Policy
-  service: "4dbfdae0-13b7-45f6-a9c9-a533a3a8ff87", // Default Service Policy
-  instanceType: "6374e27b-b7c5-4fae-9371-390f1175ca8f", // Default Instance Type Policy
-  image: "8c4fe149-7ea6-4507-bd6b-3d6a12465152", // Default Image Policy
-};
-
-export const ROLES = {
-  teamAdmin: "1cd64174-ff8c-4054-97ad-a799fe1740ab",
-  teamMember: "43c25fe2-e9c1-47fb-b2d5-8b23ca1facbd",
-};
-
 // ============================================
 // Team Types
 // ============================================
@@ -191,6 +177,13 @@ export interface CreateInstanceParams {
   workspace_id?: string;
   network_assignment?: string;
   additional_disks?: Array<{ storage_block_id: string; disk_position: number }>;
+}
+
+export interface InstanceCredentials {
+  ip: string | null;
+  username: string | null;
+  password: string | null;
+  port: number | null;
 }
 
 export interface VNCSession {

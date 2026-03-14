@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { captureUtm, getUtmData, clearUtmData } from "@/lib/utm";
 import { getSessionId } from "@/lib/tracker";
+import { getBrandName } from "@/lib/branding";
 
 // MAINTENANCE MODE — set to false when hosted.ai team creation is fixed
 const SIGNUP_MAINTENANCE = false;
@@ -83,11 +84,19 @@ function AccountContent() {
       // Signup success — redirect to success page
       if (mode === "signup" && data.redirect) {
         clearUtmData();
+        import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.SIGNUP)).catch(() => {});
+        if (typeof window !== "undefined" && typeof (window as any).my_analytics !== "undefined") {
+          (window as any).my_analytics.goal("keo2bt1sqibntima");
+        }
+        if (typeof window !== "undefined" && typeof (window as any).lintrk === "function") {
+          (window as any).lintrk("track", { conversion_id: 24436340 });
+        }
         router.push(data.redirect);
         return;
       }
 
       // Sign-in success — show "check your email"
+      import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.LOGIN)).catch(() => {});
       setSubmitted(true);
     } catch {
       setError("Failed to process request");
@@ -104,16 +113,18 @@ function AccountContent() {
           <Link href="/">
             <Image
               src="/packet-logo.png"
-              alt="GPU Cloud"
+              alt={getBrandName()}
               width={120}
               height={40}
               style={{ height: "32px", width: "auto" }}
             />
           </Link>
           <div className="account-header-nav">
-            <Link href="/#pricing" className="account-header-link">
-              Pricing
-            </Link>
+            {process.env.NEXT_PUBLIC_EDITION !== "oss" && (
+              <Link href="/#pricing" className="account-header-link">
+                Pricing
+              </Link>
+            )}
             {mode === "signup" && (
               <button
                 onClick={() => { setMode("signin"); setError(""); setSubmitted(false); }}
@@ -153,7 +164,7 @@ function AccountContent() {
             <div className="account-benefits">
               {[
                 "Full GPU inventory with live pricing",
-                "10,000 free inference API tokens",
+                "10,000 free Token Factory tokens",
                 hasGpuContext ? "Fund your wallet and deploy when ready" : "SSH access in under 5 minutes",
                 "No credit card required",
               ].map((text) => (

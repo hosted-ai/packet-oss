@@ -10,7 +10,7 @@ export const psCommand = new Command("ps")
   .option("-a, --all", "Include terminated instances")
   .action(async (options) => {
     if (!getApiKey()) {
-      console.log(chalk.yellow("\n  Not logged in. Run 'packet login' first.\n"));
+      console.log(chalk.yellow("\n  Not logged in. Run 'gpu-cloud login' first.\n"));
       process.exit(1);
     }
 
@@ -33,7 +33,7 @@ export const psCommand = new Command("ps")
 
       if (subs.length === 0) {
         console.log(chalk.gray("\n  No running instances.\n"));
-        console.log(chalk.gray("  Launch one with: packet launch --gpu <type>\n"));
+        console.log(chalk.gray("  Launch one with: gpu-cloud launch --gpu <type>\n"));
         return;
       }
 
@@ -101,7 +101,7 @@ export const psCommand = new Command("ps")
       }
 
       console.log(table.toString());
-      console.log(chalk.gray("\n  SSH: packet ssh <id>  |  Terminate: packet terminate <id>\n"));
+      console.log(chalk.gray("\n  SSH: gpu-cloud ssh <id>  |  Terminate: gpu-cloud terminate <id>\n"));
     } catch (error) {
       spinner.fail("Failed to fetch instances");
       console.log(chalk.red(`\n  ${error instanceof Error ? error.message : "Unknown error"}\n`));

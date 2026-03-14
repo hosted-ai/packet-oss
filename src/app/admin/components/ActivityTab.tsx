@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import type { Quote } from "../types";
 import { getTimeAgo } from "../utils";
 
 interface UnifiedActivity {
@@ -17,7 +18,10 @@ interface UnifiedActivity {
 interface ActivityTabProps {
   activities: unknown[];
   activitiesLoading: boolean;
+  quotes: Quote[];
   onRefresh: () => void;
+  onViewQuote: (quote: Quote) => void;
+  onSwitchToQuotes: () => void;
 }
 
 const SOURCE_OPTIONS = [
@@ -34,14 +38,19 @@ const TYPE_CATEGORIES: Record<string, string[]> = {
   "Billing": ["payment_received", "wallet_charged", "wallet_topup", "voucher_redeemed", "budget_set"],
   "API/SSH Keys": ["api_key_created", "api_key_deleted", "ssh_key_added", "ssh_key_deleted"],
   "Team": ["team_member_invited", "team_member_removed", "team_member_joined"],
-  "Inference": ["inference", "batch_created", "batch_cancelled", "lora_created", "lora_training_started", "lora_training_completed", "lora_deleted"],
+  "Token Factory": ["inference", "batch_created", "batch_cancelled", "lora_created", "lora_training_started", "lora_training_completed", "lora_deleted"],
   "Admin": ["admin_login", "admin_added", "admin_removed", "customer_viewed", "customer_credit_added", "wallet_adjustment", "login_link_sent", "customer_login"],
+  "Quotes": ["quote_created", "quote_updated", "quote_deleted", "quote_sent", "quote_reminder_sent", "quote_request_received"],
   "Snapshots": ["snapshot_created", "snapshot_restored", "snapshot_deleted"],
   "HuggingFace": ["hf_deployment_started", "hf_deployment_running", "hf_deployment_failed", "hf_deployment_deleted"],
   "Pods (Admin)": ["pod_stop", "pod_start", "pod_restart", "pod_terminate"],
 };
 
-export function ActivityTab({}: ActivityTabProps) {
+export function ActivityTab({
+  quotes,
+  onViewQuote,
+  onSwitchToQuotes,
+}: ActivityTabProps) {
   const [data, setData] = useState<UnifiedActivity[]>([]);
   const [loading, setLoading] = useState(false);
   const [sourceFilter, setSourceFilter] = useState("all");
@@ -206,6 +215,10 @@ export function ActivityTab({}: ActivityTabProps) {
             {data.map((activity) => {
               const time = new Date(activity.created * 1000);
               const timeAgo = getTimeAgo(time);
+              const isQuoteRelated = activity.type.includes("quote");
+              const quoteId = activity.metadata?.quoteId as string | undefined;
+              const quoteNumber = activity.metadata?.quoteNumber as string | undefined;
+
               return (
                 <div key={activity.id} className="px-4 py-3 hover:bg-gray-50 transition-colors">
                   <div className="flex items-start justify-between gap-4">
@@ -223,6 +236,21 @@ export function ActivityTab({}: ActivityTabProps) {
                         </span>
                       </div>
                       <p className="mt-1 text-[#0b0f1c] text-sm">{activity.description}</p>
+                      {isQuoteRelated && quoteId && quoteNumber && (
+                        <button
+                          onClick={() => {
+                            const quote = quotes.find(q => q.id === quoteId);
+                            if (quote) {
+                              onViewQuote(quote);
+                            } else {
+                              onSwitchToQuotes();
+                            }
+                          }}
+                          className="mt-1 text-xs text-[#1a4fff] hover:text-[#1238c9] underline"
+                        >
+                          View Quote {quoteNumber}
+                        </button>
+                      )}
                     </div>
                     <div className="text-xs text-[#5b6476] whitespace-nowrap">
                       {timeAgo}

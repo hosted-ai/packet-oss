@@ -25,14 +25,14 @@ const DEFAULT_TEMPLATES = [
     name: "Signup Welcome",
     description: "Sent to new users after free signup — includes API key and dashboard link",
     variables: ["customerName", "dashboardUrl", "apiKey", "gpuName"],
-    defaultSubject: "Your GPU Cloud account is ready",
+    defaultSubject: "Your account is ready",
   },
   {
     slug: "welcome",
     name: "Paid Welcome",
     description: "Sent to customers after paid checkout with wallet balance",
     variables: ["customerName", "productName", "dashboardUrl", "walletBalance"],
-    defaultSubject: "Welcome to GPU Cloud — Your GPU wallet is ready",
+    defaultSubject: "Welcome — Your GPU wallet is ready",
   },
   // ── GPU events ──
   {
@@ -76,7 +76,7 @@ const DEFAULT_TEMPLATES = [
     name: "Budget Alert",
     description: "Sent at 50%, 80%, 100% budget thresholds",
     variables: ["customerName", "alertTitle", "alertMessage", "currentSpend", "limit", "percentUsed", "limitTypeLabel", "dashboardUrl"],
-    defaultSubject: "GPU Cloud Budget Alert",
+    defaultSubject: "Budget Alert",
   },
   {
     slug: "auto-shutdown",
@@ -114,7 +114,7 @@ const DEFAULT_TEMPLATES = [
     name: "Quote Sent",
     description: "Sent to customer with their GPU cluster quote",
     variables: ["customerName", "quoteNumber", "quoteUrl", "gpuType", "gpuCount"],
-    defaultSubject: "Your GPU Cluster Quote from GPU Cloud",
+    defaultSubject: "Your GPU Cluster Quote",
   },
   {
     slug: "quote-reminder",
@@ -136,7 +136,7 @@ const DEFAULT_TEMPLATES = [
     name: "Drip: Day 3 — Explore Features",
     description: "Sent 3 days after signup — highlight batch, embeddings, models",
     variables: ["customerName", "dashboardUrl"],
-    defaultSubject: "3 things you can build with GPU Cloud",
+    defaultSubject: "3 things you can build with your GPU",
   },
   {
     slug: "drip-day7-deploy",
@@ -150,7 +150,7 @@ const DEFAULT_TEMPLATES = [
     name: "Drip: Day 14 — Case Study",
     description: "Sent 14 days after signup — social proof and case study",
     variables: ["customerName", "dashboardUrl"],
-    defaultSubject: "How developers are using GPU Cloud",
+    defaultSubject: "How developers are using the platform",
   },
 ];
 
@@ -255,7 +255,7 @@ export function EmailTemplatesTab() {
   <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
 
   <p style="color: #999; font-size: 13px; text-align: center;">
-    <strong>The GPU Cloud Team</strong>
+    <strong>The Team</strong>
   </p>
 </body>
 </html>`;
@@ -336,7 +336,7 @@ export function EmailTemplatesTab() {
     const sampleData: Record<string, string> = {
       customerName: "John Doe",
       productName: "RTX 6000 Ada",
-      dashboardUrl: "https://your-domain.com/dashboard?token=xxx",
+      dashboardUrl: "https://your-dashboard-url/dashboard?token=xxx",
       gpuType: "NVIDIA RTX 6000 Ada",
       gpuName: "NVIDIA B200",
       region: "EU West",
@@ -344,10 +344,10 @@ export function EmailTemplatesTab() {
       cost: "$9.07",
       balance: "$12.50",
       walletBalance: "$50.00",
-      topupUrl: "https://your-domain.com/account",
+      topupUrl: "https://your-dashboard-url/account",
       ticketSubject: "Help with deployment",
       ticketTitle: "Help with deployment",
-      ticketUrl: "https://your-domain.com/support/123",
+      ticketUrl: "https://your-dashboard-url/support/123",
       messagePreview: "We've looked into your issue and here's what we found...",
       apiKey: "pk-abc123def456ghi789jkl012",
       poolName: "my-gpu-pool",
@@ -366,7 +366,7 @@ export function EmailTemplatesTab() {
       totalRequests: "1000",
       completedRequests: "998",
       quoteNumber: "Q-2026-001",
-      quoteUrl: "https://your-domain.com/quotes/Q-2026-001",
+      quoteUrl: "https://your-dashboard-url/quotes/Q-2026-001",
       expiresDate: "Friday, March 15, 2026",
     };
 

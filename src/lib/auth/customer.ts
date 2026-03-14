@@ -1,11 +1,8 @@
 import jwt from "jsonwebtoken";
+import { getSecret } from "./secrets";
 
 function getJwtSecret(): string {
-  const secret = process.env.CUSTOMER_JWT_SECRET;
-  if (!secret) {
-    throw new Error("CUSTOMER_JWT_SECRET environment variable is required");
-  }
-  return secret;
+  return getSecret("CUSTOMER_JWT_SECRET");
 }
 
 export interface CustomerTokenPayload {

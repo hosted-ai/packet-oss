@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import { prisma } from "@/lib/prisma";
-import { podAction, getPoolSubscriptions, getConnectionInfo } from "@/lib/hostedai";
+import {
+  podAction,
+  getPoolSubscriptions,
+  getConnectionInfo,
+  stopInstance,
+  getTeamInstances,
+} from "@/lib/hostedai";
 import { logGPUStopped } from "@/lib/activity";
+
+// Check if the ID looks like an HAI 2.2 instance (i-{uuid}) vs numeric (legacy pool subscription)
+function isInstanceId(id: string): boolean {
+  return /^i-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
 
 // POST - Stop a pod using the pod action API
 export async function POST(
@@ -21,7 +32,45 @@ export async function POST(
       );
     }
 
-    const { id: subscriptionId } = await params;
+    const { id } = await params;
+
+    // === HAI 2.2: Unified instance stop ===
+    if (isInstanceId(id)) {
+      console.log("[HAI 2.2] Stopping instance:", id);
+
+      let found = false;
+      for (const tid of allTeamIds) {
+        const instances = await getTeamInstances(tid);
+        if (instances.some(i => i.id === id)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        return NextResponse.json({ error: "Instance not found" }, { status: 404 });
+      }
+
+      await stopInstance(id);
+
+      let displayNameForLog: string | undefined;
+      try {
+        const meta = await prisma.podMetadata.findFirst({
+          where: { instanceId: id },
+          select: { displayName: true },
+        });
+        displayNameForLog = meta?.displayName || undefined;
+      } catch { /* ignore */ }
+      await logGPUStopped(payload.customerId, "GPU Instance", displayNameForLog, id);
+
+      return NextResponse.json({
+        success: true,
+        instance_id: id,
+        message: "GPU stopped successfully",
+      });
+    }
+
+    // === Legacy: Pool subscription stop ===
+    const subscriptionId = id;
 
     // Optionally get pod name from request body (for multi-pod subscriptions)
     let targetPodName: string | undefined;
@@ -88,7 +137,7 @@ export async function POST(
     // Call the pod action API
     await podAction(podName, subscriptionId, "stop");
 
-    // Log the activity (include pod name for tracking)
+    // Log the activity
     let displayNameForLog: string | undefined;
     try {
       const meta = await prisma.podMetadata.findUnique({

@@ -6,6 +6,7 @@ import { hostedaiRequest } from "./client";
 import type {
   Instance,
   CreateInstanceParams,
+  InstanceCredentials,
   InstanceType,
   Image,
   ImagePolicy,
@@ -111,6 +112,16 @@ export async function restartInstance(instanceId: string): Promise<void> {
 // Delete an instance
 export async function deleteInstance(instanceId: string): Promise<void> {
   await hostedaiRequest("DELETE", `/instance/${instanceId}`);
+}
+
+// Get SSH credentials for an instance
+export async function getInstanceCredentials(
+  instanceId: string
+): Promise<InstanceCredentials> {
+  return hostedaiRequest<InstanceCredentials>(
+    "GET",
+    `/instance/${instanceId}/credentials`
+  );
 }
 
 // Get GPUaaS compatible instances for a team (lists running instances)

@@ -16,7 +16,7 @@ import "dotenv/config";
 import { Stagehand } from "@browserbasehq/stagehand";
 import { z } from "zod";
 
-const BASE_URL = process.env.SMOKE_TEST_URL || "https://your-domain.com";
+const BASE_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
 const MODEL = process.env.STAGEHAND_MODEL || "anthropic/claude-sonnet-4-5";
 
 interface TestResult {
@@ -118,7 +118,7 @@ async function main() {
     await page.goto(`${BASE_URL}/vs/runpod`, { waitUntil: "networkidle" });
 
     const data = await stagehand.extract(
-      "Extract whether this page shows a pricing comparison between this platform and RunPod, and whether specific dollar amounts are visible",
+      "Extract whether this page shows a pricing comparison between the platform and RunPod, and whether specific dollar amounts are visible",
       z.object({
         hasComparisonContent: z
           .boolean()

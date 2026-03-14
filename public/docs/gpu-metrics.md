@@ -19,7 +19,7 @@ The GPU Metrics Dashboard provides real-time monitoring and visualization of you
 
 ### Accessing GPU Metrics
 
-1. Navigate to your Dashboard
+1. Navigate to your Packet.ai Dashboard
 2. Select a GPU instance
 3. Click the **"Metrics"** or **"Monitoring"** tab
 4. View real-time GPU statistics
@@ -297,7 +297,7 @@ Import our pre-built Grafana dashboard:
 
 ```json
 {
-  "dashboard_id": "gpu-cloud-gpu-metrics",
+  "dashboard_id": "packet-ai-gpu-metrics",
   "panels": [
     "GPU Utilization Gauge",
     "Memory Usage Timeline",

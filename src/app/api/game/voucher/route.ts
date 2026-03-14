@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
+import { getBrandName, getDashboardUrl, getSupportEmail, getAppUrl } from "@/lib/branding";
 
 const MONTHLY_VOUCHER_LIMIT = 5; // Max 5 vouchers per email per month
 
@@ -16,6 +17,10 @@ function generateVoucherCode(): string {
 }
 
 function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt: Date): string {
+  const brandName = getBrandName();
+  const dashUrl = getDashboardUrl();
+  const supportEmail = getSupportEmail();
+  const appUrl = getAppUrl();
   const creditDollars = (creditCents / 100).toFixed(2);
   const expiresDate = expiresAt.toLocaleDateString("en-US", {
     year: "numeric",
@@ -64,7 +69,7 @@ function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt
               <div style="background: #0a0a0f; border-radius: 8px; padding: 20px;">
                 <p style="margin: 0 0 12px; color: #fff; font-weight: 600;">How to use your voucher:</p>
                 <ol style="margin: 0; padding-left: 20px; color: #aaa; font-size: 14px; line-height: 1.8;">
-                  <li>Sign up at <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout" style="color: #64ffda;">Sign up here</a></li>
+                  <li>Sign up at <a href="${dashUrl}/checkout" style="color: #64ffda;">${brandName}</a></li>
                   <li>Enter your voucher code at checkout</li>
                   <li>Or add it in Dashboard → Billing → Add Voucher</li>
                 </ol>
@@ -75,7 +80,7 @@ function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt
           <!-- CTA Button -->
           <tr>
             <td style="padding: 0 32px 32px; text-align: center;">
-              <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #e94560, #ff6b6b); color: #fff; text-decoration: none; font-weight: 700; border-radius: 8px; font-size: 16px;">Start Using GPUs →</a>
+              <a href="${dashUrl}/checkout" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #e94560, #ff6b6b); color: #fff; text-decoration: none; font-weight: 700; border-radius: 8px; font-size: 16px;">Start Using GPUs →</a>
             </td>
           </tr>
 
@@ -83,13 +88,13 @@ function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt
           <tr>
             <td style="padding: 24px 32px; border-top: 1px solid #2a2a4a; text-align: center;">
               <p style="margin: 0 0 8px; color: #666; font-size: 12px;">Expires: ${expiresDate}</p>
-              <p style="margin: 0; color: #666; font-size: 12px;">Questions? Reply to this email or contact support@example.com</p>
+              <p style="margin: 0; color: #666; font-size: 12px;">Questions? Reply to this email or contact ${supportEmail}</p>
             </td>
           </tr>
         </table>
 
         <p style="margin: 24px 0 0; color: #444; font-size: 12px;">
-          <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}" style="color: #666;">GPU Cloud</a> - GPU Infrastructure for AI
+          <a href="${appUrl}" style="color: #666;">${brandName}</a> - GPU Infrastructure for AI
         </p>
       </td>
     </tr>
@@ -100,6 +105,10 @@ function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt
 }
 
 function getVoucherEmailText(voucherCode: string, creditCents: number, expiresAt: Date): string {
+  const brandName = getBrandName();
+  const dashUrl = getDashboardUrl();
+  const supportEmail = getSupportEmail();
+  const appUrl = getAppUrl();
   const creditDollars = (creditCents / 100).toFixed(2);
   const expiresDate = expiresAt.toLocaleDateString("en-US", {
     year: "numeric",
@@ -117,16 +126,17 @@ YOUR VOUCHER CODE: ${voucherCode}
 Value: $${creditDollars} GPU Credits (≈ 1 hour of RTX PRO 6000 compute time)
 
 HOW TO USE:
-1. Sign up at ${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/checkout
+1. Sign up at ${dashUrl}/checkout
 2. Enter your voucher code at checkout
 3. Or add it in Dashboard → Billing → Add Voucher
 
 Expires: ${expiresDate}
 
-Questions? Contact support@example.com
+Questions? Contact ${supportEmail}
 
 ---
-GPU Infrastructure for AI
+${brandName} - GPU Infrastructure for AI
+${appUrl}
 `;
 }
 
@@ -215,7 +225,7 @@ export async function POST(request: NextRequest) {
         startsAt: null,
         expiresAt,
         active: true,
-        createdBy: "game-voucher",
+        createdBy: `game@${new URL(getAppUrl()).hostname}`,
       },
     });
 

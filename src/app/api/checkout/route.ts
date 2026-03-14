@@ -12,9 +12,10 @@ import {
   ROLES,
 } from "@/lib/hostedai";
 import { generateCustomerToken } from "@/lib/customer-auth";
-import { syncCustomerToPipedrive } from "@/lib/pipedrive";
+import { isPro } from "@/lib/edition";
 import { checkAndProcessReferralQualification } from "@/lib/referral";
 import { cacheCustomer } from "@/lib/customer-cache";
+import { getBrandName } from "@/lib/branding";
 import crypto from "crypto";
 
 // Generate a secure password for hosted.ai account
@@ -159,6 +160,8 @@ export async function POST(request: NextRequest) {
       const rawName = email.split("@")[0];
       const customerName = rawName.replace(/[^a-zA-Z0-9- ]/g, "").trim() || "User";
 
+      console.log(`=== VOUCHER SIGNUP: Full deposit covered for ${customerEmail} ===`);
+
       // Create Stripe customer first (needed for later payments)
       const stripeCustomer = await stripe.customers.create({
         email: customerEmail,
@@ -166,12 +169,12 @@ export async function POST(request: NextRequest) {
         metadata: {
           billing_type: "hourly",
           gpu_product_id: product.id,
-          source: "gpu-cloud",
+          source: getBrandName(),
           signup_type: "voucher",
         },
       });
       cacheCustomer(stripeCustomer).catch(() => {});
-      console.log(`Created Stripe customer: ${stripeCustomer.id}`);
+      console.log(`✅ Created Stripe customer: ${stripeCustomer.id}`);
 
       // Credit the customer's Stripe balance with the voucher amount
       await stripe.customers.createBalanceTransaction(stripeCustomer.id, {
@@ -206,11 +209,13 @@ export async function POST(request: NextRequest) {
       const generatedPassword = generateSecurePassword();
       const teamName = `${customerName}-hourly-${Date.now()}`;
 
+      console.log(`=== VOUCHER SIGNUP: Creating hosted.ai team for ${customerEmail} ===`);
+
       let team: { id: string; name: string };
       try {
         team = await createTeam({
           name: teamName,
-          description: `GPU Cloud - ${product.name} (hourly) - Voucher signup`,
+          description: `${getBrandName()} - ${product.name} (hourly) - Voucher signup`,
           color: "#6366F1",
           members: [
             {
@@ -228,18 +233,18 @@ export async function POST(request: NextRequest) {
           instance_type_policy_id: DEFAULT_POLICIES.instanceType,
           image_policy_id: DEFAULT_POLICIES.image,
         });
-        console.log(`Created hosted.ai team ${team.id} for voucher signup`);
+        console.log(`✅ Created hosted.ai team ${team.id} for voucher signup`);
 
         // CRITICAL: Add team to resource policy's teams array
         // Without this, the team cannot access GPU pools
         try {
           await syncTeamsToDefaultPolicy([team.id]);
-          console.log(`Added team ${team.id} to default resource policy`);
+          console.log(`✅ Added team ${team.id} to default resource policy`);
         } catch (policyError) {
-          console.error(`Failed to add team to resource policy:`, policyError);
+          console.error(`⚠️ WARNING: Failed to add team to resource policy:`, policyError);
         }
       } catch (teamError) {
-        console.error("Failed to create hosted.ai team for voucher signup:", teamError);
+        console.error("❌ FATAL: Failed to create hosted.ai team for voucher signup:", teamError);
         throw new Error(`Failed to create hosted.ai team: ${teamError instanceof Error ? teamError.message : String(teamError)}`);
       }
 
@@ -251,9 +256,9 @@ export async function POST(request: NextRequest) {
           teamId: team.id,
           roleId: ROLES.teamAdmin,
         });
-        console.log(`Created OTL for ${customerEmail}`);
+        console.log(`✅ Created OTL for ${customerEmail}`);
       } catch (otlError) {
-        console.error("Failed to create OTL (non-fatal):", otlError);
+        console.error("❌ WARNING: Failed to create OTL (non-fatal):", otlError);
       }
 
       // Update Stripe customer with hosted.ai team ID
@@ -279,9 +284,9 @@ export async function POST(request: NextRequest) {
           dashboardUrl,
           walletBalance: validatedVoucher ? `$${(validatedVoucher.creditCents / 100).toFixed(0)}` : undefined,
         });
-        console.log(`Sent welcome email to ${customerEmail} (voucher signup)`);
+        console.log(`✅ Sent welcome email to ${customerEmail} (voucher signup)`);
       } catch (emailError) {
-        console.error("Failed to send welcome email (non-fatal):", emailError);
+        console.error("❌ WARNING: Failed to send welcome email (non-fatal):", emailError);
       }
 
       // Process referral qualification (voucher amount counts as deposit)
@@ -291,20 +296,26 @@ export async function POST(request: NextRequest) {
           validatedVoucher.creditCents
         );
         if (referralResult.processed) {
-          console.log(`Referral reward processed for voucher signup ${stripeCustomer.id}`);
+          console.log(`✅ Referral reward processed for voucher signup ${stripeCustomer.id}`);
         }
       } catch (referralError) {
-        console.error("Failed to process referral (non-fatal):", referralError);
+        console.error("❌ WARNING: Failed to process referral (non-fatal):", referralError);
       }
 
-      // Sync to Pipedrive (async, don't block response)
-      syncCustomerToPipedrive({
-        name: customerName,
-        email: customerEmail,
-        productName: product.name,
-        billingType: "hourly",
-        stripeCustomerId: stripeCustomer.id,
-      }).catch((err) => console.error("[Pipedrive] Customer sync failed:", err));
+      // Sync to Pipedrive (async, don't block response — Pro only)
+      if (isPro()) {
+        import("@/lib/pipedrive").then(({ syncCustomerToPipedrive }) =>
+          syncCustomerToPipedrive({
+            name: customerName,
+            email: customerEmail,
+            productName: product.name,
+            billingType: "hourly",
+            stripeCustomerId: stripeCustomer.id,
+          })
+        ).catch((err) => console.error("[Pipedrive] Customer sync failed:", err));
+      }
+
+      console.log(`=== VOUCHER SIGNUP COMPLETE: ${customerEmail} -> Team ${team.id} ===`);
 
       // Redirect to success page — include token so user can auto-login
       return NextResponse.json({

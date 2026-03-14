@@ -33,7 +33,8 @@ export { SnapshotCard } from "./SnapshotCard";
 // Re-export tab components
 export { MetricsTab } from "./MetricsTab";
 export { BillingTab } from "./BillingTab";
-
+// OSS stub — original: export { BareMetalTab } from "./BareMetalTab";
+export const BareMetalTab = (_props?: any) => null;
 
 // Re-export main dashboard content
 export { DashboardContent } from "./DashboardContent";

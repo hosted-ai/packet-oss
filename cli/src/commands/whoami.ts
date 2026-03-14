@@ -8,7 +8,7 @@ export const whoamiCommand = new Command("whoami")
   .description("Show current logged-in account")
   .action(async () => {
     if (!getApiKey()) {
-      console.log(chalk.yellow("\n  Not logged in. Run 'packet login' first.\n"));
+      console.log(chalk.yellow("\n  Not logged in. Run 'gpu-cloud login' first.\n"));
       process.exit(1);
     }
 

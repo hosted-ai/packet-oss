@@ -1,7 +1,7 @@
 /**
  * Pod Failure Alert Email Template
  *
- * Sends an urgent email to SUPPORT_EMAIL when a customer pod
+ * Sends an urgent email to support@hosted.ai when a customer pod
  * transitions to a failed status, including all relevant debugging info.
  */
 
@@ -30,7 +30,7 @@ interface PodFailureAlertParams {
 export async function sendPodFailureAlertEmail(
   params: PodFailureAlertParams
 ): Promise<void> {
-  const to = process.env.SUPPORT_EMAIL || "support@example.com";
+  const to = "support@hosted.ai";
 
   const detailRows = [
     ["Pod Name", params.podName],
@@ -60,7 +60,7 @@ export async function sendPodFailureAlertEmail(
     .map(([label, value]) => `- ${label}: ${value}`)
     .join("\n");
 
-  const adminUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://example.com"}/admin?tab=pods`;
+  const adminUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://localhost:3000"}/admin?tab=pods`;
 
   const body = `
     ${emailDangerBox(`<p style="margin: 0; font-size: 16px; color: #991b1b;"><strong>URGENT: Pod Failed</strong></p>

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The OpenAI-Compatible API Gateway provides a standardized interface for interacting with your deployed AI models using the same API format as OpenAI's GPT models. This means you can use existing OpenAI client libraries, tools, and integrations with your self-hosted models on GPU Cloud Platform.
+The OpenAI-Compatible API Gateway provides a standardized interface for interacting with your deployed AI models using the same API format as OpenAI's GPT models. This means you can use existing OpenAI client libraries, tools, and integrations with your self-hosted models on Packet.ai.
 
 ### Prerequisites
 
@@ -11,7 +11,7 @@ Before using the API Gateway, ensure you have:
 1. **An active GPU subscription** with a running pod
 2. **vLLM deployed and running** on your pod (via Hugging Face deployment or manual setup)
 3. **Port 8000 exposed as a service** using the "Expose Service" feature in your dashboard
-4. **A GPU Cloud Platform API key** created in your dashboard under API Keys
+4. **A Packet.ai API key** created in your dashboard under API Keys
 
 ### Why Use the API Gateway?
 
@@ -34,18 +34,18 @@ Create an API key in your dashboard under **Settings → API Keys**. Your key wi
 pk_live_abc123...
 ```
 
-### 2. Use the GPU Cloud Platform Proxy Endpoint
+### 2. Use the Packet.ai Proxy Endpoint
 
-Point your OpenAI SDK to the GPU Cloud Platform API gateway:
+Point your OpenAI SDK to the Packet.ai API gateway:
 
 ```
-https://YOUR_DOMAIN/api/v1
+https://dash.packet.ai/api/v1
 ```
 
 ### 3. Make Your First Request
 
 ```bash
-curl https://YOUR_DOMAIN/api/v1/chat/completions \
+curl https://dash.packet.ai/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer pk_live_YOUR_API_KEY" \
   -d '{
@@ -66,7 +66,7 @@ curl https://YOUR_DOMAIN/api/v1/chat/completions \
 from openai import OpenAI
 
 client = OpenAI(
-    base_url="https://YOUR_DOMAIN/api/v1",
+    base_url="https://dash.packet.ai/api/v1",
     api_key="pk_live_YOUR_API_KEY"
 )
 
@@ -355,9 +355,9 @@ python -m vllm.entrypoints.openai.api_server \
 ```python
 from openai import OpenAI
 
-# Initialize client with GPU Cloud Platform gateway
+# Initialize client with Packet.ai gateway
 client = OpenAI(
-    base_url="https://YOUR_DOMAIN/api/v1",
+    base_url="https://dash.packet.ai/api/v1",
     api_key="pk_live_YOUR_API_KEY"
 )
 
@@ -381,7 +381,7 @@ print(response.choices[0].message.content)
 import OpenAI from 'openai';
 
 const client = new OpenAI({
-  baseURL: 'https://YOUR_DOMAIN/api/v1',
+  baseURL: 'https://dash.packet.ai/api/v1',
   apiKey: 'pk_live_YOUR_API_KEY',
 });
 
@@ -404,7 +404,7 @@ async function chat() {
 from langchain_openai import ChatOpenAI
 
 llm = ChatOpenAI(
-    base_url="https://YOUR_DOMAIN/api/v1",
+    base_url="https://dash.packet.ai/api/v1",
     api_key="pk_live_YOUR_API_KEY",
     model="auto",
     temperature=0.7
@@ -420,7 +420,7 @@ print(response.content)
 from llama_index.llms.openai_like import OpenAILike
 
 llm = OpenAILike(
-    api_base="https://YOUR_DOMAIN/api/v1",
+    api_base="https://dash.packet.ai/api/v1",
     api_key="pk_live_YOUR_API_KEY",
     model="auto"
 )
@@ -433,7 +433,7 @@ print(response.text)
 
 ```bash
 # Basic request
-curl https://YOUR_DOMAIN/api/v1/chat/completions \
+curl https://dash.packet.ai/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer pk_live_YOUR_API_KEY" \
   -d '{
@@ -442,7 +442,7 @@ curl https://YOUR_DOMAIN/api/v1/chat/completions \
   }'
 
 # With streaming
-curl https://YOUR_DOMAIN/api/v1/chat/completions \
+curl https://dash.packet.ai/api/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer pk_live_YOUR_API_KEY" \
   -N \
@@ -530,7 +530,7 @@ curl https://YOUR_ENDPOINT/v1/models
 - Wait for model to finish loading (check deployment logs)
 
 #### "Authentication failed"
-- Make sure you're using a valid GPU Cloud Platform API key (starts with `pk_live_`)
+- Make sure you're using a valid Packet.ai API key (starts with `pk_live_`)
 - Include the `Authorization: Bearer YOUR_KEY` header
 - Check that your API key hasn't been revoked in the dashboard
 

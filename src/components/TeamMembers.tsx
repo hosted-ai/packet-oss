@@ -75,6 +75,7 @@ export default function TeamMembers({ token, isOwner = true }: TeamMembersProps)
         throw new Error(data.error || "Failed to invite team member");
       }
 
+      import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.TEAM_MEMBER_INVITED)).catch(() => {});
       setSuccess(`Invitation sent to ${inviteEmail}`);
       setInviteEmail("");
       setInviteName("");

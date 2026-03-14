@@ -44,6 +44,7 @@ export function InvestorsTab({
   const [nodes, setNodes] = useState<NodeOption[]>([]);
   const [nodesLoading, setNodesLoading] = useState(false);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(new Set());
+  const [pixelFactoryChecked, setPixelFactoryChecked] = useState(false);
   const [saving, setSaving] = useState(false);
   const [nodeSearch, setNodeSearch] = useState("");
   const [savingShare, setSavingShare] = useState<string | null>(null);
@@ -115,10 +116,15 @@ export function InvestorsTab({
 
     // Parse existing assignedNodeIds to pre-select matching nodes.
     // Format is "pools:X,Y,Z" — we reverse-map pool IDs back to nodes.
-    // Also handle legacy direct node IDs.
+    // Also handle legacy direct node IDs and "pixel-factory".
     const savedPoolIds = new Set<number>();
     const directNodeIds = new Set<string>();
+    let hasPxl = false;
     for (const nid of investor.assignedNodeIds || []) {
+      if (nid === "pixel-factory") {
+        hasPxl = true;
+        continue;
+      }
       const poolsMatch = nid.match(/^pools:(.+)$/);
       if (poolsMatch) {
         poolsMatch[1].split(",").map(Number).filter((n) => !isNaN(n) && n > 0).forEach((pid) => savedPoolIds.add(pid));
@@ -126,6 +132,7 @@ export function InvestorsTab({
         directNodeIds.add(nid);
       }
     }
+    setPixelFactoryChecked(hasPxl);
     // We'll resolve savedPoolIds to nodes once nodes are loaded (see useEffect below).
     // For now, store pool IDs to resolve after nodes load.
     setSavedPoolIdsForResolve(savedPoolIds);
@@ -155,6 +162,9 @@ export function InvestorsTab({
 
       // Save as "pools:X,Y,Z" format (the investor stats API handles this)
       const allIds: string[] = [];
+      if (pixelFactoryChecked) {
+        allIds.push("pixel-factory");
+      }
       if (allPoolIds.size > 0) {
         allIds.push(`pools:${Array.from(allPoolIds).sort((a, b) => a - b).join(",")}`);
       }
@@ -200,13 +210,16 @@ export function InvestorsTab({
   function getAssignmentLabel(inv: Investor): string {
     const ids = inv.assignedNodeIds || [];
     if (ids.length === 0) return "Assign Nodes";
+    const hasPxl = ids.includes("pixel-factory");
     let poolCount = 0;
     for (const nid of ids) {
       const m = nid.match(/^pools:(.+)$/);
       if (m) poolCount += m[1].split(",").filter(Boolean).length;
     }
-    if (poolCount > 0) return `${poolCount} pool${poolCount !== 1 ? "s" : ""}`;
-    return `${ids.length} assigned`;
+    const parts: string[] = [];
+    if (poolCount > 0) parts.push(`${poolCount} pool${poolCount !== 1 ? "s" : ""}`);
+    if (hasPxl) parts.push("PXL");
+    return parts.length > 0 ? parts.join(" + ") : `${ids.length} assigned`;
   }
 
   /** Count total pools that will be saved from selected nodes */
@@ -400,6 +413,33 @@ export function InvestorsTab({
             </div>
 
             <div className="flex-1 overflow-y-auto px-6 py-3">
+              {/* Pixel Factory toggle */}
+              <label
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors mb-3 ${
+                  pixelFactoryChecked
+                    ? "bg-violet-50 border border-violet-200"
+                    : "hover:bg-gray-50 border border-[#e4e7ef]"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={pixelFactoryChecked}
+                  onChange={() => setPixelFactoryChecked((v) => !v)}
+                  className="w-4 h-4 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-[#0b0f1c]">Pixel Factory</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">Image &amp; Video</span>
+                    <span className="text-[10px] text-[#5b6476]">RTX PRO 6000 Blackwell</span>
+                    <span className="text-[10px] text-[#9ca3af]">8 GPUs</span>
+                  </div>
+                  <div className="text-xs text-[#5b6476] mt-0.5">
+                    ComfyUI image/video generation service revenue
+                  </div>
+                </div>
+              </label>
+
               {nodesLoading ? (
                 <div className="py-8 text-center text-[#5b6476]">Loading nodes...</div>
               ) : filteredNodes.length === 0 ? (
@@ -484,7 +524,7 @@ export function InvestorsTab({
                 </button>
                 <button
                   onClick={saveAssignment}
-                  disabled={saving || selectedNodeIds.size === 0}
+                  disabled={saving || (selectedNodeIds.size === 0 && !pixelFactoryChecked)}
                   className="px-4 py-2 bg-[#1a4fff] hover:bg-[#1238c9] text-white rounded-lg text-sm font-medium transition-colors disabled:bg-gray-400"
                 >
                   {saving ? "Saving..." : `Save (${selectedNodeIds.size} node${selectedNodeIds.size !== 1 ? "s" : ""})`}

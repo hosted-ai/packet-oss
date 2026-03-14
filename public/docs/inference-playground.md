@@ -20,7 +20,7 @@ The Inference Playground is an interactive web-based interface for testing and e
 
 ### Accessing the Playground
 
-1. Navigate to your Dashboard
+1. Navigate to your Packet.ai Dashboard
 2. Select a GPU instance with a deployed model
 3. Click the **"Playground"** tab or button
 4. The playground loads automatically with your model

@@ -1,7 +1,7 @@
 /**
  * GPUaaS Admin API Client
  *
- * Cookie-based authentication client for the admin-console.example.com API.
+ * Cookie-based authentication client for the GPUaaS admin API.
  * This client manages session cookies internally and re-authenticates as needed.
  *
  * @module gpuaas-admin/client
@@ -10,7 +10,7 @@
 import type { LoginResponse, APIError } from "./types";
 
 const GPUAAS_ADMIN_URL =
-  process.env.GPUAAS_ADMIN_URL || "https://admin-console.example.com";
+  process.env.GPUAAS_ADMIN_URL || "http://localhost:3001";
 const GPUAAS_ADMIN_USER = process.env.GPUAAS_ADMIN_USER!;
 const GPUAAS_ADMIN_PASSWORD = process.env.GPUAAS_ADMIN_PASSWORD!;
 

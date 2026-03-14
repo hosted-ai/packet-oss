@@ -1,3 +1,5 @@
+import { getAppUrl } from "@/lib/branding";
+
 type BreadcrumbItem = { name: string; href: string };
 
 export default function BreadcrumbJsonLd({ items }: { items: BreadcrumbItem[] }) {
@@ -8,7 +10,7 @@ export default function BreadcrumbJsonLd({ items }: { items: BreadcrumbItem[] })
       "@type": "ListItem",
       position: i + 1,
       name: item.name,
-      item: item.href.startsWith("http") ? item.href : `https://example.com${item.href}`,
+      item: item.href.startsWith("http") ? item.href : `${getAppUrl()}${item.href}`,
     })),
   };
 

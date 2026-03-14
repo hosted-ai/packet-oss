@@ -1,6 +1,7 @@
 import { sendEmail } from "../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButton, emailSuccessBox, emailWarningBox, emailDangerBox, emailInfoBox, emailSignoff, plainTextFooter } from "../utils";
 import { loadTemplate } from "../template-loader";
+import { getBrandName } from "@/lib/branding";
 
 export async function sendHfDeploymentEmail(params: {
   to: string;
@@ -54,7 +55,7 @@ You can view the logs in your dashboard for more details, or try deploying again
 
 Go to Dashboard: ${dashboardUrl}
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   const templateSlug = isSuccess ? "model-deployed" : "model-deploy-failed";
@@ -100,7 +101,7 @@ Your GPU is being provisioned. View connection details in your dashboard.
 
 Open Dashboard: ${dashboardUrl}
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(
@@ -146,7 +147,7 @@ Need to launch another GPU? Head to your dashboard.
 
 Go to Dashboard: ${dashboardUrl}
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(
@@ -192,7 +193,7 @@ You can monitor the deployment progress in your dashboard.
 
 Go to Dashboard: ${dashboardUrl}
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(

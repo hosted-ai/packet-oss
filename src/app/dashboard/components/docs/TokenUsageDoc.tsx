@@ -133,7 +133,7 @@ export function TokenUsageDoc() {
 
       <h2>Cost Estimation</h2>
       <p>
-        While GPU Cloud charges by GPU-hour (not tokens), the dashboard provides
+        While the platform charges by GPU-hour (not tokens), the dashboard provides
         comparative cost estimates to show your savings:
       </p>
 
@@ -143,7 +143,7 @@ export function TokenUsageDoc() {
 ─────────────────────────────────────────────
 OpenAI GPT-4 equivalent:    $1,254.38
 Claude 3.5 Sonnet equiv:      $876.45
-GPU Cloud GPU-hour cost:       $32.40
+Platform GPU-hour cost:        $32.40
 ─────────────────────────────────────────────
 Savings this period:         $1,221.98 (97.4%)`}</code>
       </pre>
@@ -330,7 +330,7 @@ Authorization: Bearer YOUR_API_KEY`}</code>
       <h2>Need Help?</h2>
       <p>
         Contact us at{" "}
-        <a href="mailto:support@example.com">support@example.com</a>
+        our support team via the <strong>Support</strong> tab
       </p>
     </div>
   );

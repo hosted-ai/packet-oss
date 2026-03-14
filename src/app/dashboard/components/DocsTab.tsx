@@ -7,7 +7,9 @@ import {
   GettingStartedDoc,
   HuggingFaceDoc,
   Pro6000BlackwellDoc,
+  OpenAIGatewayDoc,
   InferencePlaygroundDoc,
+  TokenFactoryDoc,
   GPUMetricsDoc,
   TokenUsageDoc,
   ServiceExposureDoc,
@@ -36,7 +38,9 @@ type DocSection =
   | "getting-started"
   | "huggingface"
   | "pro-6000-blackwell"
+  | "openai-gateway"
   | "inference-playground"
+  | "token-factory"
   | "gpu-metrics"
   | "token-usage"
   | "service-exposure"
@@ -61,7 +65,9 @@ const navItems: NavItemConfig[] = [
   { id: "huggingface", label: "HuggingFace Deploy", shortLabel: "HF" },
   { id: "pro-6000-blackwell", label: "Pro 6000 Blackwell", shortLabel: "Pro 6000", isNew: true },
   // Using Your Models
+  { id: "openai-gateway", label: "OpenAI API", shortLabel: "API", isNew: true },
   { id: "inference-playground", label: "Playground", shortLabel: "Play", isNew: true },
+  { id: "token-factory", label: "Token Factory", shortLabel: "Factory", isNew: true },
   // Monitoring & Analytics
   { id: "gpu-metrics", label: "GPU Metrics", shortLabel: "GPU", isNew: true },
   { id: "token-usage", label: "Token Usage", shortLabel: "Tokens", isNew: true },
@@ -90,8 +96,12 @@ export function DocsTab({ isOwner }: DocsTabProps) {
       case "pro-6000-blackwell":
         return <Pro6000BlackwellDoc />;
       // Using Your Models
+      case "openai-gateway":
+        return <OpenAIGatewayDoc />;
       case "inference-playground":
         return <InferencePlaygroundDoc />;
+      case "token-factory":
+        return <TokenFactoryDoc />;
       // Monitoring & Analytics
       case "gpu-metrics":
         return <GPUMetricsDoc />;
@@ -156,12 +166,9 @@ export function DocsTab({ isOwner }: DocsTabProps) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-zinc-900">Documentation</h1>
-        <a
-          href="mailto:support@example.com"
-          className="text-sm text-teal-600 hover:text-teal-700 font-medium"
-        >
-          Need help? Contact Support
-        </a>
+        <span className="text-sm text-teal-600 font-medium">
+          Need help? Use the Support tab
+        </span>
       </div>
 
       {/* Navigation Select */}
@@ -181,7 +188,9 @@ export function DocsTab({ isOwner }: DocsTabProps) {
             <option value="pro-6000-blackwell">Pro 6000 Blackwell ✨</option>
           </optgroup>
           <optgroup label="Using Your Models">
+            <option value="openai-gateway">OpenAI API ✨</option>
             <option value="inference-playground">Playground ✨</option>
+            <option value="token-factory">Token Factory ✨</option>
           </optgroup>
           <optgroup label="Monitoring">
             <option value="gpu-metrics">GPU Metrics ✨</option>

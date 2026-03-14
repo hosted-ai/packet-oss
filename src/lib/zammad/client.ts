@@ -98,7 +98,7 @@ export async function searchOrganizations(
 
 /**
  * Create a new organization
- * For GPU Cloud, we add the custom 'brand' attribute with value 'packet'
+ * We add the custom 'brand' attribute
  */
 export async function createOrganization(
   input: CreateOrganizationInput
@@ -287,7 +287,7 @@ export async function searchAllTickets(query: string): Promise<ZammadTicket[]> {
 
 /**
  * Get tickets by customer ID
- * Only returns tickets from GPU Cloud groups
+ * Only returns tickets from platform support groups
  */
 export async function getTicketsByCustomer(
   customerId: number
@@ -352,51 +352,51 @@ export async function createArticle(
 }
 
 // ============================================================================
-// High-level GPU Cloud helpers
+// High-level platform helpers
 // ============================================================================
 
 // The group to create tickets in
-const PACKET_SUPPORT_GROUP = "Support::L1";
+const PACKET_SUPPORT_GROUP = process.env.ZAMMAD_SUPPORT_GROUP || "Support::L1 - packet.ai";
 
-// All GPU Cloud groups we should show tickets from
-const PACKET_GROUP_NAMES = [
-  "Support::L1",
-  "Support::Escalated",
-];
+// All support groups we should show tickets from
+const PACKET_GROUP_NAMES = (process.env.ZAMMAD_GROUP_NAMES || "Support::L1 - packet.ai,Support::Escalated - packet.ai").split(",").map(s => s.trim());
 
 // Cached group IDs for support groups
 let packetGroupIds: number[] | null = null;
 
 /**
- * Get the Zammad group IDs for GPU Cloud groups.
- * Results are cached for the lifetime of the process.
+ * Get the Zammad group IDs for support groups.
+ * Results are cached for the lifetime of the process, but only if non-empty.
+ * Empty results are NOT cached — this prevents permanent breakage if
+ * the Zammad API is temporarily unreachable during process startup.
  */
 async function getPacketGroupIds(): Promise<number[]> {
-  if (packetGroupIds) return packetGroupIds;
+  if (packetGroupIds && packetGroupIds.length > 0) return packetGroupIds;
 
   const allGroups = await getGroups();
-  packetGroupIds = allGroups
+  const ids = allGroups
     .filter((g) => PACKET_GROUP_NAMES.some((name) => g.name === name))
     .map((g) => g.id);
 
-  if (packetGroupIds.length === 0) {
-    console.warn("[Zammad] No GPU Cloud groups found! Expected:", PACKET_GROUP_NAMES);
-  } else {
-    console.log("[Zammad] GPU Cloud group IDs:", packetGroupIds);
+  if (ids.length === 0) {
+    console.warn("[Zammad] No support groups found! Expected:", PACKET_GROUP_NAMES);
+    return ids; // Don't cache — retry next time
   }
 
+  packetGroupIds = ids;
+  console.log("[Zammad] Support group IDs:", packetGroupIds);
   return packetGroupIds;
 }
 
 /**
- * Filter tickets to only those in GPU Cloud groups
+ * Filter tickets to only those in support groups
  */
 function filterPacketTickets(tickets: ZammadTicket[], groupIds: number[]): ZammadTicket[] {
   return tickets.filter((t) => groupIds.includes(t.group_id));
 }
 
 /**
- * Get or create a Zammad organization for a GPU Cloud customer.
+ * Get or create a Zammad organization for a platform customer.
  * Organizations are created with brand='packet' custom attribute.
  */
 export async function getOrCreatePacketOrganization(
@@ -427,13 +427,13 @@ export async function getOrCreatePacketOrganization(
     name: orgName,
     shared: true,
     active: true,
-    brand: "packet", // Custom attribute for GPU Cloud
-    note: `GPU Cloud customer. Stripe ID: ${stripeCustomerId}`,
+    brand: process.env.ZAMMAD_BRAND || "packet",
+    note: `Platform customer. Stripe ID: ${stripeCustomerId}`,
   });
 }
 
 /**
- * Get or create a Zammad user for a GPU Cloud customer.
+ * Get or create a Zammad user for a platform customer.
  * Users are associated with their organization.
  */
 export async function getOrCreatePacketUser(
@@ -487,7 +487,7 @@ export const ZAMMAD_STATES = {
 } as const;
 
 /**
- * Create a support ticket for a GPU Cloud customer.
+ * Create a support ticket for a platform customer.
  * Tickets are created with type 'web' in the designated support group.
  */
 export async function createPacketSupportTicket(params: {
@@ -570,7 +570,7 @@ export async function reopenTicket(ticketId: number): Promise<ZammadTicket> {
 
 /**
  * Get all tickets for admin view (with optional filters)
- * Only returns tickets from GPU Cloud groups (L1 and Escalated)
+ * Only returns tickets from support groups
  */
 export async function getAllTickets(params?: {
   state?: "open" | "closed" | "all";
@@ -599,7 +599,7 @@ export async function getAllTickets(params?: {
     tickets = allTickets;
   }
 
-  // Filter to only GPU Cloud groups
+  // Filter to only support groups
   const filtered = filterPacketTickets(tickets, groupIds);
 
   // Apply pagination

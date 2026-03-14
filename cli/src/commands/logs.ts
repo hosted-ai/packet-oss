@@ -10,7 +10,7 @@ export const logsCommand = new Command("logs")
   .option("-f, --follow", "Follow status updates")
   .action(async (id, options) => {
     if (!getApiKey()) {
-      console.log(chalk.yellow("\n  Not logged in. Run 'packet login' first.\n"));
+      console.log(chalk.yellow("\n  Not logged in. Run 'gpu-cloud login' first.\n"));
       process.exit(1);
     }
 

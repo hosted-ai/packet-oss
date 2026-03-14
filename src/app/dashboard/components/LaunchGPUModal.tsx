@@ -270,6 +270,13 @@ export function LaunchGPUModal({
     }
 
     // Close modal immediately — provisioning happens in the background
+    import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.GPU_DEPLOYED)).catch(() => {});
+    if (typeof (window as any).my_analytics !== "undefined") {
+      (window as any).my_analytics.goal("dc2zgi7efaqu6o3h");
+    }
+    if (typeof (window as any).lintrk === "function") {
+      (window as any).lintrk("track", { conversion_id: 24436340 });
+    }
     onSuccess({ name: instanceName.trim(), poolName });
     onClose();
 
@@ -369,7 +376,7 @@ export function LaunchGPUModal({
                   <h3 className="font-semibold text-[var(--ink)] mb-2">Unlock GPU Access</h3>
                   <p className="text-sm text-[var(--muted)] mb-4">
                     Add funds to deploy GPU instances.<br />
-                    Your free account includes 10,000 tokens for LLM inference.
+                    Your free account includes 10,000 tokens for Token Factory.
                   </p>
                   <div className="grid grid-cols-2 gap-2 mb-3">
                     {[50, 100, 250, 500].map((amount) => (

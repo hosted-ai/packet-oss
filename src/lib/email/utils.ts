@@ -4,15 +4,16 @@
  */
 
 import type { EmailBranding } from './tenant-branding';
+import { getBrandName, getAppUrl, getPrimaryColor, getAccentColor } from '../branding';
 
-// ── Default branding values ──────────────────────────────────────────────────
+// ── Default branding values ─────────────────────────────────────────────────
 // Used when no branding object is passed — keeps every existing call-site
 // producing byte-identical output.
 
-const DEFAULT_BRAND_NAME = process.env.NEXT_PUBLIC_BRAND_NAME || 'GPU Cloud';
+const DEFAULT_BRAND_NAME = getBrandName();
 const DEFAULT_PRIMARY_COLOR = '#1a4fff';
 const DEFAULT_ACCENT_COLOR = '#18b6a8';
-const DEFAULT_DASHBOARD_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://example.com';
+const DEFAULT_DASHBOARD_URL = getAppUrl();
 
 /**
  * Escape HTML special characters to prevent injection
@@ -118,7 +119,7 @@ Unsubscribe: ${unsubscribeUrl}`;
 // maximum deliverability (spam-filter safe: no <style> blocks, no CSS classes,
 // balanced text-to-image ratio, proper List-Unsubscribe hints, physical address).
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://example.com";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || getAppUrl();
 
 /**
  * Full HTML email wrapper.
@@ -146,7 +147,7 @@ export function emailLayout(opts: {
 
   // For the default brand we render the stylized "Packet<span>.ai" header.
   // For tenant brands we render the plain brand name in their primary color.
-  const headerHtml = brand === DEFAULT_BRAND_NAME
+  const headerHtml = brand === 'Packet.ai'
     ? `<h1 style="margin: 0; font-size: 22px; font-weight: 700; color: #0b0f1c; letter-spacing: -0.3px;">Packet<span style="color: ${primary};">.</span>ai</h1>`
     : `<h1 style="margin: 0; font-size: 22px; font-weight: 700; color: ${primary}; letter-spacing: -0.3px;">${escapeHtml(brand)}</h1>`;
 
@@ -197,7 +198,7 @@ export function emailLayout(opts: {
 
 /**
  * Primary call-to-action button
- * Uses brand primary color (default: GPU Cloud blue #1a4fff) — solid color for Outlook compatibility
+ * Uses brand primary color (default: #1a4fff) — solid color for Outlook compatibility
  */
 export function emailButton(label: string, url: string, branding?: EmailBranding): string {
   const primary = branding?.primaryColor || DEFAULT_PRIMARY_COLOR;

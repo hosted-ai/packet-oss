@@ -10,6 +10,7 @@ import {
 import { generateAdminBypassToken, generateCustomerToken } from "@/lib/customer-auth";
 import { logAdminActivity } from "@/lib/admin-activity";
 import { cacheCustomer, markCustomerCacheDeleted } from "@/lib/customer-cache";
+import { getBrandName, getDashboardUrl } from "@/lib/branding";
 import Stripe from "stripe";
 
 async function sendCredentialsEmail(params: {
@@ -19,19 +20,19 @@ async function sendCredentialsEmail(params: {
 }) {
   await sendEmail({
     to: params.to,
-    subject: "Your GPU Cloud login link",
+    subject: `Your ${getBrandName()} login link`,
     html: emailLayout({
-      preheader: "Your login link for GPU Cloud",
+      preheader: `Your login link for ${getBrandName()}`,
       body: `
         ${emailGreeting(params.customerName)}
-        ${emailText("Here is your login link for GPU Cloud:")}
+        ${emailText(`Here is your login link for ${getBrandName()}:`)}
         ${emailButton("Open Dashboard", params.dashboardUrl)}
-        ${emailMuted('This link expires in 1 hour. Request a new one at <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account" style="color: #1a4fff;">${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account</a>')}
+        ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="${getDashboardUrl()}/account" style="color: #1a4fff;">${getDashboardUrl()}/account</a>`)}
         ${emailMuted("Did not request this? You can safely ignore this email.")}
         ${emailSignoff()}
       `,
     }),
-    text: `Hi ${params.customerName},\n\nHere is your login link for GPU Cloud:\n\nOpen Dashboard: ${params.dashboardUrl}\n\nThis link expires in 1 hour. Request a new one at ${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account\n\nDid not request this? You can ignore this email.\n${plainTextFooter()}`,
+    text: `Hi ${params.customerName},\n\nHere is your login link for ${getBrandName()}:\n\nOpen Dashboard: ${params.dashboardUrl}\n\nThis link expires in 1 hour. Request a new one at ${getDashboardUrl()}/account\n\nDid not request this? You can ignore this email.\n${plainTextFooter()}`,
   });
 }
 
@@ -81,7 +82,7 @@ export async function POST(
             const billingType = customer.metadata?.billing_type || "hourly";
             const team = await createTeam({
               name: `${safeName}-${billingType}-${Date.now()}`,
-              description: `GPU Cloud - Auto-provisioned by admin`,
+              description: `${getBrandName()} - Auto-provisioned by admin`,
               color: "#6366F1",
               members: [
                 {

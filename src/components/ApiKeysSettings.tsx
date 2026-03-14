@@ -86,6 +86,7 @@ export function ApiKeysSettings({ token }: ApiKeysSettingsProps) {
       }
 
       const data = await response.json();
+      import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.API_KEY_CREATED)).catch(() => {});
       setNewKey(data.apiKey);
       fetchKeys();
     } catch (err) {

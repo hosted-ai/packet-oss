@@ -7,7 +7,15 @@
  */
 
 import { hostedaiRequest } from "./client";
-import { DEFAULT_POLICIES } from "./types";
+import { getDefaultPoliciesSync } from "./default-policies";
+
+// Helper to get DEFAULT_POLICIES synchronously
+const DEFAULT_POLICIES = new Proxy({} as { resource: string }, {
+  get(_target, prop: string) {
+    const policies = getDefaultPoliciesSync();
+    return policies[prop as keyof typeof policies];
+  }
+});
 
 export interface ResourcePolicyRegion {
   region_id: number;

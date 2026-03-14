@@ -6,8 +6,9 @@
 
 import { sendEmail } from "../../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButton, emailDangerBox, emailDetailBox, emailInfoBox, emailMuted, emailSignoff, plainTextFooter } from "../../utils";
+import { getBrandName, getSupportEmail, getAppUrl } from "@/lib/branding";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://example.com";
+const APP_URL = getAppUrl();
 
 /**
  * Send email to customers when their server is being removed (7-day notice)
@@ -28,7 +29,7 @@ export async function sendCustomerServerRemovalNotice(params: {
   const body = `
     ${emailDangerBox(`<p style="margin: 0; font-size: 15px; color: #991b1b;"><strong>Action Required: Server Removal in ${params.daysRemaining} Days</strong></p>`)}
     ${emailGreeting(safeCustomerName || "there")}
-    ${emailText(`We're writing to inform you that the server you're currently using will be removed on <strong>${safeRemovalDate}</strong>.`)}
+    ${emailText(`We're writing to inform you that the server you're currently using on ${getBrandName()} will be removed on <strong>${safeRemovalDate}</strong>.`)}
     ${emailDetailBox(`
       <p style="margin: 0 0 8px 0; font-size: 13px; font-weight: 600; color: #5b6476;">Server Details</p>
       <table role="presentation" cellpadding="0" cellspacing="0" style="width: 100%;">
@@ -56,7 +57,7 @@ export async function sendCustomerServerRemovalNotice(params: {
     `)}
     ${emailText("We have plenty of other GPU servers available for you to choose from. Simply visit your dashboard to find a replacement that meets your needs.")}
     ${emailButton("Find a New Server", `${APP_URL}/dashboard`)}
-    ${emailMuted(`If you have any questions or need assistance migrating, please contact us at <a href="mailto:${process.env.SUPPORT_EMAIL || "support@example.com"}" style="color: #1a4fff;">${process.env.SUPPORT_EMAIL || "support@example.com"}</a>.`)}
+    ${emailMuted(`If you have any questions or need assistance migrating, please contact us at <a href="mailto:${getSupportEmail()}" style="color: #1a4fff;">${getSupportEmail()}</a>.`)}
     ${emailSignoff()}
   `;
 
@@ -66,7 +67,7 @@ export async function sendCustomerServerRemovalNotice(params: {
 
 Hi${params.customerName ? ` ${params.customerName}` : " there"},
 
-We're writing to inform you that the server you're currently using will be removed on ${params.removalDate}.
+We're writing to inform you that the server you're currently using on ${getBrandName()} will be removed on ${params.removalDate}.
 
 Server Details:
 - Server: ${params.serverName}
@@ -82,9 +83,9 @@ We have plenty of other GPU servers available for you to choose from. Simply vis
 
 Find a new server: ${APP_URL}/dashboard
 
-If you have any questions or need assistance migrating, please contact us at ${process.env.SUPPORT_EMAIL || "support@example.com"}.
+If you have any questions or need assistance migrating, please contact us at ${getSupportEmail()}.
 
-The ${process.env.NEXT_PUBLIC_BRAND_NAME || "GPU Cloud"} Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   await sendEmail({

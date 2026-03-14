@@ -113,25 +113,25 @@ export async function GET(request: NextRequest) {
       // Hourly stats for the last 24 hours (raw query for grouping)
       prisma.$queryRaw`
         SELECT
-          strftime('%Y-%m-%d %H:00', createdAt) as hour,
+          DATE_FORMAT(created_at, '%Y-%m-%d %H:00') as hour,
           COUNT(*) as plays,
           SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END) as wins
-        FROM GamePlay
-        WHERE createdAt >= datetime('now', '-24 hours')
-        GROUP BY strftime('%Y-%m-%d %H:00', createdAt)
+        FROM game_play
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d %H:00')
         ORDER BY hour DESC
       ` as Promise<Array<{ hour: string; plays: number; wins: number }>>,
 
       // Daily stats for the last 30 days
       prisma.$queryRaw`
         SELECT
-          date(createdAt) as date,
+          DATE(created_at) as date,
           COUNT(*) as plays,
           SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END) as wins,
-          SUM(CASE WHEN voucherClaimed = 1 THEN 1 ELSE 0 END) as vouchers
-        FROM GamePlay
-        WHERE createdAt >= datetime('now', '-30 days')
-        GROUP BY date(createdAt)
+          SUM(CASE WHEN voucher_claimed = 1 THEN 1 ELSE 0 END) as vouchers
+        FROM game_play
+        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        GROUP BY DATE(created_at)
         ORDER BY date DESC
       ` as Promise<Array<{ date: string; plays: number; wins: number; vouchers: number }>>,
 

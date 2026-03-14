@@ -15,8 +15,8 @@ import { setupCommand } from "./commands/setup.js";
 const program = new Command();
 
 program
-  .name("packet")
-  .description("CLI for GPU cloud platform")
+  .name("gpu-cloud")
+  .description("CLI for GPU cloud platform — powered by hosted.ai")
   .version("1.0.0");
 
 // Authentication

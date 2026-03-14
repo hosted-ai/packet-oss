@@ -1,4 +1,5 @@
 import { delay } from "./utils";
+import { getBrandName, getDashboardUrl } from "@/lib/branding";
 
 const EMAILIT_API_KEY = process.env.EMAILIT_API_KEY;
 // Admin email for receiving copies of all transactional emails
@@ -25,7 +26,7 @@ async function sendEmailToRecipient(params: EmailParams, retries = 4): Promise<v
         Authorization: `Bearer ${EMAILIT_API_KEY}`,
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || "GPU Cloud <no-reply@example.com>",
+        from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
         to: params.to,
         subject: params.subject,
         html: params.html,
@@ -98,7 +99,7 @@ export async function sendEmailDirect(params: {
         Authorization: `Bearer ${EMAILIT_API_KEY}`,
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || "GPU Cloud <no-reply@example.com>",
+        from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
         ...params,
       }),
     });

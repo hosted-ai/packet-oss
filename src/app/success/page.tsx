@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { getBrandName, getAppUrl } from "@/lib/branding";
 
 function SuccessContent() {
   const searchParams = useSearchParams();
@@ -55,6 +56,35 @@ function SuccessContent() {
           clearInterval(intervalId);
           setAccountReady(true);
           setDashboardUrl(data.dashboardUrl);
+          if (typeof (window as any).lintrk === "function") {
+            (window as any).lintrk("track", { conversion_id: 24436340 });
+          }
+          // Growify v2 conversion — new signup with first payment
+          try {
+            const amountDollars = (data.amountCents || 0) / 100;
+            const price = amountDollars > 0 ? amountDollars : 50;
+            const nameParts = (data.name || "").split(" ");
+            const w = window as any;
+            w.grpQueue = w.grpQueue || [];
+            if (!w.grp) { w.grp = function() { w.grpQueue.push(arguments); }; }
+            w.grp('conversion', {
+              userEmail: data.email || email || '',
+              userFirstName: nameParts[0] || '',
+              userLastName: nameParts.slice(1).join(" ") || '',
+              userId: data.customerId || '',
+              orderId: sessionId || '',
+              tax: 0,
+              shipping: 0,
+              products: [{
+                productId: "signup-deposit",
+                productName: "Initial Wallet Deposit",
+                productPrice: price,
+                productBrand: "gpu-cloud",
+                productQuantity: 1,
+                purchaseValue: price,
+              }],
+            });
+          } catch { /* Growify not loaded */ }
           setTimeout(() => {
             window.location.href = data.dashboardUrl;
           }, 2000);
@@ -90,7 +120,7 @@ function SuccessContent() {
           <Link href="/" className="flex items-center">
             <Image
               src="/packet-logo.png"
-              alt="GPU Cloud"
+              alt={getBrandName()}
               width={120}
               height={32}
               className="h-7 w-auto"
@@ -141,7 +171,7 @@ function SuccessContent() {
           </div>
 
           <h1 className="text-3xl font-bold tracking-tight mb-3">
-            {isFreeTrial ? "Your free account is ready!" : "Welcome to GPU Cloud"}
+            {isFreeTrial ? "Your free account is ready!" : `Welcome to ${getBrandName()}`}
           </h1>
 
           <p className="text-zinc-500 mb-10">
@@ -220,7 +250,7 @@ function SuccessContent() {
                   </div>
                   <div className="pt-1">
                     <p className="font-medium text-zinc-900">
-                      {isFreeTrial ? "Start using the API" : "Launch your first GPU"}
+                      {isFreeTrial ? "Start using Token Factory" : "Launch your first GPU"}
                     </p>
                     <p className="text-sm text-zinc-500">
                       {isFreeTrial
@@ -254,7 +284,7 @@ function SuccessContent() {
               Resend Login Link
             </Link>
             <Link
-              href="https://www.the platform/support/"
+              href={`${getAppUrl()}/support/`}
               className="px-6 py-3 border border-zinc-200 hover:border-zinc-300 text-zinc-700 rounded-lg text-sm font-medium transition-colors"
             >
               Contact Support
@@ -267,7 +297,10 @@ function SuccessContent() {
       <footer className="border-t border-zinc-100">
         <div className="mx-auto max-w-6xl px-6 py-6">
           <p className="text-center text-xs text-zinc-400">
-            &copy; {new Date().getFullYear()} GPU Cloud Platform
+            &copy; {new Date().getFullYear()} {getBrandName()} &middot; Powered by{" "}
+            <a href="https://hosted.ai" className="hover:text-zinc-600 transition-colors" target="_blank" rel="noopener noreferrer">
+              hosted.ai
+            </a>
           </p>
         </div>
       </footer>

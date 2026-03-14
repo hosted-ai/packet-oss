@@ -1,11 +1,27 @@
 import type { NextConfig } from "next";
+import { readFileSync } from "fs";
+import { join } from "path";
+
+function getPackageVersion(): string {
+  try {
+    const changelog = readFileSync(join(process.cwd(), "debian/changelog"), "utf-8");
+    const match = changelog.match(/^[^\s]+\s+\(([^)]+)\)/);
+    return match?.[1] ?? "unknown";
+  } catch {
+    return "";
+  }
+}
 
 const nextConfig: NextConfig = {
+  env: {
+    NEXT_PUBLIC_APP_VERSION: getPackageVersion(),
+  },
+  output: "standalone",
   images: {
     remotePatterns: [
       {
         protocol: "https",
-        hostname: "**",
+        hostname: process.env.NEXT_PUBLIC_APP_HOSTNAME || "packet.ai",
       },
     ],
   },

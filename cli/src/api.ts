@@ -24,7 +24,7 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error("Not authenticated. Run 'packet login' first.");
+    throw new Error("Not authenticated. Run 'gpu-cloud login' first.");
   }
 
   const url = `${getApiUrl()}/api/v1${endpoint}`;

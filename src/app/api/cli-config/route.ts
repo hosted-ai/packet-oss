@@ -1,4 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { isPro } from '@/lib/edition';
+import { getBrandName, getDashboardUrl, getSupportEmail } from '@/lib/branding';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -11,20 +13,48 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const brandName = process.env.NEXT_PUBLIC_BRAND_NAME || 'GPU Cloud';
-    const supportEmail = process.env.SUPPORT_EMAIL || 'support@example.com';
+    // In Pro edition with multi-tenancy, resolve tenant from request
+    if (isPro()) {
+      try {
+        const { getTenantFromRequest } = await import('@/lib/tenant');
+        const tenant = await getTenantFromRequest(request);
+
+        const primaryDomain = tenant.isDefault
+          ? new URL(getDashboardUrl()).hostname
+          : tenant.domains[0] || new URL(getDashboardUrl()).hostname;
+
+        const baseUrl = `https://${primaryDomain}`;
+
+        return NextResponse.json(
+          {
+            brandName: tenant.brandName,
+            apiBaseUrl: `${baseUrl}/api/v1`,
+            dashboardUrl: baseUrl,
+            docsUrl: tenant.isDefault ? `${baseUrl}/docs` : `${baseUrl}/api-docs`,
+            statusUrl: `${baseUrl}/status`,
+            supportEmail: tenant.supportEmail,
+            version: '1.0.0',
+          },
+          { headers: CORS_HEADERS },
+        );
+      } catch {
+        // Fall through to default behavior
+      }
+    }
+
+    // OSS / default behavior
+    const baseUrl = getDashboardUrl();
 
     return NextResponse.json(
       {
-        brandName,
+        brandName: getBrandName(),
         apiBaseUrl: `${baseUrl}/api/v1`,
         dashboardUrl: baseUrl,
         docsUrl: `${baseUrl}/docs`,
         statusUrl: `${baseUrl}/status`,
-        supportEmail,
+        supportEmail: getSupportEmail(),
         version: '1.0.0',
       },
       { headers: CORS_HEADERS },

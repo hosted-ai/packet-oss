@@ -1,6 +1,6 @@
-# GPU Cloud Platform Documentation
+# Packet.ai Documentation
 
-Welcome to the GPU Cloud Platform documentation! This guide covers all features for deploying and managing AI models on GPU infrastructure.
+Welcome to the Packet.ai documentation! This guide covers all features for deploying and managing AI models on GPU infrastructure.
 
 ## 📚 Documentation Index
 
@@ -142,9 +142,9 @@ System architecture and technical details:
 
 ## 🚀 Quick Links
 
-- **Live Documentation Site**: https://example.com/docs
-- **Dashboard**: https://example.com
-- **Support**: support@example.com
+- **Live Documentation Site**: https://dash.packet.ai/docs
+- **Dashboard**: https://dash.packet.ai
+- **Support**: support@packet.ai
 
 ---
 
@@ -239,13 +239,13 @@ Found a typo or want to improve the docs?
 
 1. Edit the markdown files in `/docs`
 2. Submit a pull request
-3. Or contact us at support@example.com
+3. Or contact us at support@packet.ai
 
 ---
 
 ## 📝 License
 
-Documentation © 2025 GPU Cloud Platform. All rights reserved.
+Documentation © 2025 Packet.ai. All rights reserved.
 
 ---
 
@@ -259,4 +259,4 @@ Documentation © 2025 GPU Cloud Platform. All rights reserved.
 
 **Last Updated**: January 2025
 **Version**: 2.0
-**Maintained by**: GPU Cloud Platform Team
+**Maintained by**: Packet.ai Team

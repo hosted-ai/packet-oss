@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { getBrandName } from "@/lib/branding";
 
 interface TwoFactorVerifyProps {
   token: string;
@@ -97,7 +98,7 @@ export default function TwoFactorVerify({
             <Link href="/" className="flex items-center">
               <Image
                 src="/packet-logo.png"
-                alt="GPU Cloud"
+                alt={getBrandName()}
                 width={140}
                 height={50}
                 className="h-10 w-auto"
@@ -172,7 +173,7 @@ export default function TwoFactorVerify({
           <Link href="/" className="flex items-center">
             <Image
               src="/packet-logo.png"
-              alt="GPU Cloud"
+              alt={getBrandName()}
               width={140}
               height={50}
               className="h-10 w-auto"
@@ -269,7 +270,15 @@ export default function TwoFactorVerify({
       <footer className="border-t border-[var(--line)]">
         <div className="mx-auto max-w-[1120px] px-6 py-6">
           <p className="text-center text-xs text-[var(--muted)]">
-            &copy; {new Date().getFullYear()} GPU Cloud Platform
+            &copy; {new Date().getFullYear()} {getBrandName()} &middot; Powered by{" "}
+            <a
+              href="https://hosted.ai"
+              className="text-[var(--blue)] hover:underline transition-colors"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              hosted.ai
+            </a>
           </p>
         </div>
       </footer>

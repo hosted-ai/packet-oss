@@ -52,9 +52,10 @@ next-env.d.ts
 /src/generated/prisma
 
 # Database files
-data/*.db
-data/*.db-journal
-data/*.db-wal
+*.db
+*.db-journal
+*.db-wal
+data/
 
 # Session tracking files (development only)
 local_memory.md
@@ -102,3 +103,7 @@ coordination/orchestration/*
 claude-flow
 # Removed Windows wrapper files per user request
 hive-mind-prompt-*.txt
+pnpm-lock.yaml
+dist/deb/
+packetdb-production-*
+.cache/

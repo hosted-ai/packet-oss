@@ -246,7 +246,7 @@ Content-Type: application/json
       <h2>Need Help?</h2>
       <p>
         Contact us at{" "}
-        <a href="mailto:support@example.com">support@example.com</a> for assistance with
+        our support team via the <strong>Support</strong> tab for assistance with
         budget configuration or billing questions.
       </p>
     </div>

@@ -12,6 +12,8 @@
  * - GpuTypesSubTab: GPU type configuration
  * - ProviderDetailsModal: Provider detail view/edit
  *
+ * File reduced from 1894 to ~450 lines through component extraction.
+ *
  * @module admin/components/ProvidersTab
  */
 

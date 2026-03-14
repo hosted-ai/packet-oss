@@ -3,6 +3,7 @@
  */
 
 import { hostedaiRequest, getCached, setCache, clearCache, getApiUrl, getApiKey } from "./client";
+import { recordSubscriptionLineage } from "@/lib/subscription-lineage";
 import { prisma } from "@/lib/prisma";
 import { getDefaultResourcePolicy } from "./policies";
 import { validateSSHParams } from "@/lib/ssh-validation";
@@ -534,6 +535,67 @@ export async function podAction(
   return hostedaiRequest<{ success: boolean }>("POST", "/pods/action", payload);
 }
 
+// DEPRECATED: Old restart method using unsubscribe + resubscribe
+// Use podAction() with action="restart" instead
+// Restart a GPUaaS pod subscription (unsubscribe + resubscribe)
+// Note: Ephemeral storage will be reset, but persistent storage will be preserved if provided
+export async function restartPoolSubscription(
+  subscriptionId: string | number,
+  teamId: string,
+  poolId: string | number,
+  vgpus: number = 1,
+  instanceTypeId: string,
+  ephemeralStorageBlockId: string,
+  imageUuid?: string,
+  persistentStorageBlockId?: string
+): Promise<{ subscription_id: string }> {
+  // Unsubscribe first
+  console.log("Restarting: unsubscribing from", subscriptionId);
+  await unsubscribeFromPool(subscriptionId, teamId, poolId);
+
+  // Wait for unsubscribe to complete
+  const maxAttempts = 60;
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const subs = await getPoolSubscriptions(teamId);
+    const existingSub = subs.find(s =>
+      String(s.id) === String(subscriptionId) ||
+      String(s.pool_id) === String(poolId)
+    );
+    if (!existingSub) {
+      console.log("Unsubscribe complete after", i + 1, "seconds");
+      break;
+    }
+    if (existingSub.status === "un_subscribing") {
+      continue;
+    }
+  }
+
+  // Resubscribe with same settings (including persistent storage if provided)
+  console.log("Restarting: resubscribing to pool", poolId, "with persistent storage:", persistentStorageBlockId || "none");
+  const newSubscription = await subscribeToPool({
+    pool_id: String(poolId),
+    team_id: teamId,
+    vgpus,
+    instance_type_id: instanceTypeId,
+    ephemeral_storage_block_id: ephemeralStorageBlockId,
+    persistent_storage_block_id: persistentStorageBlockId,
+    image_uuid: imageUuid,
+  });
+
+  // Record the lineage so metrics can be aggregated across restarts
+  // This allows the dashboard to show data as though it's the same pod
+  await recordSubscriptionLineage({
+    teamId,
+    previousSubscriptionId: String(subscriptionId),
+    newSubscriptionId: newSubscription.subscription_id,
+    poolId: String(poolId),
+    reason: "restart",
+  });
+
+  return newSubscription;
+}
+
 // Reimage a GPUaaS pod subscription (change image)
 export async function reimagePoolSubscription(
   subscriptionId: string | number,
@@ -867,30 +929,29 @@ export async function selectOptimalPool(
   let vramDataAvailable = false;
 
   try {
-    const tenMinutesAgoMs = Date.now() - 10 * 60 * 1000;
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     const eligiblePoolIds = eligiblePools
       .map(p => parseInt(String(p.id), 10))
       .filter(id => !isNaN(id));
 
     if (eligiblePoolIds.length > 0) {
       // Get the latest VRAM reading per subscription for each pool
-      // Uses the @@index([poolId, timestamp]) for efficient lookup
-      // NOTE: timestamp is stored as epoch milliseconds (integer) in SQLite
+      // Uses the @@index([pool_id, recorded_at]) for efficient lookup
       const latestMetrics = await prisma.$queryRawUnsafe<
         Array<{ poolId: number; subscriptionId: string; memoryUsedMb: number; memoryTotalMb: number }>
       >(
-        `SELECT m1.poolId, m1.subscriptionId, m1.memoryUsedMb, m1.memoryTotalMb
-         FROM GpuHardwareMetrics m1
+        `SELECT m1.pool_id as poolId, m1.subscription_id as subscriptionId, m1.memory_used_mb as memoryUsedMb, m1.memory_total_mb as memoryTotalMb
+         FROM gpu_hardware_metrics m1
          INNER JOIN (
-           SELECT subscriptionId, MAX(timestamp) as maxTs
-           FROM GpuHardwareMetrics
-           WHERE poolId IN (${eligiblePoolIds.map(() => '?').join(',')})
-             AND timestamp > ?
-             AND poolId IS NOT NULL
-           GROUP BY subscriptionId
-         ) m2 ON m1.subscriptionId = m2.subscriptionId AND m1.timestamp = m2.maxTs`,
+           SELECT subscription_id, MAX(recorded_at) as maxTs
+           FROM gpu_hardware_metrics
+           WHERE pool_id IN (${eligiblePoolIds.map(() => '?').join(',')})
+             AND recorded_at > ?
+             AND pool_id IS NOT NULL
+           GROUP BY subscription_id
+         ) m2 ON m1.subscription_id = m2.subscription_id AND m1.recorded_at = m2.maxTs`,
         ...eligiblePoolIds,
-        tenMinutesAgoMs
+        tenMinutesAgo
       );
 
       // Aggregate VRAM per pool
@@ -1085,6 +1146,12 @@ export async function subscribeWithFallback(params: {
 // Storage Management for Pool Subscriptions
 // ============================================
 
+export interface AddStorageToSubscriptionParams {
+  subscriptionId: string | number;
+  teamId: string;
+  persistentStorageBlockId: string;
+}
+
 export interface StoragePricingInfo {
   hourly_cost: number;
   monthly_cost?: number;
@@ -1123,3 +1190,29 @@ export async function getPoolSubscriptionStoragePricing(
   };
 }
 
+// Add persistent storage to a pool subscription
+// Note: This requires unsubscribing and resubscribing with the new storage config
+// The restartPoolSubscription function already handles this
+export async function addStorageToPoolSubscription(
+  params: AddStorageToSubscriptionParams & {
+    poolId: string | number;
+    vgpus?: number;
+    instanceTypeId: string;
+    ephemeralStorageBlockId: string;
+    imageUuid?: string;
+  }
+): Promise<{ subscription_id: string }> {
+  console.log("Adding persistent storage to subscription:", params.subscriptionId);
+
+  // Use the restart function which unsubscribes and resubscribes with new config
+  return restartPoolSubscription(
+    params.subscriptionId,
+    params.teamId,
+    params.poolId,
+    params.vgpus || 1,
+    params.instanceTypeId,
+    params.ephemeralStorageBlockId,
+    params.imageUuid,
+    params.persistentStorageBlockId
+  );
+}

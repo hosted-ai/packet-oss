@@ -3,8 +3,9 @@ import * as QRCode from "qrcode";
 import crypto from "crypto";
 import { prisma } from "../prisma";
 import { rateLimit } from "../ratelimit";
+import { getBrandName } from "../branding";
 
-const ISSUER = "GPU Cloud";
+const ISSUER = getBrandName();
 const BACKUP_CODE_COUNT = 8;
 
 // 2FA rate limiting: 5 failed attempts per 15 minutes per email

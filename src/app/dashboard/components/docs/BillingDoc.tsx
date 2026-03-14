@@ -5,7 +5,7 @@ export function BillingDoc() {
     <div className="prose prose-zinc max-w-none">
       <h1>Billing &amp; Usage Guide</h1>
       <p className="lead">
-        GPU Cloud offers two ways to rent GPUs: pay-as-you-go with a prepaid wallet, or a flat-rate monthly subscription.
+        This platform offers two ways to rent GPUs: pay-as-you-go with a prepaid wallet, or a flat-rate monthly subscription.
       </p>
 
       {/* Table of Contents */}
@@ -17,6 +17,7 @@ export function BillingDoc() {
           <li><a href="#monthly-subscription" className="text-blue-600 dark:text-blue-400 hover:underline">Monthly Subscription</a></li>
           <li><a href="#gpu-pricing" className="text-blue-600 dark:text-blue-400 hover:underline">GPU Pricing</a></li>
           <li><a href="#how-wallet-works" className="text-blue-600 dark:text-blue-400 hover:underline">How the Wallet Works</a></li>
+          <li><a href="#token-factory-pricing" className="text-blue-600 dark:text-blue-400 hover:underline">Token Factory Pricing</a></li>
           <li><a href="#storage-pricing" className="text-blue-600 dark:text-blue-400 hover:underline">Storage Pricing</a></li>
           <li><a href="#cost-management" className="text-blue-600 dark:text-blue-400 hover:underline">Cost Management Tips</a></li>
           <li><a href="#faq" className="text-blue-600 dark:text-blue-400 hover:underline">FAQ</a></li>
@@ -27,7 +28,7 @@ export function BillingDoc() {
 
       <h2 id="two-billing-models">Two Ways to Rent a GPU</h2>
       <p>
-        Every GPU on GPU Cloud is available through one of two billing models.
+        Every GPU on this platform is available through one of two billing models.
         Choose the one that fits your workload:
       </p>
 
@@ -145,7 +146,7 @@ export function BillingDoc() {
       <h2 id="how-wallet-works">How the Wallet Works</h2>
       <p>
         Your wallet is a prepaid balance managed through Stripe. It powers all
-        hourly GPU usage and persistent storage charges.
+        hourly GPU usage, Token Factory API calls, and persistent storage charges.
       </p>
 
       <h3>Adding Funds</h3>
@@ -201,6 +202,82 @@ export function BillingDoc() {
         <li><strong>$5 remaining</strong> &mdash; add funds to avoid interruption</li>
         <li><strong>$0 balance</strong> &mdash; running instances may be paused</li>
       </ul>
+
+      {/* ── Token Factory Pricing ──────────────────────────────── */}
+
+      <h2 id="token-factory-pricing">Token Factory Pricing</h2>
+      <p>Token Factory offers pay-per-token pricing with discounts for batch processing:</p>
+
+      <h3>Real-Time Inference</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Token Type</th>
+            <th>Price per 1M Tokens</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Input Tokens</td>
+            <td>$0.03</td>
+          </tr>
+          <tr>
+            <td>Output Tokens</td>
+            <td>$0.06</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Batch Processing (50% Discount)</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Batch Type</th>
+            <th>Input per 1M</th>
+            <th>Output per 1M</th>
+            <th>Turnaround</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1-Hour Batch</strong></td>
+            <td>$0.02</td>
+            <td>$0.04</td>
+            <td>Results within 1 hour</td>
+          </tr>
+          <tr>
+            <td><strong>24-Hour Batch</strong></td>
+            <td>$0.015</td>
+            <td>$0.03</td>
+            <td>Results within 24 hours</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Other Token Factory Services</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Embeddings</strong></td>
+            <td>$0.02 per 1M tokens</td>
+          </tr>
+          <tr>
+            <td><strong>LoRA Training</strong></td>
+            <td>$3.00 per 1K training tokens</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>
+        All Token Factory usage is deducted from your wallet. New accounts include
+        10,000 free tokens to get started.
+      </p>
 
       {/* ── Storage Pricing ────────────────────────────────────── */}
 
@@ -275,6 +352,12 @@ export function BillingDoc() {
         $199/mo subscription is cheaper than hourly.
       </p>
 
+      <h3>4. Use Batch Processing for Token Factory</h3>
+      <p>
+        Batch API calls are <strong>50% cheaper</strong> than real-time. Use them
+        for data processing, evaluations, and bulk generation.
+      </p>
+
       <div className="not-prose bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 my-6">
         <h4 className="text-red-800 dark:text-red-200 font-semibold mb-2 text-base">Warning</h4>
         <p className="text-red-700 dark:text-red-300 text-sm mb-0">
@@ -323,18 +406,17 @@ export function BillingDoc() {
       <h3>Can I get a refund on wallet funds?</h3>
       <p>
         Unused prepaid credits can be refunded within 30 days of purchase.
-        Contact <a href="mailto:support@example.com">support@example.com</a> for refund requests.
+        Contact support for refund requests.
       </p>
 
       <h3>Do you offer enterprise pricing?</h3>
       <p>
-        Yes. Contact <a href="mailto:support@example.com">support@example.com</a> for
-        volume discounts, reserved capacity, and custom SLAs.
+        Yes. Contact us for volume discounts, reserved capacity, and custom SLAs.
       </p>
 
       <h2>Need Help?</h2>
       <p>
-        For billing questions, contact <a href="mailto:support@example.com">support@example.com</a>
+        For billing questions, contact our support team.
       </p>
     </div>
   );

@@ -10,7 +10,7 @@ export const gpusCommand = new Command("gpus")
   .option("-a, --all", "Show all GPUs including unavailable")
   .action(async (options) => {
     if (!getApiKey()) {
-      console.log(chalk.yellow("\n  Not logged in. Run 'packet login' first.\n"));
+      console.log(chalk.yellow("\n  Not logged in. Run 'gpu-cloud login' first.\n"));
       process.exit(1);
     }
 
@@ -69,7 +69,7 @@ export const gpusCommand = new Command("gpus")
 
       console.log(table.toString());
       console.log(
-        chalk.gray(`\n  Launch with: packet launch --gpu <name>\n`)
+        chalk.gray(`\n  Launch with: gpu-cloud launch --gpu <name>\n`)
       );
     } catch (error) {
       spinner.fail("Failed to fetch GPUs");

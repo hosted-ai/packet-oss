@@ -6,23 +6,18 @@ import { validateSSHParams } from "@/lib/ssh-validation";
  * Appended to ~/.bashrc on first run (guarded by a marker comment).
  */
 const MOTD_SETUP_SCRIPT = `
-# Setup GPU Cloud welcome banner
-if ! grep -q "packet-motd" ~/.bashrc 2>/dev/null; then
+# Setup GPU cloud welcome banner
+if ! grep -q "gpu-cloud-motd" ~/.bashrc 2>/dev/null; then
   cat >> ~/.bashrc << 'MOTD_EOF'
 
-# packet-motd
-if [ -z "$PACKET_MOTD_SHOWN" ]; then
-  export PACKET_MOTD_SHOWN=1
-  export LANG=C.UTF-8
+# gpu-cloud-motd
+if [ -z "$GPU_CLOUD_MOTD_SHOWN" ]; then
+  export GPU_CLOUD_MOTD_SHOWN=1
   echo ""
-  echo "  ██████   █████   ██████ ██   ██ ███████ ████████      █████  ██"
-  echo "  ██   ██ ██   ██ ██      ██  ██  ██         ██        ██   ██ ██"
-  echo "  ██████  ███████ ██      █████   █████      ██    .   ███████ ██"
-  echo "  ██      ██   ██ ██      ██  ██  ██         ██        ██   ██ ██"
-  echo "  ██      ██   ██  ██████ ██   ██ ███████    ██        ██   ██ ██"
-  echo ""
-  echo "  GPU Cloud"
-  echo "  Docs: \${PACKET_APP_URL:-http://localhost:3000}/docs"
+  echo "  ╔═══════════════════════════════════════╗"
+  echo "  ║         GPU Cloud Platform            ║"
+  echo "  ║       Powered by hosted.ai            ║"
+  echo "  ╚═══════════════════════════════════════╝"
   echo ""
 fi
 MOTD_EOF

@@ -322,11 +322,11 @@ export async function GET(request: NextRequest) {
       });
       // Clean up PodUptimeDay for pods with no heartbeat in 7+ days
       const uptimeCleanup = await prisma.$executeRaw`
-        DELETE FROM PodUptimeDay
-        WHERE subscriptionId IN (
-          SELECT subscriptionId FROM PodUptimeDay
-          GROUP BY subscriptionId
-          HAVING MAX("lastSeen") < ${sevenDaysAgo}
+        DELETE FROM pod_uptime_day
+        WHERE subscription_id IN (
+          SELECT subscription_id FROM pod_uptime_day
+          GROUP BY subscription_id
+          HAVING MAX(last_seen) < ${sevenDaysAgo}
         )
       `;
       if (uptimeCleanup > 0) {
@@ -512,11 +512,11 @@ export async function GET(request: NextRequest) {
     // Clean up PodUptimeDay for pods with no heartbeat in 7+ days
     try {
       const uptimeCleanup = await prisma.$executeRaw`
-        DELETE FROM PodUptimeDay
-        WHERE subscriptionId IN (
-          SELECT subscriptionId FROM PodUptimeDay
-          GROUP BY subscriptionId
-          HAVING MAX("lastSeen") < ${sevenDaysAgo}
+        DELETE FROM pod_uptime_day
+        WHERE subscription_id IN (
+          SELECT subscription_id FROM pod_uptime_day
+          GROUP BY subscription_id
+          HAVING MAX(last_seen) < ${sevenDaysAgo}
         )
       `;
       if (uptimeCleanup > 0) {

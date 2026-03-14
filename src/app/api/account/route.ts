@@ -10,6 +10,17 @@ import { generateCustomerToken } from "@/lib/customer-auth";
 import { getTeamMemberships, acceptTeamInvite } from "@/lib/team-members";
 import { logLoginLinkSent } from "@/lib/admin-activity";
 import { prisma } from "@/lib/prisma";
+import {
+  createTeam,
+  getDefaultPolicies,
+  getRoles,
+} from "@/lib/hostedai";
+import { getBrandName, getDashboardUrl } from "@/lib/branding";
+import crypto from "crypto";
+
+function generateSecurePassword(): string {
+  return crypto.randomBytes(24).toString("base64url");
+}
 
 // Get user's session timeout preference (default 1 hour)
 async function getSessionTimeout(stripeCustomerId: string): Promise<number> {
@@ -40,41 +51,41 @@ async function sendTeamMemberAccessEmail(params: {
 
   await sendEmail({
     to,
-    subject: "Your GPU Cloud login link",
+    subject: `Your ${getBrandName()} login link`,
     html: emailLayout({
-      preheader: "Your login link for GPU Cloud",
+      preheader: `Your login link for ${getBrandName()}`,
       body: `
         ${emailGreeting(memberName)}
-        ${emailText("Here is your login link for GPU Cloud:")}
+        ${emailText(`Here is your login link for ${getBrandName()}:`)}
         ${emailButton("Open Team Dashboard", accountUrl)}
         ${emailInfoBox(`
           <p style="margin: 0; font-size: 14px; color: #0b0f1c;">
             <strong>Team:</strong> ${safeTeamOwnerName}'s workspace<br>
-            You have team member access to this GPU Cloud dashboard.
+            You have team member access to this ${getBrandName()} dashboard.
           </p>
         `)}
-        ${emailMuted(`This link expires in ${expiryText}. Request a new one at <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account" style="color: #1a4fff;">${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account</a>`)}
+        ${emailMuted(`This link expires in ${expiryText}. Request a new one at <a href="${getDashboardUrl()}/account" style="color: #1a4fff;">${getDashboardUrl()}/account</a>`)}
         ${emailMuted("Did not request this? You can safely ignore this email.")}
         ${emailSignoff()}
       `,
     }),
     text: `Hi ${memberName},
 
-Here is your login link for GPU Cloud:
+Here is your login link for ${getBrandName()}:
 
 Open Team Dashboard: ${accountUrl}
 
 Team: ${teamOwnerName}'s workspace
-You have team member access to this GPU Cloud dashboard.
+You have team member access to this ${getBrandName()} dashboard.
 
-This link expires in ${expiryText}. Request a new one at ${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account
+This link expires in ${expiryText}. Request a new one at ${getDashboardUrl()}/account
 
 Did not request this? You can ignore this email.
 ${plainTextFooter()}`,
   });
 }
 
-// Send access email for free trial users (no billing portal, focused on inference API)
+// Send access email for free trial users (no billing portal, focused on Token Factory)
 async function sendFreeTrialAccessEmail(params: {
   to: string;
   customerName: string;
@@ -85,39 +96,39 @@ async function sendFreeTrialAccessEmail(params: {
 
   await sendEmail({
     to,
-    subject: "Your GPU Cloud login link",
+    subject: `Your ${getBrandName()} login link`,
     html: emailLayout({
-      preheader: "Your login link for GPU Cloud",
+      preheader: `Your login link for ${getBrandName()}`,
       body: `
         ${emailGreeting(customerName)}
-        ${emailText("Here is your login link for GPU Cloud:")}
+        ${emailText(`Here is your login link for ${getBrandName()}:`)}
         ${emailButton("Open Dashboard", accountUrl)}
         ${emailText("From your dashboard you can:")}
         <ul style="font-size: 15px; line-height: 1.8; color: #0b0f1c; padding-left: 20px; margin: 0 0 16px 0;">
-          <li>Use the inference API for LLM tasks</li>
+          <li>Use Token Factory for LLM inference</li>
           <li>Create and manage your API keys</li>
           <li>Run batch processing jobs</li>
         </ul>
         ${emailMuted("Need dedicated GPU instances? Add funds from the Billing tab in your dashboard.")}
-        ${emailMuted('This link expires in 1 hour. Request a new one at <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account" style="color: #1a4fff;">${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account</a>')}
+        ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="${getDashboardUrl()}/account" style="color: #1a4fff;">${getDashboardUrl()}/account</a>`)}
         ${emailMuted("Did not request this? You can safely ignore this email.")}
         ${emailSignoff()}
       `,
     }),
     text: `Hi ${customerName},
 
-Here is your login link for GPU Cloud:
+Here is your login link for ${getBrandName()}:
 
 Open Dashboard: ${accountUrl}
 
 From your dashboard you can:
-- Use the inference API for LLM tasks
+- Use Token Factory for LLM inference
 - Create and manage your API keys
 - Run batch processing jobs
 
 Need dedicated GPU instances? Add funds from the Billing tab in your dashboard.
 
-This link expires in 1 hour. Request a new one at ${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account
+This link expires in 1 hour. Request a new one at ${getDashboardUrl()}/account
 ${plainTextFooter()}`,
   });
 }
@@ -133,12 +144,12 @@ async function sendAccessEmail(params: {
 
   await sendEmail({
     to,
-    subject: "Your GPU Cloud login link",
+    subject: `Your ${getBrandName()} login link`,
     html: emailLayout({
-      preheader: "Your login link for GPU Cloud",
+      preheader: `Your login link for ${getBrandName()}`,
       body: `
         ${emailGreeting(customerName)}
-        ${emailText("Here is your login link for GPU Cloud:")}
+        ${emailText(`Here is your login link for ${getBrandName()}:`)}
         ${emailButton("Open Dashboard", accountUrl)}
         ${emailText("From your dashboard you can:")}
         <ul style="font-size: 15px; line-height: 1.8; color: #0b0f1c; padding-left: 20px; margin: 0 0 16px 0;">
@@ -152,14 +163,14 @@ async function sendAccessEmail(params: {
             <a href="${billingUrl}" style="color: #1a4fff; text-decoration: none;">Open billing portal</a> to update payment methods or view invoices.
           </p>
         `)}
-        ${emailMuted('This link expires in 1 hour. Request a new one at <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account" style="color: #1a4fff;">${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account</a>')}
+        ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="${getDashboardUrl()}/account" style="color: #1a4fff;">${getDashboardUrl()}/account</a>`)}
         ${emailMuted("Did not request this? You can safely ignore this email.")}
         ${emailSignoff()}
       `,
     }),
     text: `Hi ${customerName},
 
-Here is your login link for GPU Cloud:
+Here is your login link for ${getBrandName()}:
 
 Open Dashboard: ${accountUrl}
 
@@ -170,7 +181,7 @@ From your dashboard you can:
 
 Manage billing: ${billingUrl}
 
-This link expires in 1 hour. Request a new one at ${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account
+This link expires in 1 hour. Request a new one at ${getDashboardUrl()}/account
 ${plainTextFooter()}`,
   });
 }
@@ -229,7 +240,54 @@ export async function POST(request: NextRequest) {
 
       console.log(`[Account] Customer found: ${customer.id}, teamId: ${teamId}, billingType: ${billingType} (checked ${customers.data.length} customers)`);
 
-      if (teamId) {
+      // If customer has no team but is on a paid billing type, provision one now
+      // This handles the case where team creation failed during signup but user already topped up
+      let resolvedTeamId = teamId;
+      if (!resolvedTeamId && billingType && billingType !== "free" && billingType !== "free_trial") {
+        const customerEmail = customer.email || email.toLowerCase();
+        const customerName = customer.name || customerEmail.split("@")[0];
+        console.log(`[Account] Customer ${customer.id} is ${billingType} but has no team — provisioning now`);
+
+        try {
+          const generatedPassword = generateSecurePassword();
+          const teamName = `${customerName}-${billingType}-${Date.now()}`;
+          const [roles, policies] = await Promise.all([getRoles(), getDefaultPolicies()]);
+          const team = await createTeam({
+            name: teamName,
+            description: `${getBrandName()} - ${billingType} (auto-provisioned on login)`,
+            color: "#6366F1",
+            members: [
+              {
+                email: customerEmail,
+                name: customerName,
+                role: roles.teamAdmin,
+                send_email_invite: false,
+                password: generatedPassword,
+                pre_onboard: true,
+              },
+            ],
+            pricing_policy_id: policies.pricing,
+            resource_policy_id: policies.resource,
+            service_policy_id: policies.service,
+            instance_type_policy_id: policies.instanceType,
+            image_policy_id: policies.image,
+          });
+          console.log(`[Account] Created hosted.ai team ${team.id} for ${customer.id}`);
+
+          await stripe.customers.update(customer.id, {
+            metadata: {
+              ...customer.metadata,
+              hostedai_team_id: team.id,
+            },
+          });
+          resolvedTeamId = team.id;
+        } catch (teamError) {
+          console.error(`[Account] Failed to provision team for ${customer.id}:`, teamError);
+          // Continue — still send login email even if team creation fails
+        }
+      }
+
+      if (resolvedTeamId) {
         // Direct customer with provisioned team - send full access email
         const sessionTimeout = await getSessionTimeout(customer.id);
         const token = generateCustomerToken(email.toLowerCase(), customer.id, sessionTimeout);

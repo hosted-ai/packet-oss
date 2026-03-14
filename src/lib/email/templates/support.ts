@@ -1,6 +1,7 @@
 import { sendEmail } from "../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButtonTeal, emailSignoff, plainTextFooter } from "../utils";
 import { loadTemplate } from "../template-loader";
+import { getBrandName } from "@/lib/branding";
 
 export async function sendSupportReplyNotification(params: {
   to: string;
@@ -39,7 +40,7 @@ View the full conversation in your dashboard: ${dashboardUrl}
 
 You can reply directly from your dashboard or respond to this email.
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(

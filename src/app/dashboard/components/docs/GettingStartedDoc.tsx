@@ -3,7 +3,7 @@
 export function GettingStartedDoc() {
   return (
     <div className="prose prose-zinc max-w-none">
-      <h1>Getting Started with GPU Cloud</h1>
+      <h1>Getting Started</h1>
       <p className="lead">
         Get your first GPU running in minutes. This guide covers everything from account setup to running your first training job.
       </p>
@@ -28,7 +28,7 @@ export function GettingStartedDoc() {
       {/* Platform Overview */}
       <h2 id="platform-overview">Platform Overview</h2>
       <p>
-        GPU Cloud is a cloud GPU platform designed for AI/ML workloads. Whether you&apos;re training models,
+        This is a cloud GPU platform designed for AI/ML workloads. Whether you&apos;re training models,
         running inference, or deploying LLMs, we provide the infrastructure you need.
       </p>
 
@@ -50,6 +50,10 @@ export function GettingStartedDoc() {
             <td>One-click deployment of any HuggingFace model with vLLM inference server.</td>
           </tr>
           <tr>
+            <td><strong>Token Factory</strong></td>
+            <td>OpenAI-compatible API for LLM inference with batch processing and LoRA support.</td>
+          </tr>
+          <tr>
             <td><strong>Persistent Storage</strong></td>
             <td>NFS-based storage that survives instance restarts. Perfect for datasets and checkpoints.</td>
           </tr>
@@ -68,7 +72,7 @@ export function GettingStartedDoc() {
       <h2 id="prerequisites">Prerequisites</h2>
       <p>Before you begin, make sure you have:</p>
       <ul>
-        <li>An account (<a href="/checkout">Sign up here</a> if you don&apos;t have one)</li>
+        <li>An account (sign up from the homepage if you don&apos;t have one)</li>
         <li>Credits in your account (prepaid balance or subscription)</li>
         <li>A payment method on file</li>
       </ul>
@@ -272,7 +276,7 @@ jupyter lab --ip 0.0.0.0 --port 8888 --no-browser`}</code>
           Click <strong>Expose Port</strong> in the Exposed Services section of your GPU card
         </li>
         <li>Enter the port number and a service name</li>
-        <li>Copy the external URL provided (e.g., <code>https://abc123.example.com</code>)</li>
+        <li>Copy the external URL provided by the platform</li>
       </ol>
 
       <pre>
@@ -284,7 +288,7 @@ app = FastAPI()
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello from GPU Cloud GPU!"}
+    return {"message": "Hello from my GPU!"}
 EOF
 
 # Start on port 8000
@@ -382,6 +386,11 @@ uvicorn app:app --host 0.0.0.0 --port 8000`}</code>
         </thead>
         <tbody>
           <tr>
+            <td><strong>Token Factory</strong></td>
+            <td>Use our hosted LLM inference API with pay-per-token pricing</td>
+            <td><a href="?tab=tokenfactory">Token Factory Docs</a></td>
+          </tr>
+          <tr>
             <td><strong>HuggingFace Deployment</strong></td>
             <td>One-click deployment of any HuggingFace model</td>
             <td><a href="?tab=huggingface">HuggingFace Docs</a></td>
@@ -459,8 +468,8 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121`}</code>
       {/* Need Help */}
       <h2>Need Help?</h2>
       <p>
-        Contact us at <a href="mailto:support@example.com">support@example.com</a> or
-        use the <strong>Support</strong> tab in your dashboard for faster response.
+        Use the <strong>Support</strong> tab in your dashboard for the fastest response,
+        or reach out to our support team via email.
       </p>
     </div>
   );

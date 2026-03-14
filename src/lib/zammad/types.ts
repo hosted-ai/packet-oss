@@ -28,7 +28,7 @@ export interface CreateOrganizationInput {
   domain_assignment?: boolean;
   active?: boolean;
   note?: string;
-  // Custom attribute for the platform
+  // Custom brand attribute for platform identification
   brand?: string;
 }
 
@@ -146,7 +146,7 @@ export interface ZammadTicket {
 
 export interface CreateTicketInput {
   title: string;
-  group: string; // Group name, e.g., "Support::L1"
+  group: string; // Zammad group name for ticket routing
   customer_id: number;
   article: {
     subject?: string;

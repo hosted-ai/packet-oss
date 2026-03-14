@@ -1,6 +1,7 @@
 import { sendEmail } from "../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButtonTeal, emailInfoBox, emailSignoff, plainTextFooter } from "../utils";
 import { loadTemplate } from "../template-loader";
+import { getBrandName } from "@/lib/branding";
 
 export async function sendWelcomeEmail(params: {
   to: string;
@@ -22,7 +23,7 @@ export async function sendWelcomeEmail(params: {
     : "";
   const subject = safeWalletBalance
     ? `Your ${safeWalletBalance} GPU wallet is ready — launch your ${safeProductName}`
-    : "Your GPU Cloud GPU account is ready";
+    : `Your ${getBrandName()} GPU account is ready`;
 
   const body = `
     ${emailGreeting("{{customerName}}")}
@@ -62,7 +63,7 @@ ${safeWalletBalance
 
 Questions? Reply to this email and our team will help you.
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`,
     }
   );

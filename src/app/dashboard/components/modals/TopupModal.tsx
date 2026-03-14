@@ -216,6 +216,10 @@ export function TopupModal({
                   </div>
                   {isFreeVoucher ? (
                     <p className="text-green-600 mt-1">Click redeem to add this credit to your wallet.</p>
+                  ) : validatedVoucher.minTopupCents ? (
+                    <p className="text-amber-600 mt-1">
+                      Requires a minimum ${(validatedVoucher.minTopupCents / 100).toFixed(0)} deposit. Select an amount below.
+                    </p>
                   ) : (
                     <p className="text-green-600 mt-1">Select an amount below to apply this bonus.</p>
                   )}
@@ -247,11 +251,12 @@ export function TopupModal({
                       ? Math.round((validatedVoucher.creditCents / 100) / 2)
                       : 0;
                     const totalHours = parseInt(option.hours.replace("~", "").replace("h", "")) + bonusHours;
+                    const belowMinimum = validatedVoucher?.minTopupCents && option.value < validatedVoucher.minTopupCents;
                     return (
                       <button
                         key={option.value}
                         onClick={() => handleTopupWithVoucher(option.value)}
-                        disabled={topupLoading}
+                        disabled={topupLoading || !!belowMinimum}
                         className="flex flex-col items-center p-4 border border-[var(--line)] rounded-xl hover:border-violet-500 hover:bg-violet-50 transition-colors disabled:opacity-50"
                       >
                         <span className="text-xl font-bold text-[var(--ink)]">{option.label}</span>

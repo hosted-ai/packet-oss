@@ -1,28 +1,17 @@
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'crypto';
+import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 16;
 
-let derivedKey: Buffer | null = null;
-
 function getKey(): Buffer {
-  if (derivedKey) return derivedKey;
-
   const key = process.env.TENANT_ENCRYPTION_KEY;
-  if (key) {
-    derivedKey = Buffer.from(key, 'hex');
-    return derivedKey;
+  if (!key) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('TENANT_ENCRYPTION_KEY must be set in production');
+    }
+    return Buffer.from('0'.repeat(64), 'hex');
   }
-
-  // Derive from ADMIN_JWT_SECRET if TENANT_ENCRYPTION_KEY not set
-  const jwtSecret = process.env.ADMIN_JWT_SECRET;
-  if (!jwtSecret) {
-    throw new Error(
-      "No encryption key available. Set ADMIN_JWT_SECRET or TENANT_ENCRYPTION_KEY."
-    );
-  }
-  derivedKey = scryptSync(jwtSecret, "packet-oss-crypto", 32);
-  return derivedKey;
+  return Buffer.from(key, 'hex');
 }
 
 export function encrypt(plaintext: string): string {

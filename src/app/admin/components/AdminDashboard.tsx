@@ -2,8 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAdminData, useAdminActions } from "../hooks";
-import type { AdminTab, Investor } from "../types";
+import { useAdminData, useAdminActions, useClusterManagement, useQuoteManagement, useInfrastructureRequestManagement } from "../hooks";
+import type { AdminTab, Quote, Investor, InfrastructureRequest } from "../types";
+import { PREMIUM_ADMIN_TABS, OSS_ONLY_ADMIN_TABS } from "../types";
+import { isPro, isOSS } from "@/lib/edition";
+import dynamic from "next/dynamic";
 import {
   CustomersTab,
   AdminsTab,
@@ -12,7 +15,6 @@ import {
   VouchersTab,
   ActivityTab,
   SettingsTab,
-  QATab,
   ProvidersTab,
   LandingPageTab,
   GameStatsTab,
@@ -25,18 +27,37 @@ import {
   BusinessTab,
   CreditModal,
   CustomerDetailPanel,
-  SkyPilotTab,
   SupportTab,
-
   NodeRevenueTab,
   BannersTab,
-  MarketingTab,
   UptimeTab,
   PayoutsTab,
   PlatformSettingsTab,
 } from "./index";
 import { AdminSidebar } from "./AdminSidebar";
 import { LogoutConfirmModal } from "@/components/logout-confirm-modal";
+
+// Premium tab components — dynamically imported, files excluded in OSS build
+const NullTab = () => null;
+const ClustersTab = isPro() ? dynamic(() => import("./ClustersTab").then(m => ({ default: m.ClustersTab }))) : NullTab;
+const QuotesTab = isPro() ? dynamic(() => import("./QuotesTab").then(m => ({ default: m.QuotesTab }))) : NullTab;
+const QATab = isPro() ? dynamic(() => import("./QATab").then(m => ({ default: m.QATab }))) : NullTab;
+const BatchesTab = isPro() ? dynamic(() => import("./BatchesTab").then(m => ({ default: m.BatchesTab }))) : NullTab;
+const TokenFactoryProvidersTab = isPro() ? dynamic(() => import("./TokenFactoryProvidersTab").then(m => ({ default: m.TokenFactoryProvidersTab }))) : NullTab;
+const SkyPilotTab = isPro() ? dynamic(() => import("./SkyPilotTab").then(m => ({ default: m.SkyPilotTab }))) : NullTab;
+const SpheronInventoryTab = isPro() ? dynamic(() => import("./SpheronInventoryTab").then(m => ({ default: m.SpheronInventoryTab }))) : NullTab;
+const MarketingTab = isPro() ? dynamic(() => import("./MarketingTab").then(m => ({ default: m.MarketingTab }))) : NullTab;
+const TenantsTab = isPro() ? dynamic(() => import("./TenantsTab").then(m => ({ default: m.TenantsTab }))) : NullTab;
+const PixelFactoryTab = isPro() ? dynamic(() => import("./PixelFactoryTab").then(m => ({ default: m.PixelFactoryTab }))) : NullTab;
+const InfrastructureRequestsTab = isPro() ? dynamic(() => import("./InfrastructureRequestsTab").then(m => ({ default: m.InfrastructureRequestsTab }))) : NullTab;
+const DealCalculators = isPro() ? dynamic(() => import("./DealCalculator").then(m => ({ default: m.DealCalculators }))) : NullTab;
+
+// Premium modals — dynamically imported
+const ClusterModal = isPro() ? dynamic(() => import("./ClusterModal").then(m => ({ default: m.ClusterModal }))) : NullTab;
+const QuoteModal = isPro() ? dynamic(() => import("./QuoteModal").then(m => ({ default: m.QuoteModal }))) : NullTab;
+const QuoteViewModal = isPro() ? dynamic(() => import("./QuoteViewModal").then(m => ({ default: m.QuoteViewModal }))) : NullTab;
+const EmailPreviewModal = isPro() ? dynamic(() => import("./EmailPreviewModal").then(m => ({ default: m.EmailPreviewModal }))) : NullTab;
+const InfrastructureRequestModal = isPro() ? dynamic(() => import("./InfrastructureRequestModal").then(m => ({ default: m.InfrastructureRequestModal }))) : NullTab;
 
 export function AdminDashboard() {
   const router = useRouter();
@@ -50,6 +71,9 @@ export function AdminDashboard() {
   const [investorActionLoading, setInvestorActionLoading] = useState<string | null>(null);
   const [revenueInvestorEmail, setRevenueInvestorEmail] = useState<string | null>(null);
 
+  // Infrastructure requests state
+  const [infrastructureRequests, setInfrastructureRequests] = useState<InfrastructureRequest[]>([]);
+
   // Data hook
   const {
     loading,
@@ -57,6 +81,9 @@ export function AdminDashboard() {
     stats,
     customers,
     admins,
+    canResetPin,
+    clusterOffers,
+    quotes,
     pricing,
     activities,
     activitiesLoading,
@@ -112,6 +139,85 @@ export function AdminDashboard() {
     }
   }, [pricing, initPricingForm]);
 
+  // Cluster management hook
+  const {
+    clusterModalOpen,
+    editingCluster,
+    clusterForm,
+    clusterSaving,
+    highlightInput,
+    imageUploading,
+    setClusterForm,
+    setHighlightInput,
+    openClusterModal,
+    closeClusterModal,
+    handleImageUpload,
+    handleSaveCluster,
+    handleDeleteCluster,
+    addHighlight,
+    removeHighlight,
+    removeImage,
+  } = useClusterManagement(loadData);
+
+  // Quote management hook
+  const {
+    quoteModalOpen,
+    editingQuote,
+    quoteForm,
+    quoteSaving,
+    quoteViewModalOpen,
+    viewingQuote,
+    emailPreviewModalOpen,
+    emailPreview,
+    emailPreviewLoading,
+    emailSending,
+    previewQuoteId,
+    setQuoteForm,
+    openQuoteModal,
+    closeQuoteModal,
+    handleSaveQuote,
+    handleDeleteQuote,
+    viewQuoteDetails,
+    closeQuoteViewModal,
+    handlePreviewEmail,
+    handleSendEmail,
+    closeEmailPreviewModal,
+    prefillQuoteFromCluster,
+    copyQuoteUrl,
+  } = useQuoteManagement(loadData);
+
+  // Infrastructure request management hook
+  const {
+    requestModalOpen,
+    editingRequest,
+    requestForm,
+    requestSaving,
+    locationInput,
+    setRequestForm,
+    setLocationInput,
+    openRequestModal,
+    closeRequestModal,
+    handleSaveRequest,
+    handleDeleteRequest,
+    addLocation,
+    removeLocation,
+  } = useInfrastructureRequestManagement(async () => {
+    await loadInfrastructureRequests();
+  });
+
+  // Load infrastructure requests
+  const loadInfrastructureRequests = async () => {
+    try {
+      const res = await fetch("/api/admin/infrastructure-requests");
+      const data = await res.json();
+      if (data.requests) {
+        setInfrastructureRequests(data.requests);
+      }
+    } catch (error) {
+      console.error("Failed to load infrastructure requests:", error);
+    }
+  };
+
   // Load investors
   const loadInvestors = async () => {
     try {
@@ -129,6 +235,13 @@ export function AdminDashboard() {
   useEffect(() => {
     if (activeTab === "investors") {
       loadInvestors();
+    }
+  }, [activeTab]);
+
+  // Load infrastructure requests when tab changes to demand
+  useEffect(() => {
+    if (activeTab === "demand") {
+      loadInfrastructureRequests();
     }
   }, [activeTab]);
 
@@ -234,6 +347,14 @@ export function AdminDashboard() {
     }
   };
 
+  const handleViewQuoteFromActivity = (quote: Quote) => {
+    viewQuoteDetails(quote);
+  };
+
+  const handleSwitchToQuotes = () => {
+    setActiveTab("quotes");
+  };
+
   const doLogout = async () => {
     await handleLogout(router);
   };
@@ -252,11 +373,14 @@ export function AdminDashboard() {
       customers: "Customers",
       admins: "Administrators",
       investors: "Investors",
+      clusters: "Cluster Offers",
+      quotes: "Quotes",
       providers: "Providers",
       referrals: "Referrals",
       vouchers: "Vouchers",
       activity: "Activity Log",
       settings: "Settings",
+      calculator: "Deal Calculator",
       qa: "QA Tools",
       landing: "Landing Page",
       game: "GPU Tetris Stats",
@@ -267,12 +391,17 @@ export function AdminDashboard() {
       nodes: "Node Monitoring",
       pools: "Pool Overview",
       business: "Business Metrics",
+      demand: "Infrastructure Demand",
+      batches: "Batch Jobs",
+      "token-providers": "Token Provider Revenue",
       skypilot: "SkyPilot Integration",
       support: "Support Tickets",
-
+      spheron: "Spheron Inventory",
       "node-revenue": "Node Revenue",
       banners: "Campaign Banners",
       marketing: "Marketing",
+      tenants: "White-Label Tenants",
+      "pixel-factory": "Pixel Factory",
       uptime: "Pod Uptime",
       payouts: "Investor Payouts",
       "platform-settings": "Platform Settings",
@@ -350,6 +479,20 @@ export function AdminDashboard() {
 
         {/* Tab Content */}
         <main className="p-8">
+        {/* Premium tabs are hidden from sidebar in OSS, but guard rendering too */}
+        {!isPro() && PREMIUM_ADMIN_TABS.has(activeTab) && (
+          <div className="text-center py-20 text-gray-500">
+            <p>This feature is available in the Pro edition.</p>
+          </div>
+        )}
+
+        {/* OSS-only tabs are hidden from sidebar in Pro, but guard rendering too */}
+        {!isOSS() && OSS_ONLY_ADMIN_TABS.has(activeTab) && (
+          <div className="text-center py-20 text-gray-500">
+            <p>This feature is available in the self-hosted edition.</p>
+          </div>
+        )}
+
         {activeTab === "customers" && (
           <CustomersTab
             customers={customers}
@@ -381,7 +524,7 @@ export function AdminDashboard() {
             adminEmail={adminEmail}
             newAdminEmail={newAdminEmail}
             actionLoading={actionLoading}
-            canResetPin={true}
+            canResetPin={canResetPin}
             onNewAdminEmailChange={setNewAdminEmail}
             onAddAdmin={handleAddAdmin}
             onRemoveAdmin={handleRemoveAdmin}
@@ -407,6 +550,27 @@ export function AdminDashboard() {
           />
         )}
 
+        {activeTab === "clusters" && (
+          <ClustersTab
+            clusterOffers={clusterOffers}
+            onOpenModal={openClusterModal}
+            onDelete={handleDeleteCluster}
+          />
+        )}
+
+        {activeTab === "quotes" && (
+          <QuotesTab
+            quotes={quotes}
+            emailPreviewLoading={emailPreviewLoading}
+            previewQuoteId={previewQuoteId}
+            onOpenModal={openQuoteModal}
+            onViewDetails={viewQuoteDetails}
+            onCopyUrl={copyQuoteUrl}
+            onPreviewEmail={handlePreviewEmail}
+            onDelete={handleDeleteQuote}
+          />
+        )}
+
         {activeTab === "referrals" && <ReferralsTab />}
 
         {activeTab === "providers" && <ProvidersTab />}
@@ -417,7 +581,10 @@ export function AdminDashboard() {
           <ActivityTab
             activities={activities}
             activitiesLoading={activitiesLoading}
+            quotes={quotes}
             onRefresh={loadActivities}
+            onViewQuote={handleViewQuoteFromActivity}
+            onSwitchToQuotes={handleSwitchToQuotes}
           />
         )}
 
@@ -430,6 +597,8 @@ export function AdminDashboard() {
             onSavePricing={(e) => handleSavePricing(e, setPricing)}
           />
         )}
+
+        {activeTab === "calculator" && <DealCalculators />}
 
         {activeTab === "qa" && <QATab adminEmail={adminEmail} />}
 
@@ -451,20 +620,37 @@ export function AdminDashboard() {
 
         {activeTab === "business" && <BusinessTab />}
 
+        {activeTab === "demand" && (
+          <InfrastructureRequestsTab
+            requests={infrastructureRequests}
+            onOpenModal={openRequestModal}
+            onDelete={handleDeleteRequest}
+          />
+        )}
+
+        {activeTab === "batches" && <BatchesTab />}
+
+        {activeTab === "token-providers" && <TokenFactoryProvidersTab />}
+
         {activeTab === "skypilot" && <SkyPilotTab />}
 
         {activeTab === "support" && <SupportTab onOpenCustomer={setSelectedCustomerId} />}
 
+        {activeTab === "spheron" && <SpheronInventoryTab />}
 
         {activeTab === "banners" && <BannersTab />}
 
         {activeTab === "marketing" && <MarketingTab />}
 
-        {activeTab === "platform-settings" && <PlatformSettingsTab />}
+        {activeTab === "tenants" && <TenantsTab />}
+
+        {activeTab === "pixel-factory" && <PixelFactoryTab />}
 
         {activeTab === "uptime" && <UptimeTab />}
 
         {activeTab === "payouts" && <PayoutsTab />}
+
+        {activeTab === "platform-settings" && <PlatformSettingsTab />}
 
         {activeTab === "node-revenue" && (
           <NodeRevenueTab
@@ -487,6 +673,52 @@ export function AdminDashboard() {
         variant="light"
       />
 
+      {clusterModalOpen && (
+        <ClusterModal
+          editingCluster={editingCluster}
+          clusterForm={clusterForm}
+          clusterSaving={clusterSaving}
+          highlightInput={highlightInput}
+          imageUploading={imageUploading}
+          onFormChange={setClusterForm}
+          onHighlightInputChange={setHighlightInput}
+          onAddHighlight={addHighlight}
+          onRemoveHighlight={removeHighlight}
+          onImageUpload={handleImageUpload}
+          onRemoveImage={removeImage}
+          onSubmit={handleSaveCluster}
+          onClose={closeClusterModal}
+        />
+      )}
+
+      {requestModalOpen && (
+        <InfrastructureRequestModal
+          editingRequest={editingRequest}
+          form={requestForm}
+          saving={requestSaving}
+          locationInput={locationInput}
+          onFormChange={setRequestForm}
+          onLocationInputChange={setLocationInput}
+          onAddLocation={addLocation}
+          onRemoveLocation={removeLocation}
+          onSubmit={handleSaveRequest}
+          onClose={closeRequestModal}
+        />
+      )}
+
+      {quoteModalOpen && (
+        <QuoteModal
+          editingQuote={editingQuote}
+          quoteForm={quoteForm}
+          quoteSaving={quoteSaving}
+          clusterOffers={clusterOffers}
+          onFormChange={setQuoteForm}
+          onPrefillFromCluster={(id: string) => prefillQuoteFromCluster(id, clusterOffers)}
+          onSubmit={handleSaveQuote}
+          onClose={closeQuoteModal}
+        />
+      )}
+
       {creditModalCustomer && (
         <CreditModal
           customer={creditModalCustomer}
@@ -495,6 +727,23 @@ export function AdminDashboard() {
           onCreditAmountChange={setCreditAmount}
           onSubmit={handleAdjustCredits}
           onClose={() => { setCreditModalCustomer(null); setCreditAmount(""); }}
+        />
+      )}
+
+      {emailPreviewModalOpen && emailPreview && (
+        <EmailPreviewModal
+          emailPreview={emailPreview}
+          emailSending={emailSending}
+          onSend={handleSendEmail}
+          onClose={closeEmailPreviewModal}
+        />
+      )}
+
+      {quoteViewModalOpen && viewingQuote && (
+        <QuoteViewModal
+          quote={viewingQuote}
+          onClose={closeQuoteViewModal}
+          onEdit={(quote: Quote) => { closeQuoteViewModal(); openQuoteModal(quote); }}
         />
       )}
 

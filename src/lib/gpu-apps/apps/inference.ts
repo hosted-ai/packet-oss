@@ -33,65 +33,50 @@ export const INFERENCE_APPS: GpuAppDefinition[] = [
     displayOrder: 2,
     tags: ["llm", "inference", "api", "vllm", "v1", "tinyllama", "one-click"],
     docsUrl: "https://docs.vllm.ai/en/stable/usage/v1_guide/",
-    installScript: `#!/bin/bash
-set -e
-
+    installScript: SCRIPT_PREAMBLE + `
 echo "=== Installing vLLM V1 + TinyLlama 1.1B ==="
-echo "This is the recommended one-click LLM deployment for immediate use."
-echo "Uses Docker extraction method for RTX Blackwell SM120 support."
+echo "This installs vLLM via pip with TinyLlama pre-loaded for immediate inference."
 echo ""
 
 # Kill any existing vLLM/inference processes to free GPU memory
-pkill -f "vllm" 2>/dev/null || true
-pkill -f "python.*vllm" 2>/dev/null || true
+pkill -f "vllm.entrypoints" 2>/dev/null || true
 sleep 2
 
-# Install dependencies
+# Install system dependencies
 sudo apt-get update -qq
-sudo apt-get install -y python3-pip python3.12 curl > /dev/null 2>&1
+sudo apt-get install -y python3-venv curl > /dev/null 2>&1
 
-# Check if we already have the docker extraction
-if [ ! -d ~/vllm-docker-extract/usr/local/lib/python3.12/dist-packages/vllm ]; then
-  echo "Extracting vLLM 0.14.0 from Docker image (has SM120 Blackwell support)..."
+# Create venv for vLLM
+VLLM_DIR=/opt/vllm
+sudo mkdir -p $VLLM_DIR
+sudo chown $(whoami):$(whoami) $VLLM_DIR
 
-  # Download docker-image-extract script
-  curl -sL https://raw.githubusercontent.com/jjlin/docker-image-extract/main/docker-image-extract > /tmp/docker-image-extract
-  chmod +x /tmp/docker-image-extract
-
-  # Extract the vLLM docker image (contains vLLM 0.14.0 + PyTorch 2.9.1+cu129 with SM120)
-  rm -rf ~/vllm-docker-extract
-  mkdir -p ~/vllm-docker-extract
-  cd ~
-  /tmp/docker-image-extract -o vllm-docker-extract vllm/vllm-openai:latest
-
-  echo "Docker extraction complete (~19GB)"
+if [ ! -d "$VLLM_DIR/venv" ]; then
+  echo "Creating virtual environment..."
+  create_venv "$VLLM_DIR/venv"
 fi
+source "$VLLM_DIR/venv/bin/activate"
 
-# Verify extraction
-if [ ! -d ~/vllm-docker-extract/usr/local/lib/python3.12/dist-packages/vllm ]; then
-  echo "ERROR: vLLM extraction failed"
-  exit 1
-fi
+# Install vLLM via pip
+echo "Installing vLLM (this may take a few minutes)..."
+pip install --quiet vllm
 
-# Create startup script using docker-extracted packages
+echo "vLLM installed successfully"
+
+# Create startup script
 sudo tee /opt/start-vllm-tinyllama.sh > /dev/null << 'STARTSCRIPT'
 #!/bin/bash
-# vLLM V1 + TinyLlama using Docker-extracted packages with SM120 Blackwell support
-# Contains: vLLM 0.14.0, PyTorch 2.9.1+cu129, CUDA 12.9
-
-export PYTHONPATH="$HOME/vllm-docker-extract/usr/local/lib/python3.12/dist-packages:$PYTHONPATH"
-export PATH="$HOME/vllm-docker-extract/usr/local/bin:$PATH"
+source /opt/vllm/venv/bin/activate
 export VLLM_USE_V1=1
-export CUDA_VISIBLE_DEVICES=0
 
 # Kill any existing vLLM processes
-pkill -f "vllm" 2>/dev/null || true
+pkill -f "vllm.entrypoints" 2>/dev/null || true
 sleep 2
 
 MODEL="TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-echo "Starting vLLM V1 0.14.0 with $MODEL..."
+echo "Starting vLLM V1 with $MODEL..."
 
-exec python3.12 -m vllm.entrypoints.openai.api_server \\
+exec python -m vllm.entrypoints.openai.api_server \\
   --model "$MODEL" \\
   --host 0.0.0.0 \\
   --port 8000 \\
@@ -124,9 +109,8 @@ sudo chmod +x /opt/test-vllm.sh
 echo ""
 echo "=== vLLM V1 + TinyLlama 1.1B installed ==="
 echo "PORT=8000"
-echo "INFO=vLLM 0.14.0 with SM120 Blackwell support"
 echo "INFO=OpenAI-compatible API at http://localhost:8000/v1"
-echo "INFO=Model: TinyLlama/TinyLlama-1.1B-Chat-v1.0 (~200 tok/s)"
+echo "INFO=Model: TinyLlama/TinyLlama-1.1B-Chat-v1.0"
 echo "INFO=Test with: /opt/test-vllm.sh"
 `,
   },
@@ -155,65 +139,50 @@ echo "INFO=Test with: /opt/test-vllm.sh"
     displayOrder: 3,
     tags: ["llm", "inference", "api", "vllm", "v1"],
     docsUrl: "https://docs.vllm.ai",
-    installScript: `#!/bin/bash
-set -e
-
+    installScript: SCRIPT_PREAMBLE + `
 echo "=== Installing vLLM Inference Server (V1 Engine) ==="
-echo "Uses Docker extraction method for RTX Blackwell SM120 support."
 echo ""
 
 # Kill any existing vLLM/inference processes to free GPU memory
-pkill -f "vllm" 2>/dev/null || true
-pkill -f "python.*vllm" 2>/dev/null || true
+pkill -f "vllm.entrypoints" 2>/dev/null || true
 sleep 2
 
-# Install dependencies
+# Install system dependencies
 sudo apt-get update -qq
-sudo apt-get install -y python3-pip python3.12 curl > /dev/null 2>&1
+sudo apt-get install -y python3-venv curl > /dev/null 2>&1
 
-# Check if we already have the docker extraction
-if [ ! -d ~/vllm-docker-extract/usr/local/lib/python3.12/dist-packages/vllm ]; then
-  echo "Extracting vLLM 0.14.0 from Docker image (has SM120 Blackwell support)..."
+# Create venv for vLLM
+VLLM_DIR=/opt/vllm
+sudo mkdir -p $VLLM_DIR
+sudo chown $(whoami):$(whoami) $VLLM_DIR
 
-  # Download docker-image-extract script
-  curl -sL https://raw.githubusercontent.com/jjlin/docker-image-extract/main/docker-image-extract > /tmp/docker-image-extract
-  chmod +x /tmp/docker-image-extract
-
-  # Extract the vLLM docker image (contains vLLM 0.14.0 + PyTorch 2.9.1+cu129 with SM120)
-  rm -rf ~/vllm-docker-extract
-  mkdir -p ~/vllm-docker-extract
-  cd ~
-  /tmp/docker-image-extract -o vllm-docker-extract vllm/vllm-openai:latest
-
-  echo "Docker extraction complete (~19GB)"
+if [ ! -d "$VLLM_DIR/venv" ]; then
+  echo "Creating virtual environment..."
+  create_venv "$VLLM_DIR/venv"
 fi
+source "$VLLM_DIR/venv/bin/activate"
 
-# Verify extraction
-if [ ! -d ~/vllm-docker-extract/usr/local/lib/python3.12/dist-packages/vllm ]; then
-  echo "ERROR: vLLM extraction failed"
-  exit 1
-fi
+# Install vLLM via pip
+echo "Installing vLLM (this may take a few minutes)..."
+pip install --quiet vllm
 
-# Create startup script using docker-extracted packages
+echo "vLLM installed successfully"
+
+# Create startup script
 sudo tee /opt/start-vllm.sh > /dev/null << 'STARTSCRIPT'
 #!/bin/bash
-# vLLM V1 Server using Docker-extracted packages with SM120 Blackwell support
-# Contains: vLLM 0.14.0, PyTorch 2.9.1+cu129, CUDA 12.9
-
-export PYTHONPATH="$HOME/vllm-docker-extract/usr/local/lib/python3.12/dist-packages:$PYTHONPATH"
-export PATH="$HOME/vllm-docker-extract/usr/local/bin:$PATH"
+source /opt/vllm/venv/bin/activate
 export VLLM_USE_V1=1
-export CUDA_VISIBLE_DEVICES=0
 
 # Kill any existing vLLM processes
-pkill -f "vllm" 2>/dev/null || true
+pkill -f "vllm.entrypoints" 2>/dev/null || true
 sleep 2
 
 # Use model from environment or default to TinyLlama
 MODEL=\${VLLM_MODEL:-"TinyLlama/TinyLlama-1.1B-Chat-v1.0"}
-echo "Starting vLLM V1 0.14.0 with $MODEL..."
+echo "Starting vLLM V1 with $MODEL..."
 
-exec python3.12 -m vllm.entrypoints.openai.api_server \\
+exec python -m vllm.entrypoints.openai.api_server \\
   --model "$MODEL" \\
   --host 0.0.0.0 \\
   --port 8000 \\
@@ -263,9 +232,8 @@ TESTSCRIPT
 sudo chmod +x /opt/test-vllm.sh
 
 echo ""
-echo "=== vLLM V1 (0.14.0) installed ==="
+echo "=== vLLM V1 Inference Server installed ==="
 echo "PORT=8000"
-echo "INFO=vLLM 0.14.0 with SM120 Blackwell support"
 echo "INFO=OpenAI-compatible API at http://localhost:8000/v1"
 echo "INFO=Change model: VLLM_MODEL=<model> /opt/start-vllm.sh"
 echo "INFO=Test with: /opt/test-vllm.sh"

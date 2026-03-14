@@ -32,10 +32,11 @@ import {
   emailMuted,
   plainTextFooter,
 } from "../utils";
+import { getBrandName, getApiBaseUrl } from "@/lib/branding";
 
 // ── Default brand values used when no branding is supplied ──────────────────
-const DEFAULT_BRAND_NAME = 'GPU Cloud';
-const DEFAULT_API_BASE_URL = 'https://api.example.com';
+const DEFAULT_BRAND_NAME = getBrandName();
+const DEFAULT_API_BASE_URL = getApiBaseUrl();
 
 // ── GPU display names + pricing (kept in sync with signup route) ──
 
@@ -330,7 +331,7 @@ export async function sendDripApi1(params: {
     `)}
     ${emailText("It's <strong>OpenAI-compatible</strong>. Change the base URL in your existing code and it works — OpenAI SDK, LangChain, LlamaIndex, anything.")}
     ${emailButton("Open Dashboard", dashboardUrl, branding)}
-    ${emailMuted("Your API key is in the API Keys tab. Or just use the built-in playground to test without code.")}
+    ${emailMuted("Your API key is in the Token Factory tab. Or just use the built-in playground to test without code.")}
     ${emailSignoff(branding)}
   `;
 
@@ -349,7 +350,7 @@ It's OpenAI-compatible. Change the base URL in your existing code and it works �
 
 Open Dashboard: ${dashboardUrl}
 
-Your API key is in the API Keys tab. Or just use the built-in playground to test without code.
+Your API key is in the Token Factory tab. Or just use the built-in playground to test without code.
 
 The ${brand} Team
 ${plainTextFooter({ unsubscribeUrl, branding })}`;

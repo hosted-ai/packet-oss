@@ -80,9 +80,7 @@ export function WelcomeModal({
         const found = (Array.isArray(products) ? products : []).find(
           (p: MonthlyProduct) =>
             p.billingType === "monthly" &&
-            p.stripePriceId &&
-            (p.name.toLowerCase().includes("blackwell") ||
-              p.name.toLowerCase().includes("rtx pro 6000"))
+            p.stripePriceId
         );
         setMonthlyProduct(found || null);
       } catch {
@@ -330,11 +328,12 @@ export function WelcomeModal({
                           ? Math.round((validatedVoucher.creditCents / 100) / 2)
                           : 0;
                         const totalHours = parseInt(option.hours.replace("~", "").replace("h", "")) + bonusHours;
+                        const belowMinimum = validatedVoucher?.minTopupCents && option.value < validatedVoucher.minTopupCents;
                         return (
                           <button
                             key={option.value}
                             onClick={() => handleTopupWithVoucher(option.value)}
-                            disabled={topupLoading}
+                            disabled={topupLoading || !!belowMinimum}
                             className="relative flex flex-col items-center p-5 border border-[var(--line)] rounded-xl hover:border-teal-400 hover:bg-teal-50/50 transition-all duration-150 disabled:opacity-50 group"
                           >
                             {option.tag && (
@@ -401,9 +400,13 @@ export function WelcomeModal({
                         <span className="text-green-700 font-medium">{validatedVoucher.name}</span>
                         <span className="text-green-600">+${(validatedVoucher.creditCents / 100).toFixed(0)} credit</span>
                       </div>
-                      {isFreeVoucher && (
+                      {isFreeVoucher ? (
                         <p className="text-green-600 mt-1">Click redeem to add this credit to your wallet.</p>
-                      )}
+                      ) : validatedVoucher.minTopupCents ? (
+                        <p className="text-amber-600 mt-1">
+                          Requires a minimum ${(validatedVoucher.minTopupCents / 100).toFixed(0)} deposit. Select an amount below.
+                        </p>
+                      ) : null}
                     </div>
                   )}
                 </div>

@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
-import { podAction, getPoolSubscriptions, getConnectionInfo } from "@/lib/hostedai";
+import {
+  podAction,
+  getPoolSubscriptions,
+  getConnectionInfo,
+  startInstance,
+  getInstanceCredentials,
+  getTeamInstances,
+} from "@/lib/hostedai";
 import { logGPUStarted } from "@/lib/activity";
 import { prisma } from "@/lib/prisma";
-import { injectServerKeyUsingSSHInfo } from "@/lib/ssh-keys";
+import { injectServerKeyUsingSSHInfo, injectServerKeyIntoPod } from "@/lib/ssh-keys";
+
+// Check if the ID looks like an HAI 2.2 instance (i-{uuid}) vs numeric (legacy pool subscription)
+function isInstanceId(id: string): boolean {
+  return /^i-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
 
 // POST - Start a stopped pod using the pod action API
 export async function POST(
@@ -22,7 +34,72 @@ export async function POST(
       );
     }
 
-    const { id: subscriptionId } = await params;
+    const { id } = await params;
+
+    // === HAI 2.2: Unified instance start ===
+    if (isInstanceId(id)) {
+      console.log("[HAI 2.2] Starting instance:", id);
+
+      // Verify the instance belongs to this customer's teams
+      let found = false;
+      for (const tid of allTeamIds) {
+        const instances = await getTeamInstances(tid);
+        if (instances.some(i => i.id === id)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        return NextResponse.json({ error: "Instance not found" }, { status: 404 });
+      }
+
+      await startInstance(id);
+
+      // Clear installed apps
+      try {
+        await prisma.installedApp.deleteMany({
+          where: { subscriptionId: id, stripeCustomerId: payload.customerId },
+        });
+      } catch { /* ignore */ }
+
+      // Log activity
+      let displayNameForLog: string | undefined;
+      try {
+        const meta = await prisma.podMetadata.findFirst({
+          where: { instanceId: id },
+          select: { displayName: true },
+        });
+        displayNameForLog = meta?.displayName || undefined;
+      } catch { /* ignore */ }
+      await logGPUStarted(payload.customerId, "GPU Instance", displayNameForLog, id);
+
+      // Schedule SSH key injection after boot
+      setTimeout(async () => {
+        try {
+          const creds = await getInstanceCredentials(id);
+          if (creds.ip && creds.username && creds.password && creds.port) {
+            console.log(`[Start] Injecting server SSH key into instance ${id}...`);
+            const result = await injectServerKeyIntoPod(
+              creds.ip, creds.port, creds.username, creds.password
+            );
+            if (result.success) {
+              console.log(`[Start] Server key injected into instance ${id}`);
+            }
+          }
+        } catch (keyErr) {
+          console.error("[Start] Error injecting server SSH key:", keyErr);
+        }
+      }, 30000);
+
+      return NextResponse.json({
+        success: true,
+        instance_id: id,
+        message: "GPU starting up - will be ready shortly",
+      });
+    }
+
+    // === Legacy: Pool subscription start ===
+    const subscriptionId = id;
 
     // Optionally get pod name from request body (for multi-pod subscriptions)
     let targetPodName: string | undefined;
@@ -90,7 +167,6 @@ export async function POST(
     await podAction(podName, subscriptionId, "start");
 
     // Clear installed apps for this subscription since pod may have been rebuilt
-    // Apps need to be reinstalled after a stop/start cycle
     try {
       const deletedApps = await prisma.installedApp.deleteMany({
         where: {
@@ -103,10 +179,9 @@ export async function POST(
       }
     } catch (appErr) {
       console.error("Error clearing installed apps after start:", appErr);
-      // Don't fail the start if app cleanup fails
     }
 
-    // Log the activity (include pod name for tracking)
+    // Log the activity
     let displayNameForLog: string | undefined;
     try {
       const meta = await prisma.podMetadata.findUnique({
@@ -117,11 +192,9 @@ export async function POST(
     } catch { /* ignore */ }
     await logGPUStarted(payload.customerId, poolName, displayNameForLog, String(subscriptionId));
 
-    // Schedule server SSH key injection after pod boots (runs in background)
-    // This ensures we can always access the pod even if the user changes the password
+    // Schedule server SSH key injection after pod boots
     setTimeout(async () => {
       try {
-        // Fetch fresh connection info after start
         const freshConnectionInfo = await getConnectionInfo(ownerTeamId, subscriptionId);
         const freshSub = freshConnectionInfo?.find(c => String(c.id) === String(subscriptionId));
         const freshPod = freshSub?.pods?.find(p => p.pod_name === podName) || freshSub?.pods?.[0];
@@ -141,7 +214,7 @@ export async function POST(
       } catch (keyErr) {
         console.error("[Start] Error injecting server SSH key:", keyErr);
       }
-    }, 30000); // Wait 30 seconds for pod to boot
+    }, 30000);
 
     return NextResponse.json({
       success: true,

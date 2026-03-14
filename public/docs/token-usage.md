@@ -19,7 +19,7 @@ The Token Usage Dashboard provides comprehensive analytics on your AI model toke
 
 ### Accessing Token Usage
 
-1. Navigate to your Dashboard
+1. Navigate to your Packet.ai Dashboard
 2. Click **"Usage"** or **"Analytics"** in the navigation
 3. Select a time range to view
 4. Explore the token breakdown charts
@@ -181,14 +181,14 @@ Median: 450 tokens   95th percentile: 2,340 tokens
 
 ### Estimated Costs
 
-While GPU Cloud Platform charges by GPU-hour (not tokens), the dashboard provides comparative cost estimates:
+While Packet.ai charges by GPU-hour (not tokens), the dashboard provides comparative cost estimates:
 
 ```
 Cost Comparison (if using pay-per-token APIs)
 ─────────────────────────────────────────────
 OpenAI GPT-4 equivalent:    $1,254.38
 Claude 3.5 Sonnet equiv:      $876.45
-GPU Cloud Platform GPU-hour cost:       $32.40
+Packet.ai GPU-hour cost:       $32.40
 ─────────────────────────────────────────────
 Savings this period:         $1,221.98 (97.4%)
 ```
@@ -200,7 +200,7 @@ Average Cost Per Request
 ┌─────────────────────────────────────────────┐
 │ If GPT-4:         $0.0274 per request       │
 │ If Claude 3.5:    $0.0192 per request       │
-│ GPU Cloud Platform:        $0.0007 per request       │
+│ Packet.ai:        $0.0007 per request       │
 │                   (based on GPU time share) │
 └─────────────────────────────────────────────┘
 ```

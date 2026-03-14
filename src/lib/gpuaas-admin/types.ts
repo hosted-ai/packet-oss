@@ -1,7 +1,7 @@
 /**
  * GPUaaS Admin API Types
  *
- * Types for the admin-console.example.com API used to manage
+ * Types for the GPUaaS admin API used to manage
  * GPU infrastructure for service providers.
  */
 

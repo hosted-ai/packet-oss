@@ -21,7 +21,7 @@ export const sshCommand = new Command("ssh")
   .option("--copy", "Just print the SSH command (don't connect)")
   .action(async (id, options) => {
     if (!getApiKey()) {
-      console.log(chalk.yellow("\n  Not logged in. Run 'packet login' first.\n"));
+      console.log(chalk.yellow("\n  Not logged in. Run 'gpu-cloud login' first.\n"));
       process.exit(1);
     }
 
@@ -37,7 +37,7 @@ export const sshCommand = new Command("ssh")
       if (!pod?.ssh) {
         spinner.fail("Instance not ready for SSH");
         console.log(chalk.gray("\n  The instance may still be starting. Try again in a moment.\n"));
-        console.log(chalk.gray(`  Check status: packet ps\n`));
+        console.log(chalk.gray(`  Check status: gpu-cloud ps\n`));
         process.exit(1);
       }
 

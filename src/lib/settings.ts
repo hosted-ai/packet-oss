@@ -1,22 +1,31 @@
+/**
+ * Database-backed settings store with AES-256-GCM encryption.
+ *
+ * Used primarily in OSS / self-hosted deployments where there is no .env file
+ * management — admins configure API keys, branding, etc. through the
+ * Platform Settings UI which persists values in the `SystemSetting` table.
+ *
+ * Resolution: DB value → process.env fallback.
+ * Sensitive keys (Stripe secrets, API tokens) are stored encrypted at rest.
+ */
+
 import { randomBytes, createCipheriv, createDecipheriv, scryptSync } from "crypto";
+import { getSecret } from "./auth/secrets";
 import { prisma } from "./prisma";
 
-// In-memory cache with TTL
+// ── In-memory cache with TTL ────────────────────────────────────────────────
+
 const cache = new Map<string, { value: string | null; expiresAt: number }>();
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
-// Encryption key derived from a root secret (auto-generated if needed)
+// ── Encryption ──────────────────────────────────────────────────────────────
+
 let encryptionKey: Buffer | null = null;
 
 function getEncryptionKey(): Buffer {
   if (encryptionKey) return encryptionKey;
-  const rootSecret = process.env.ADMIN_JWT_SECRET;
-  if (!rootSecret) {
-    throw new Error(
-      "ADMIN_JWT_SECRET is not configured. Settings encryption requires this secret."
-    );
-  }
-  encryptionKey = scryptSync(rootSecret, "packet-oss-settings", 32);
+  const rootSecret = getSecret("ADMIN_JWT_SECRET");
+  encryptionKey = scryptSync(rootSecret, "platform-settings", 32);
   return encryptionKey;
 }
 
@@ -36,17 +45,17 @@ function decrypt(ciphertext: string): string {
   return decipher.update(encryptedHex, "hex", "utf8") + decipher.final("utf8");
 }
 
+// ── Public API ──────────────────────────────────────────────────────────────
+
 /**
  * Get a setting value. Checks DB first, then falls back to process.env.
  */
 export async function getSetting(key: string): Promise<string | null> {
-  // Check cache first
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
 
-  // Try database
   try {
     const row = await prisma.systemSetting.findUnique({ where: { key } });
     if (row) {
@@ -58,7 +67,6 @@ export async function getSetting(key: string): Promise<string | null> {
     // DB might not be initialized yet, fall through to env
   }
 
-  // Fall back to environment variable
   const envValue = process.env[key] || null;
   cache.set(key, { value: envValue, expiresAt: Date.now() + CACHE_TTL_MS });
   return envValue;
@@ -86,9 +94,7 @@ export async function setSetting(key: string, value: string, encrypted = false):
     update: { value: storedValue, encrypted },
     create: { key, value: storedValue, encrypted },
   });
-  // Update cache with the plain value
   cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
-  // Reset encryption key cache if we changed the root secret
   if (key === "ADMIN_JWT_SECRET") {
     encryptionKey = null;
   }
@@ -99,7 +105,6 @@ export async function setSetting(key: string, value: string, encrypted = false):
  */
 export async function getSettings(keys: string[]): Promise<Record<string, string | null>> {
   const result: Record<string, string | null> = {};
-  // Batch DB read
   try {
     const rows = await prisma.systemSetting.findMany({
       where: { key: { in: keys } },
@@ -113,7 +118,6 @@ export async function getSettings(keys: string[]): Promise<Record<string, string
     // DB might not be ready
   }
 
-  // Fill in missing keys from env
   for (const key of keys) {
     if (!(key in result)) {
       result[key] = process.env[key] || null;
@@ -141,19 +145,26 @@ export function clearSettingsCache(): void {
   cache.clear();
 }
 
-// Service configuration groups
+// ── Service configuration groups ────────────────────────────────────────────
+
 export const SERVICE_GROUPS = {
-  stripe: {
-    label: "Stripe Billing",
-    keys: ["STRIPE_SECRET_KEY", "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"],
-    required: ["STRIPE_SECRET_KEY"],
-    sensitive: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
+  branding: {
+    label: "Branding",
+    keys: ["NEXT_PUBLIC_BRAND_NAME", "NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_LOGO_URL", "NEXT_PUBLIC_PRIMARY_COLOR", "NEXT_PUBLIC_ACCENT_COLOR", "SUPPORT_EMAIL"],
+    required: [],
+    sensitive: [],
   },
   hostedai: {
     label: "GPU Backend (hosted.ai)",
     keys: ["HOSTEDAI_API_URL", "HOSTEDAI_API_KEY"],
     required: ["HOSTEDAI_API_URL", "HOSTEDAI_API_KEY"],
     sensitive: ["HOSTEDAI_API_KEY"],
+  },
+  stripe: {
+    label: "Stripe Billing",
+    keys: ["STRIPE_SECRET_KEY", "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET"],
+    required: ["STRIPE_SECRET_KEY"],
+    sensitive: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
   },
   emailit: {
     label: "Email (Emailit)",
@@ -172,12 +183,6 @@ export const SERVICE_GROUPS = {
     keys: ["PIPEDRIVE_API_TOKEN"],
     required: ["PIPEDRIVE_API_TOKEN"],
     sensitive: ["PIPEDRIVE_API_TOKEN"],
-  },
-  branding: {
-    label: "Branding",
-    keys: ["NEXT_PUBLIC_BRAND_NAME", "NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_LOGO_URL", "NEXT_PUBLIC_PRIMARY_COLOR", "NEXT_PUBLIC_ACCENT_COLOR", "SUPPORT_EMAIL"],
-    required: [],
-    sensitive: [],
   },
 } as const;
 
@@ -210,39 +215,4 @@ export function isSensitiveKey(key: string): boolean {
 export function maskValue(value: string): string {
   if (value.length <= 8) return "****";
   return value.substring(0, 8) + "****";
-}
-
-/**
- * Ensure JWT secrets exist. Auto-generates them if not found in env or DB.
- * Call this during app initialization.
- */
-export async function ensureJwtSecrets(): Promise<void> {
-  const secrets = ["ADMIN_JWT_SECRET", "CUSTOMER_JWT_SECRET", "CRON_SECRET"];
-  for (const key of secrets) {
-    const existing = await getSetting(key);
-    if (!existing) {
-      const generated = randomBytes(32).toString("hex");
-      await setSetting(key, generated);
-      // Also set in process.env so auth modules can read it immediately
-      process.env[key] = generated;
-      console.log(`Auto-generated ${key}`);
-    } else if (!process.env[key]) {
-      // Sync DB value to process.env for auth modules
-      process.env[key] = existing;
-    }
-  }
-}
-
-/**
- * Get a JWT secret, ensuring it exists.
- */
-export async function getJwtSecret(name: string): Promise<string> {
-  const value = await getSetting(name);
-  if (!value) {
-    // Auto-generate on the fly
-    const generated = randomBytes(32).toString("hex");
-    await setSetting(name, generated);
-    return generated;
-  }
-  return value;
 }

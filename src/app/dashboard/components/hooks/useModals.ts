@@ -3,9 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 
-export type TabType = "dashboard" | "billing" | "team" | "keys" | "huggingface" | "referrals" | "support" | "settings" | "metrics" | "apps" | "storage";
+export type TabType = "dashboard" | "billing" | "team" | "keys" | "tokenfactory" | "pixelfactory" | "huggingface" | "referrals" | "support" | "settings" | "metrics" | "apps" | "storage" | "baremetal";
 
-const VALID_TABS: TabType[] = ["dashboard", "billing", "team", "keys", "huggingface", "referrals", "support", "settings", "metrics", "apps", "storage"];
+const VALID_TABS: TabType[] = ["dashboard", "billing", "team", "keys", "tokenfactory", "pixelfactory", "huggingface", "referrals", "support", "settings", "metrics", "apps", "storage", "baremetal"];
 
 export interface ModalsState {
   showLaunchModal: boolean;

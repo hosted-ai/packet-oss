@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { sendEmailDirect } from "@/lib/email/client";
 
-const ONBOARDING_EMAIL = process.env.ONBOARDING_EMAIL || process.env.ADMIN_BCC_EMAIL || "";
+const ONBOARDING_EMAIL = "onboarding@hosted.ai";
 
 /**
  * Escape a value for CSV: wrap in quotes if it contains commas, quotes, or newlines.
@@ -29,7 +29,7 @@ function formatDate(value: number | Date | null | undefined): string {
 /**
  * POST /api/cron/customer-csv
  *
- * Generates a comprehensive customer CSV and emails it to ONBOARDING_EMAIL.
+ * Generates a comprehensive customer CSV and emails it to onboarding@hosted.ai.
  * Includes wallet balance, active GPUs, billing type, and recent activity timestamps.
  *
  * Schedule: Every 12 hours via external cron.
@@ -38,10 +38,6 @@ export async function POST(request: NextRequest) {
   try {
     const authError = verifyCronAuth(request);
     if (authError) return authError;
-
-    if (!ONBOARDING_EMAIL) {
-      return NextResponse.json({ skipped: true, reason: "ONBOARDING_EMAIL not configured" });
-    }
 
     console.log("[Customer CSV] Starting customer CSV generation...");
 

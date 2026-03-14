@@ -9,6 +9,7 @@ export interface InvestorPayoutRow {
   revenueSharePercent: number;
   grossRevenueCents: number;
   payoutAmountCents: number;
+  pixelFactoryRevenueCents: number;
 }
 
 export interface PayoutsResponse {
@@ -54,7 +55,7 @@ export async function GET(request: NextRequest) {
 
   for (const investor of investors) {
     const revenueSharePercent = (await getInvestorRevenueShare(investor.email)) ?? 70;
-    const { poolIds } = await resolveInvestorPoolIds(investor.email);
+    const { poolIds, hasPixelFactory } = await resolveInvestorPoolIds(investor.email);
 
     let grossRevenueCents = 0;
 
@@ -75,6 +76,20 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Pixel Factory revenue from ImageGeneration (same as investor-stats.ts)
+    let pixelFactoryRevenueCents = 0;
+    if (hasPixelFactory) {
+      const pxl = await prisma.imageGeneration.aggregate({
+        where: {
+          status: "completed",
+          createdAt: { gte: fromDate, lte: toDate },
+        },
+        _sum: { costCents: true },
+      });
+      pixelFactoryRevenueCents = pxl._sum.costCents || 0;
+      grossRevenueCents += pixelFactoryRevenueCents;
+    }
+
     const payoutAmountCents = Math.round(grossRevenueCents * revenueSharePercent / 100);
 
     rows.push({
@@ -82,6 +97,7 @@ export async function GET(request: NextRequest) {
       revenueSharePercent,
       grossRevenueCents,
       payoutAmountCents,
+      pixelFactoryRevenueCents,
     });
   }
 
@@ -97,13 +113,14 @@ export async function GET(request: NextRequest) {
 
   // CSV export
   if (format === "csv") {
-    const header = "Email,Revenue Share %,Gross Revenue,Payout Amount,Period From,Period To";
+    const header = "Email,Revenue Share %,Gross Revenue,Payout Amount,Pixel Factory Revenue,Period From,Period To";
     const csvRows = rows.map((r) =>
       [
         r.email,
         r.revenueSharePercent,
         (r.grossRevenueCents / 100).toFixed(2),
         (r.payoutAmountCents / 100).toFixed(2),
+        (r.pixelFactoryRevenueCents / 100).toFixed(2),
         fromParam,
         toParam,
       ].join(",")

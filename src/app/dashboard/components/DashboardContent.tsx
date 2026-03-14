@@ -3,6 +3,7 @@
 import React from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { isPro, hasPremiumFeature } from "@/lib/edition";
 import dynamic from "next/dynamic";
 
 const XTerminal = dynamic(() => import("@/components/XTerminal"), { ssr: false });
@@ -19,6 +20,19 @@ import { SupportTab } from "./SupportTab";
 import { AppsTab } from "./AppsTab";
 import { StorageTab } from "./StorageTab";
 
+// Premium tabs — dynamically imported, only available in Pro edition
+const TokenFactoryTab = hasPremiumFeature("token-factory")
+  ? dynamic(() => import("./TokenFactoryTab").then(m => ({ default: m.TokenFactoryTab })))
+  : () => null;
+const PixelFactoryTab = hasPremiumFeature("pixel-factory")
+  ? dynamic(() => import("./PixelFactoryTab").then(m => ({ default: m.PixelFactoryTab })))
+  : () => null;
+const BareMetalTab = hasPremiumFeature("bare-metal")
+  ? dynamic(() => import("./BareMetalTab").then(m => ({ default: m.BareMetalTab })))
+  : () => null;
+const TruConversionIdentity = hasPremiumFeature("analytics")
+  ? dynamic(() => import("@/components/TruConversionIdentity").then(m => ({ default: m.TruConversionIdentity })))
+  : () => null;
 
 import {
   // Components
@@ -40,7 +54,8 @@ import { TopupModal, ActivityLogModal, TransactionsModal, BlackwellModal, Welcom
 import { MobileHeader, MobileNav, MobileMenuSheet, MobileMoreSheet } from "./MobileDashboard";
 import { ProfileSettings } from "./ProfileSettings";
 import { BudgetSettings } from "./BudgetSettings";
-
+import { getBrandName, getAppUrl } from "@/lib/branding";
+import { RateLimitSettings } from "./RateLimitSettings";
 import { SessionSettings } from "./SessionSettings";
 import { useDashboardData, useDashboardActions, useModals, TabType } from "./hooks";
 import { OnboardingChecklist } from "./OnboardingChecklist";
@@ -150,6 +165,42 @@ export function DashboardContent() {
   const [showMobileMenu, setShowMobileMenu] = React.useState(false);
   const [showMoreSheet, setShowMoreSheet] = React.useState(false);
 
+  // Bare metal deployments (active GPU nodes)
+  const [bareMetalNodes, setBareMetalNodes] = React.useState<Array<{
+    id: string;
+    name: string | null;
+    gpu: string;
+    gpuCount: number;
+    region: string;
+    status: string;
+    ipAddress: string | null;
+    sshUser: string | null;
+    hourlyRate: number;
+    createdAt: string;
+  }>>([]);
+
+  const fetchBareMetalNodes = React.useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/dashboard/bare-metal/deployments", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const result = await res.json();
+        const active = (result.data || []).filter(
+          (d: { status: string }) => d.status === "running" || d.status === "deploying"
+        );
+        setBareMetalNodes(active);
+      }
+    } catch {
+      // Non-critical — don't block dashboard
+    }
+  }, [token]);
+
+  React.useEffect(() => {
+    fetchBareMetalNodes();
+  }, [fetchBareMetalNodes]);
+
   // Calculate values needed for live cost ticker (must be before any early returns)
   // Treat users as hourly if they have wallet credit (e.g. voucher users with billing_type "free")
   const isHourlyEarly = data?.customer?.billingType === "hourly" || (data?.wallet?.balance || 0) > 0;
@@ -232,6 +283,41 @@ export function DashboardContent() {
     const launchProduct = params.get("launchProduct");
 
     if (topupStatus === "success") {
+      // Track wallet refill conversion
+      if (typeof (window as any).my_analytics !== "undefined") {
+        (window as any).my_analytics.goal("0xxmvyzdifvutbty");
+      }
+
+      // Growify v2 conversion — wallet top-up
+      if (amountParam) {
+        try {
+          const amountDollars = parseInt(amountParam) / 100;
+          const custEmail = data?.customer?.email;
+          const custName = data?.customer?.name || "";
+          const nameParts = custName.split(" ");
+          const w = window as any;
+          w.grpQueue = w.grpQueue || [];
+          if (!w.grp) { w.grp = function() { w.grpQueue.push(arguments); }; }
+          w.grp('conversion', {
+            userEmail: custEmail || '',
+            userFirstName: nameParts[0] || '',
+            userLastName: nameParts.slice(1).join(" ") || '',
+            userId: custEmail || '',
+            orderId: `topup-${Date.now()}`,
+            tax: 0,
+            shipping: 0,
+            products: [{
+              productId: "wallet-topup",
+              productName: "Wallet Top-Up",
+              productPrice: amountDollars,
+              productBrand: "gpu-cloud",
+              productQuantity: 1,
+              purchaseValue: amountDollars,
+            }],
+          });
+        } catch { /* Growify not loaded */ }
+      }
+
       // Show success toast
       if (amountParam) {
         const dollars = (parseInt(amountParam) / 100).toFixed(0);
@@ -268,11 +354,12 @@ export function DashboardContent() {
     const isNewUser =
       walletBalance <= 0 &&
       poolSubscriptions.length === 0 &&
-      instances.length === 0;
+      instances.length === 0 &&
+      bareMetalNodes.length === 0;
     if (isNewUser) {
       setShowWelcomeModal(true);
     }
-  }, [data, loading, poolSubscriptions.length, instances.length]);
+  }, [data, loading, poolSubscriptions.length, instances.length, bareMetalNodes.length]);
 
   // Gate GPU launch: monthly subscribers and funded wallets go straight to launch,
   // new users (no subs, no wallet) pick billing type first
@@ -415,6 +502,7 @@ export function DashboardContent() {
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
+      <TruConversionIdentity email={data.customer.email} />
       {/* Mobile Header */}
       <MobileHeader
         balance={data.wallet?.balanceFormatted || "$0"}
@@ -430,7 +518,7 @@ export function DashboardContent() {
           <Link href="/" className="flex items-center gap-2">
             <Image
               src="/packet-logo.png"
-              alt="GPU Cloud"
+              alt={getBrandName()}
               width={140}
               height={50}
               className="h-12 w-auto"
@@ -545,6 +633,24 @@ export function DashboardContent() {
           <div className="pt-4 pb-1">
             <p className="px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider">Compute</p>
           </div>
+          {isPro() && (
+            <NavItem
+              icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>}
+              label="Token Factory"
+              badge="Alpha"
+              active={activeTab === "tokenfactory"}
+              onClick={() => setActiveTab("tokenfactory")}
+            />
+          )}
+          {isPro() && (
+            <NavItem
+              icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>}
+              label="Pixel Factory"
+              badge="Alpha"
+              active={activeTab === "pixelfactory"}
+              onClick={() => setActiveTab("pixelfactory")}
+            />
+          )}
           <NavItem
             icon={<span className="text-lg">🤗</span>}
             label="Hugging Face"
@@ -563,7 +669,14 @@ export function DashboardContent() {
             active={activeTab === "storage"}
             onClick={() => setActiveTab("storage")}
           />
-
+          {isPro() && (
+            <NavItem
+              icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg>}
+              label="Bare Metal"
+              active={activeTab === "baremetal"}
+              onClick={() => setActiveTab("baremetal")}
+            />
+          )}
           <NavItem
             icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>}
             label="Metrics"
@@ -601,7 +714,7 @@ export function DashboardContent() {
             <p className="px-4 text-xs font-medium text-zinc-400 uppercase tracking-wider">Help</p>
           </div>
           <a
-            href="https://example.com/docs"
+            href={`${getAppUrl()}/docs`}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-colors text-[var(--muted)] hover:bg-zinc-50 hover:text-zinc-700"
@@ -903,9 +1016,53 @@ export function DashboardContent() {
                   </div>
                 ) : null}
 
+                {/* Active Bare Metal Nodes */}
+                {bareMetalNodes.length > 0 && (
+                  <div className={poolSubscriptions.length > 0 ? "mt-8" : ""}>
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="text-lg font-semibold text-[var(--ink)]">
+                        Bare Metal
+                        <span className="ml-2 text-sm font-normal text-zinc-400">
+                          ({bareMetalNodes.length})
+                        </span>
+                      </h2>
+                      <button
+                        onClick={() => setActiveTab("baremetal")}
+                        className="text-sm text-[var(--blue)] hover:underline"
+                      >
+                        Manage
+                      </button>
+                    </div>
+                    <div className="grid md:grid-cols-2 gap-4">
+                      {bareMetalNodes.map((node) => (
+                        <div key={node.id} className="bg-white rounded-2xl border border-[var(--line)] p-5">
+                          <div className="flex items-start justify-between">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <div className={`w-2 h-2 rounded-full ${node.status === "running" ? "bg-emerald-500" : "bg-amber-400 animate-pulse"}`} />
+                                <h3 className="font-medium text-[var(--ink)]">{node.name || node.gpu}</h3>
+                              </div>
+                              <p className="text-sm text-[var(--muted)]">
+                                {node.gpu} x{node.gpuCount} &middot; {node.region}
+                              </p>
+                              {node.ipAddress && (
+                                <p className="text-xs text-zinc-400 font-mono mt-1">{node.ipAddress}</p>
+                              )}
+                            </div>
+                            <div className="text-right">
+                              <div className="text-sm font-semibold text-[var(--ink)]">${(node.hourlyRate / 100).toFixed(2)}/hr</div>
+                              <div className="text-xs text-zinc-400 capitalize">{node.status}</div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {/* Saved Snapshots / Paused Pods */}
                 {snapshots.length > 0 && (
-                  <div className={poolSubscriptions.length > 0 ? "mt-8" : ""}>
+                  <div className={(poolSubscriptions.length > 0 || bareMetalNodes.length > 0) ? "mt-8" : ""}>
                     <div className="flex items-center justify-between mb-4">
                       <h2 className="text-lg font-semibold text-[var(--ink)]">
                         Saved Pods
@@ -1054,6 +1211,55 @@ export function DashboardContent() {
             </div>
           )}
 
+          {activeTab === "tokenfactory" && token && <TokenFactoryTab token={token} />}
+
+          {activeTab === "pixelfactory" && (
+            <div style={{
+              maxWidth: "640px",
+              margin: "80px auto",
+              textAlign: "center",
+              padding: "60px 40px",
+              background: "var(--panel)",
+              borderRadius: "16px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+            }}>
+              <div style={{
+                width: "80px",
+                height: "80px",
+                margin: "0 auto 24px",
+                background: "linear-gradient(135deg, var(--blue) 0%, var(--teal) 100%)",
+                borderRadius: "20px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: 0.7,
+              }}>
+                <svg style={{ width: "40px", height: "40px", color: "white" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+              </div>
+              <h2 style={{
+                fontSize: "24px",
+                fontWeight: "700",
+                color: "var(--ink)",
+                fontFamily: "var(--font-display)",
+                marginBottom: "12px",
+              }}>
+                Pixel Factory is Under Maintenance
+              </h2>
+              <p style={{
+                fontSize: "15px",
+                color: "var(--muted)",
+                lineHeight: "1.6",
+                maxWidth: "440px",
+                margin: "0 auto",
+              }}>
+                {"We're upgrading our image generation infrastructure. Pixel Factory will be back shortly. Thanks for your patience!"}
+              </p>
+            </div>
+          )}
+
           {activeTab === "huggingface" && (
             <HuggingFaceTab
               token={token!}
@@ -1094,6 +1300,7 @@ export function DashboardContent() {
 
           {activeTab === "storage" && token && <StorageTab token={token} />}
 
+          {activeTab === "baremetal" && token && <BareMetalTab token={token} onTopUp={() => setShowTopupModal(true)} />}
 
           {activeTab === "settings" && (
             <div className="max-w-2xl space-y-6">
@@ -1108,6 +1315,8 @@ export function DashboardContent() {
               {/* Budget Controls Section */}
               <BudgetSettings token={token!} />
 
+              {/* Rate Limit Settings Section */}
+              <RateLimitSettings token={token!} />
 
               {/* Session Settings Section */}
               <SessionSettings
@@ -1148,7 +1357,11 @@ export function DashboardContent() {
           <p className="text-center text-[var(--muted)] text-xs">
             Session expires in {sessionTimeoutHours} {sessionTimeoutHours === 1 ? "hour" : "hours"} · <Link href="/account" className="text-[var(--blue)] hover:underline">Request new link</Link>
             <span className="mx-2">·</span>
-            © {new Date().getFullYear()} GPU Cloud Platform
+            © {new Date().getFullYear()} {getBrandName()} · Powered by <a href="https://hosted.ai" className="text-[var(--blue)] hover:underline" target="_blank" rel="noopener noreferrer">hosted.ai</a>
+            {process.env.NEXT_PUBLIC_APP_VERSION && <>
+              <span className="mx-2">·</span>
+              <span className="text-zinc-400">v{process.env.NEXT_PUBLIC_APP_VERSION}</span>
+            </>}
           </p>
         </footer>
       </main>

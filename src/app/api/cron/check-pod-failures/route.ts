@@ -3,7 +3,7 @@
  *
  * Scans active pods for failed states. When a new failure is detected:
  * 1. Creates an URGENT Zammad support ticket
- * 2. Sends an email to SUPPORT_EMAIL with full debugging info
+ * 2. Sends an email to support@hosted.ai with full debugging info
  * 3. Records the alert in PodFailureAlert to prevent duplicates
  *
  * OPTIMIZED: Uses pool overview cache to identify teams with active pods,
@@ -32,7 +32,7 @@ const FAILED_STATUSES = new Set([
   "evicted",
 ]);
 
-const PACKET_SUPPORT_GROUP = "Support::L1";
+const PACKET_SUPPORT_GROUP = process.env.ZAMMAD_SUPPORT_GROUP || "Support::L1 - packet.ai";
 
 export async function GET(request: NextRequest) {
   // Verify cron secret (fail-closed: rejects if CRON_SECRET is not set)
@@ -166,7 +166,7 @@ export async function GET(request: NextRequest) {
                 `- GPU Count: ${gpuCount}`,
                 `- Region: ${region || "unknown"}`,
                 "",
-                `Admin Panel: ${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/admin?tab=pods`,
+                `Admin Panel: ${process.env.NEXT_PUBLIC_APP_URL || "https://localhost:3000"}/admin?tab=pods`,
               ].join("\n");
 
               const ticket = await createTicket({
@@ -191,7 +191,7 @@ export async function GET(request: NextRequest) {
               results.errors.push(msg);
             }
 
-            // Send email to SUPPORT_EMAIL
+            // Send email to support@hosted.ai
             try {
               await sendPodFailureAlertEmail({
                 podName: pod.pod_name,

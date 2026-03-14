@@ -254,7 +254,7 @@ vllm:avg_generation_throughput_toks_per_s`}</code>
       <h2>Need Help?</h2>
       <p>
         Contact us at{" "}
-        <a href="mailto:support@example.com">support@example.com</a>
+        our support team via the <strong>Support</strong> tab
       </p>
     </div>
   );

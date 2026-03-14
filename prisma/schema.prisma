@@ -3,132 +3,147 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
 model ActivityEvent {
   id          String   @id @default(cuid())
-  customerId  String
+  customerId  String   @map("customer_id")
   type        String
   description String
-  metadata    String?
-  createdAt   DateTime @default(now())
+  metadata    String?  @db.Text
+  tenantId    String   @default("default") @map("tenant_id")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([customerId])
   @@index([createdAt])
+  @@index([tenantId])
+  @@map("activity_event")
 }
 
 model TeamMember {
   id               String    @id @default(cuid())
   email            String
   name             String?
-  stripeCustomerId String
+  stripeCustomerId String    @map("stripe_customer_id")
   role             String    @default("member")
-  invitedAt        DateTime  @default(now())
-  acceptedAt       DateTime?
-  invitedBy        String?
+  invitedAt        DateTime  @default(now()) @map("invited_at")
+  acceptedAt       DateTime? @map("accepted_at")
+  invitedBy        String?   @map("invited_by")
+  tenantId         String    @default("default") @map("tenant_id")
 
   @@unique([email, stripeCustomerId])
   @@index([email])
   @@index([stripeCustomerId])
+  @@index([tenantId])
+  @@map("team_member")
 }
 
 model Investor {
   id                  String    @id @default(cuid())
   email               String    @unique
-  addedBy             String
-  isOwner             Boolean   @default(false)
-  acceptedAt          DateTime?
-  lastLoginAt         DateTime?
-  assignedNodeIds     String    @default("[]")
-  revenueSharePercent Float?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  addedBy             String    @map("added_by")
+  isOwner             Boolean   @default(false) @map("is_owner")
+  acceptedAt          DateTime? @map("accepted_at")
+  lastLoginAt         DateTime? @map("last_login_at")
+  assignedNodeIds     String    @default("[]") @map("assigned_node_ids") @db.Text
+  revenueSharePercent Float?    @map("revenue_share_percent")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   @@index([email])
+  @@map("investor")
 }
 
 model SSHKey {
   id               String   @id @default(cuid())
-  stripeCustomerId String
+  stripeCustomerId String   @map("stripe_customer_id")
   name             String
-  publicKey        String
+  publicKey        String   @map("public_key") @db.Text
   fingerprint      String
-  createdAt        DateTime @default(now())
+  createdAt        DateTime @default(now()) @map("created_at")
 
   @@unique([stripeCustomerId, fingerprint])
   @@index([stripeCustomerId])
+  @@map("ssh_key")
 }
 
 model PodMetadata {
   id                   String    @id @default(cuid())
-  subscriptionId       String    @unique
-  stripeCustomerId     String
-  displayName          String?
+  subscriptionId       String    @unique @map("subscription_id")
+  instanceId           String?   @unique @map("instance_id") // HostedAI 2.2 unified instance UUID
+  stripeCustomerId     String    @map("stripe_customer_id")
+  displayName          String?   @map("display_name")
   notes                String?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  deployTime           DateTime?
-  hourlyRateCents      Int?
-  poolId               String?
-  prepaidAmountCents   Int?
-  prepaidUntil         DateTime?
-  productId            String?
-  metricsToken         String?
-  startupScript        String? // Custom startup script to run after pod starts
-  startupScriptStatus  String? // "pending", "running", "completed", "failed"
-  startupScriptOutput  String? // Output/error from script execution
-  storageAlertSent     Boolean   @default(false) // Whether 80% storage warning was sent
-  skypilotTags         String? // JSON tags for SkyPilot cluster tracking (e.g. {"skypilot-cluster-name": "my-cluster"})
-  billingType          String? // "hourly" or "monthly" - null for legacy pods
-  stripeSubscriptionId String? // Links monthly pod to the Stripe subscription that pays for it
-  sharedVolumeId       Int?    // hosted.ai shared volume ID for persistent workspace
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  deployTime           DateTime? @map("deploy_time")
+  hourlyRateCents      Int?      @map("hourly_rate_cents")
+  poolId               String?   @map("pool_id")
+  prepaidAmountCents   Int?      @map("prepaid_amount_cents")
+  prepaidUntil         DateTime? @map("prepaid_until")
+  productId            String?   @map("product_id")
+  metricsToken         String?   @map("metrics_token")
+  startupScript        String?   @map("startup_script") @db.Text // Custom startup script to run after pod starts
+  startupScriptStatus  String?   @map("startup_script_status") // "pending", "running", "completed", "failed"
+  startupScriptOutput  String?   @map("startup_script_output") @db.Text // Output/error from script execution
+  storageAlertSent     Boolean   @default(false) @map("storage_alert_sent") // Whether 80% storage warning was sent
+  skypilotTags         String?   @map("skypilot_tags") @db.Text // JSON tags for SkyPilot cluster tracking (e.g. {"skypilot-cluster-name": "my-cluster"})
+  billingType          String?   @map("billing_type") // "hourly" or "monthly" - null for legacy pods
+  stripeSubscriptionId String?   @map("stripe_subscription_id") // Links monthly pod to the Stripe subscription that pays for it
+  sharedVolumeId       Int?      @map("shared_volume_id")    // hosted.ai shared volume ID for persistent workspace
+  tenantId             String    @default("default") @map("tenant_id")
+  tenantLastBilledAt   DateTime? @map("tenant_last_billed_at") // Last time this pod was billed via tenant wallet
 
   @@index([stripeCustomerId])
   @@index([prepaidUntil])
   @@index([metricsToken])
   @@index([stripeSubscriptionId])
+  @@index([tenantId])
+  @@map("pod_metadata")
 }
 
 model PodFailureAlert {
   id             String   @id @default(cuid())
-  subscriptionId String
-  podName        String
-  teamId         String
-  customerEmail  String?
-  poolName       String?
-  podStatus      String // The failed status that triggered the alert
-  zammadTicketId Int? // Zammad ticket ID if created
-  createdAt      DateTime @default(now())
+  subscriptionId String   @map("subscription_id")
+  podName        String   @map("pod_name")
+  teamId         String   @map("team_id")
+  customerEmail  String?  @map("customer_email")
+  poolName       String?  @map("pool_name")
+  podStatus      String   @map("pod_status") // The failed status that triggered the alert
+  zammadTicketId Int?     @map("zammad_ticket_id") // Zammad ticket ID if created
+  createdAt      DateTime @default(now()) @map("created_at")
 
   @@unique([subscriptionId, podName]) // One alert per pod per subscription
   @@index([teamId])
   @@index([createdAt])
+  @@map("pod_failure_alert")
 }
 
 model HuggingFaceDeployment {
   id               String   @id @default(cuid())
-  subscriptionId   String
-  stripeCustomerId String
-  hfItemId         String
-  hfItemType       String
-  hfItemName       String
-  deployScript     String
+  subscriptionId   String   @map("subscription_id")
+  stripeCustomerId String   @map("stripe_customer_id")
+  hfItemId         String   @map("hf_item_id")
+  hfItemType       String   @map("hf_item_type")
+  hfItemName       String   @map("hf_item_name")
+  deployScript     String   @map("deploy_script") @db.Text
   status           String   @default("pending")
-  deployOutput     String?
-  servicePort      Int?
-  webUiPort        Int?
-  openWebUI        Boolean  @default(false)
-  netdataPort      Int?
+  deployOutput     String?  @map("deploy_output") @db.Text
+  servicePort      Int?     @map("service_port")
+  webUiPort        Int?     @map("web_ui_port")
+  openWebUI        Boolean  @default(false) @map("open_web_ui")
+  netdataPort      Int?     @map("netdata_port")
   netdata          Boolean  @default(false)
-  errorMessage     String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  errorMessage     String?  @map("error_message")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@index([stripeCustomerId])
   @@index([subscriptionId])
   @@index([status])
+  @@map("hugging_face_deployment")
 }
 
 model TwoFactorAuth {
@@ -136,64 +151,88 @@ model TwoFactorAuth {
   email       String    @unique
   secret      String
   verified    Boolean   @default(false)
-  backupCodes String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  lastUsedAt  DateTime?
+  backupCodes String?   @map("backup_codes") @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  lastUsedAt  DateTime? @map("last_used_at")
 
   @@index([email])
+  @@map("two_factor_auth")
 }
 
 model AdminPin {
   id             String   @id @default(cuid())
   email          String   @unique
-  pinHash        String
+  pinHash        String   @map("pin_hash")
   salt           String
-  expiresAt      DateTime
-  previousHashes String?  // JSON array of {salt, hash} for reuse prevention
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  expiresAt      DateTime @map("expires_at")
+  previousHashes String?  @map("previous_hashes") @db.Text // JSON array of {salt, hash} for reuse prevention
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("admin_pin")
 }
 
 model AdminActivityEvent {
   id          String   @id @default(cuid())
-  adminEmail  String
+  adminEmail  String   @map("admin_email")
   type        String
   description String
-  metadata    String?
-  createdAt   DateTime @default(now())
+  metadata    String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at")
 
   @@index([adminEmail])
   @@index([createdAt])
   @@index([type])
+  @@map("admin_activity_event")
+}
+
+model VllmMetrics {
+  id                    String   @id @default(cuid())
+  subscriptionId        String   @map("subscription_id")
+  stripeCustomerId      String   @map("stripe_customer_id")
+  promptTokens          BigInt   @map("prompt_tokens")
+  generationTokens      BigInt   @map("generation_tokens")
+  totalTokens           BigInt   @map("total_tokens")
+  promptTokensDelta     BigInt   @default(0) @map("prompt_tokens_delta")
+  generationTokensDelta BigInt   @default(0) @map("generation_tokens_delta")
+  totalTokensDelta      BigInt   @default(0) @map("total_tokens_delta")
+  walletBalanceCents    Int?     @map("wallet_balance_cents")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@index([subscriptionId, createdAt])
+  @@index([stripeCustomerId, createdAt])
+  @@map("vllm_metrics")
 }
 
 model ReferralCode {
   id               String          @id @default(cuid())
   code             String          @unique
-  stripeCustomerId String          @unique
-  createdAt        DateTime        @default(now())
+  stripeCustomerId String          @unique @map("stripe_customer_id")
+  createdAt        DateTime        @default(now()) @map("created_at")
   claims           ReferralClaim[]
 
   @@index([stripeCustomerId])
   @@index([code])
+  @@map("referral_code")
 }
 
 model ReferralClaim {
   id                String       @id @default(cuid())
-  referralCodeId    String
-  refereeCustomerId String       @unique
-  refereeEmail      String
+  referralCodeId    String       @map("referral_code_id")
+  refereeCustomerId String       @unique @map("referee_customer_id")
+  refereeEmail      String       @map("referee_email")
   status            String       @default("pending")
-  qualifiedAt       DateTime?
-  creditedAt        DateTime?
-  referrerCredited  Boolean      @default(false)
-  refereeCredited   Boolean      @default(false)
-  createdAt         DateTime     @default(now())
+  qualifiedAt       DateTime?    @map("qualified_at")
+  creditedAt        DateTime?    @map("credited_at")
+  referrerCredited  Boolean      @default(false) @map("referrer_credited")
+  refereeCredited   Boolean      @default(false) @map("referee_credited")
+  createdAt         DateTime     @default(now()) @map("created_at")
   referralCode      ReferralCode @relation(fields: [referralCodeId], references: [id], onDelete: Cascade)
 
   @@index([referralCodeId])
   @@index([status])
+  @@map("referral_claim")
 }
 
 model Voucher {
@@ -201,499 +240,528 @@ model Voucher {
   code            String              @unique
   name            String
   description     String?
-  creditCents     Int
-  minTopupCents   Int?
-  maxRedemptions  Int?
-  redemptionCount Int                 @default(0)
-  maxPerCustomer  Int                 @default(1)
-  startsAt        DateTime?
-  expiresAt       DateTime?
+  creditCents     Int                 @map("credit_cents")
+  minTopupCents   Int?                @map("min_topup_cents")
+  maxRedemptions  Int?                @map("max_redemptions")
+  redemptionCount Int                 @default(0) @map("redemption_count")
+  maxPerCustomer  Int                 @default(1) @map("max_per_customer")
+  startsAt        DateTime?           @map("starts_at")
+  expiresAt       DateTime?           @map("expires_at")
   active          Boolean             @default(true)
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  createdBy       String?
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+  createdBy       String?             @map("created_by")
   redemptions     VoucherRedemption[]
 
   @@index([code])
   @@index([active])
+  @@map("voucher")
 }
 
 model VoucherRedemption {
   id               String   @id @default(cuid())
-  voucherId        String
-  stripeCustomerId String
-  customerEmail    String
-  topupCents       Int
-  creditCents      Int
-  stripeSessionId  String?
-  createdAt        DateTime @default(now())
+  voucherId        String   @map("voucher_id")
+  stripeCustomerId String   @map("stripe_customer_id")
+  customerEmail    String   @map("customer_email")
+  topupCents       Int      @map("topup_cents")
+  creditCents      Int      @map("credit_cents")
+  stripeSessionId  String?  @map("stripe_session_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  tenantId         String   @default("default") @map("tenant_id")
   voucher          Voucher  @relation(fields: [voucherId], references: [id], onDelete: Cascade)
 
   @@index([voucherId])
   @@index([stripeCustomerId])
   @@index([createdAt])
+  @@index([tenantId])
+  @@map("voucher_redemption")
 }
 
 model PodSnapshot {
   id                     String    @id @default(cuid())
-  stripeCustomerId       String
-  displayName            String
+  stripeCustomerId       String    @map("stripe_customer_id")
+  displayName            String    @map("display_name")
   notes                  String?
-  snapshotType           String    @default("template")
-  originalSubscriptionId String?
-  poolId                 String
-  poolName               String?
-  regionId               String?
+  snapshotType           String    @default("template") @map("snapshot_type")
+  originalSubscriptionId String?   @map("original_subscription_id")
+  poolId                 String    @map("pool_id")
+  poolName               String?   @map("pool_name")
+  regionId               String?   @map("region_id")
   vgpus                  Int
-  instanceTypeId         String?
-  imageUuid              String?
-  persistentVolumeId     Int?
-  persistentVolumeName   String?
-  persistentVolumeSize   Int?
-  autoCreatedVolume      Boolean   @default(false)
-  storageBlockId         String?
-  hfItemId               String?
-  hfItemType             String?
-  hfItemName             String?
-  deployScript           String?
-  autoPreserved          Boolean   @default(false) // Auto-created on non-payment termination
-  expiresAt              DateTime? // When auto-preserved snapshot should be cleaned up (7 days)
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  instanceTypeId         String?   @map("instance_type_id")
+  imageUuid              String?   @map("image_uuid")
+  persistentVolumeId     Int?      @map("persistent_volume_id")
+  persistentVolumeName   String?   @map("persistent_volume_name")
+  persistentVolumeSize   Int?      @map("persistent_volume_size")
+  autoCreatedVolume      Boolean   @default(false) @map("auto_created_volume")
+  storageBlockId         String?   @map("storage_block_id")
+  hfItemId               String?   @map("hf_item_id")
+  hfItemType             String?   @map("hf_item_type")
+  hfItemName             String?   @map("hf_item_name")
+  deployScript           String?   @map("deploy_script") @db.Text
+  autoPreserved          Boolean   @default(false) @map("auto_preserved") // Auto-created on non-payment termination
+  expiresAt              DateTime? @map("expires_at") // When auto-preserved snapshot should be cleaned up (7 days)
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
   @@index([stripeCustomerId])
   @@index([snapshotType])
   @@index([createdAt])
   @@index([expiresAt])
+  @@map("pod_snapshot")
 }
 
 model SupportNotification {
   id               String   @id @default(cuid())
-  ticketId         String // Zammad ticket ID (as string for compatibility)
-  stripeCustomerId String
-  customerEmail    String
-  lastArticleId    Int // Zammad article ID
-  lastArticleAt    DateTime
-  sentAt           DateTime @default(now())
+  ticketId         String   @map("ticket_id") // Zammad ticket ID (as string for compatibility)
+  stripeCustomerId String   @map("stripe_customer_id")
+  customerEmail    String   @map("customer_email")
+  lastArticleId    Int      @map("last_article_id") // Zammad article ID
+  lastArticleAt    DateTime @map("last_article_at")
+  sentAt           DateTime @default(now()) @map("sent_at")
 
   @@unique([ticketId, lastArticleId])
   @@index([ticketId])
   @@index([stripeCustomerId])
+  @@map("support_notification")
 }
 
 model ApiKey {
   id               String    @id @default(cuid())
   name             String
-  keyPrefix        String
-  keyHash          String    @unique
-  stripeCustomerId String
-  teamId           String
+  keyPrefix        String    @map("key_prefix")
+  keyHash          String    @unique @map("key_hash")
+  stripeCustomerId String    @map("stripe_customer_id")
+  teamId           String    @map("team_id")
   scopes           String    @default("*")
-  lastUsedAt       DateTime?
-  expiresAt        DateTime?
-  rateLimitRpm     Int?      // Per-key RPM override (null = use customer default)
-  createdAt        DateTime  @default(now())
-  revokedAt        DateTime?
+  lastUsedAt       DateTime? @map("last_used_at")
+  expiresAt        DateTime? @map("expires_at")
+  rateLimitRpm     Int?      @map("rate_limit_rpm") // Per-key RPM override (null = use customer default)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  revokedAt        DateTime? @map("revoked_at")
 
   @@index([stripeCustomerId])
   @@index([keyHash])
+  @@map("api_key")
 }
 
 model ServiceProvider {
   id                      String                    @id @default(cuid())
   email                   String                    @unique
-  companyName             String
-  contactName             String
+  companyName             String                    @map("company_name")
+  contactName             String                    @map("contact_name")
   phone                   String?
   website                 String?
   verified                Boolean                   @default(false)
-  verifiedAt              DateTime?
-  verifiedBy              String?
-  estimatedGpuCount       Int?
-  gpuTypes                String?
+  verifiedAt              DateTime?                 @map("verified_at")
+  verifiedBy              String?                   @map("verified_by")
+  estimatedGpuCount       Int?                      @map("estimated_gpu_count")
+  gpuTypes                String?                   @map("gpu_types")
   regions                 String?
-  applicationType         String                    @default("gpu_provider") // "gpu_provider" or "white_label"
-  desiredDomain           String?
-  expectedCustomers       String?
+  applicationType         String                    @default("gpu_provider") @map("application_type") // "gpu_provider" or "white_label"
+  desiredDomain           String?                   @map("desired_domain")
+  expectedCustomers       String?                   @map("expected_customers")
   status                  String                    @default("pending")
-  suspendedReason         String?
-  terminatedAt            DateTime?
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
-  commercialEmail         String?
-  commercialPhone         String?
-  generalEmail            String?
-  supportEmail            String?
-  supportPhone            String?
+  suspendedReason         String?                   @map("suspended_reason")
+  terminatedAt            DateTime?                 @map("terminated_at")
+  createdAt               DateTime                  @default(now()) @map("created_at")
+  updatedAt               DateTime                  @updatedAt @map("updated_at")
+  commercialEmail         String?                   @map("commercial_email")
+  commercialPhone         String?                   @map("commercial_phone")
+  generalEmail            String?                   @map("general_email")
+  supportEmail            String?                   @map("support_email")
+  supportPhone            String?                   @map("support_phone")
   commercialTerms         ProviderCommercialTerms[]
   nodes                   ProviderNode[]
   notifications           ProviderNotification[]
   payouts                 ProviderPayout[]
+  inferenceProviderConfig InferenceProviderConfig? // NEW: Token revenue config
 
   @@index([status])
   @@index([email])
+  @@map("service_provider")
 }
 
 model ProviderNode {
   id                      String                @id @default(cuid())
-  providerId              String
+  providerId              String                @map("provider_id")
   hostname                String
-  ipAddress               String
-  sshPort                 Int                   @default(22)
-  sshUsername             String                @default("root")
-  requestedGpuTypeId      String?
-  gpuModel                String?
-  gpuCount                Int?
-  cpuModel                String?
-  cpuCores                Int?
-  ramGb                   Int?
-  storageGb               Int?
-  networkSpeedMbps        Int?
+  ipAddress               String                @map("ip_address")
+  sshPort                 Int                   @default(22) @map("ssh_port")
+  sshUsername             String                @default("root") @map("ssh_username")
+  requestedGpuTypeId      String?               @map("requested_gpu_type_id")
+  gpuModel                String?               @map("gpu_model")
+  gpuCount                Int?                  @map("gpu_count")
+  cpuModel                String?               @map("cpu_model")
+  cpuCores                Int?                  @map("cpu_cores")
+  ramGb                   Int?                  @map("ram_gb")
+  storageGb               Int?                  @map("storage_gb")
+  networkSpeedMbps        Int?                  @map("network_speed_mbps")
   datacenter              String?
   region                  String?
   country                 String?
-  pricingTierId           String?
-  customProviderRateCents Int?
-  revenueSharePercent     Float?
-  selectedPayoutModel     String?
+  pricingTierId           String?               @map("pricing_tier_id")
+  customProviderRateCents Int?                  @map("custom_provider_rate_cents")
+  revenueSharePercent     Float?                @map("revenue_share_percent")
+  selectedPayoutModel     String?               @map("selected_payout_model")
   status                  String                @default("pending_validation")
-  statusMessage           String?
-  validatedAt             DateTime?
-  validationError         String?
-  osVersion               String?
-  approvedAt              DateTime?
-  approvedBy              String?
-  rejectedAt              DateTime?
-  rejectedBy              String?
-  rejectionReason         String?
-  hostedaiPoolId          String?
-  hostedaiNodeId          String?
-  gpuaasNodeId            Int?
-  gpuaasRegionId          Int?
-  gpuaasClusterId         Int?
-  gpuaasPoolId            Int?
-  gpuaasInitStatus        String?
-  gpuaasSshKeysInstalled  Boolean               @default(false)
-  externalServiceIp       String?
-  removalRequestedAt      DateTime?
-  removalScheduledFor     DateTime?
-  removalReason           String?
-  removedAt               DateTime?
-  lastHealthCheck         DateTime?
-  healthStatus            String?
-  createdAt               DateTime              @default(now())
-  updatedAt               DateTime              @updatedAt
-  deletionConfirmedAt     DateTime?
-  gpuaasSshKeys           String?
-  sshPassword             String?
+  statusMessage           String?               @map("status_message")
+  validatedAt             DateTime?             @map("validated_at")
+  validationError         String?               @map("validation_error")
+  osVersion               String?               @map("os_version")
+  approvedAt              DateTime?             @map("approved_at")
+  approvedBy              String?               @map("approved_by")
+  rejectedAt              DateTime?             @map("rejected_at")
+  rejectedBy              String?               @map("rejected_by")
+  rejectionReason         String?               @map("rejection_reason")
+  hostedaiPoolId          String?               @map("hostedai_pool_id")
+  hostedaiNodeId          String?               @map("hostedai_node_id")
+  gpuaasNodeId            Int?                  @map("gpuaas_node_id")
+  gpuaasRegionId          Int?                  @map("gpuaas_region_id")
+  gpuaasClusterId         Int?                  @map("gpuaas_cluster_id")
+  gpuaasPoolId            Int?                  @map("gpuaas_pool_id")
+  gpuaasInitStatus        String?               @map("gpuaas_init_status")
+  gpuaasSshKeysInstalled  Boolean               @default(false) @map("gpuaas_ssh_keys_installed")
+  externalServiceIp       String?               @map("external_service_ip")
+  removalRequestedAt      DateTime?             @map("removal_requested_at")
+  removalScheduledFor     DateTime?             @map("removal_scheduled_for")
+  removalReason           String?               @map("removal_reason")
+  removedAt               DateTime?             @map("removed_at")
+  lastHealthCheck         DateTime?             @map("last_health_check")
+  healthStatus            String?               @map("health_status")
+  createdAt               DateTime              @default(now()) @map("created_at")
+  updatedAt               DateTime              @updatedAt @map("updated_at")
+  deletionConfirmedAt     DateTime?             @map("deletion_confirmed_at")
+  gpuaasSshKeys           String?               @map("gpuaas_ssh_keys") @db.Text
+  sshPassword             String?               @map("ssh_password")
   poolSettings            PoolSettingsOverride?
   pricingTier             ProviderPricingTier?  @relation(fields: [pricingTierId], references: [id])
   requestedGpuType        AllowedGpuType?       @relation(fields: [requestedGpuTypeId], references: [id])
   provider                ServiceProvider       @relation(fields: [providerId], references: [id])
   usageRecords            ProviderNodeUsage[]
+  inferenceServers        InferenceServer[] // NEW: Inference servers on this node
 
   @@index([providerId])
   @@index([status])
   @@index([pricingTierId])
+  @@map("provider_node")
 }
 
 model ProviderPricingTier {
   id                   String         @id @default(cuid())
   name                 String
   description          String?
-  gpuModel             String
-  providerRateCents    Int
-  customerRateCents    Int
-  isRevenueShare       Boolean        @default(false)
-  revenueSharePercent  Float?
-  minProviderRateCents Int?
+  gpuModel             String         @map("gpu_model")
+  providerRateCents    Int            @map("provider_rate_cents")
+  customerRateCents    Int            @map("customer_rate_cents")
+  isRevenueShare       Boolean        @default(false) @map("is_revenue_share")
+  revenueSharePercent  Float?         @map("revenue_share_percent")
+  minProviderRateCents Int?           @map("min_provider_rate_cents")
   active               Boolean        @default(true)
-  createdAt            DateTime       @default(now())
-  updatedAt            DateTime       @updatedAt
+  createdAt            DateTime       @default(now()) @map("created_at")
+  updatedAt            DateTime       @updatedAt @map("updated_at")
   nodes                ProviderNode[]
 
   @@index([gpuModel])
   @@index([active])
+  @@map("provider_pricing_tier")
 }
 
 model ProviderNodeUsage {
   id                    String       @id @default(cuid())
-  nodeId                String
-  periodStart           DateTime
-  periodEnd             DateTime
-  totalHours            Float
-  occupiedHours         Float
-  utilizationPercent    Float?
-  customerRevenueCents  Int
-  providerEarningsCents Int
-  packetMarginCents     Int
-  createdAt             DateTime     @default(now())
+  nodeId                String       @map("node_id")
+  periodStart           DateTime     @map("period_start")
+  periodEnd             DateTime     @map("period_end")
+  totalHours            Float        @map("total_hours")
+  occupiedHours         Float        @map("occupied_hours")
+  utilizationPercent    Float?       @map("utilization_percent")
+  customerRevenueCents  Int          @map("customer_revenue_cents")
+  providerEarningsCents Int          @map("provider_earnings_cents")
+  packetMarginCents     Int          @map("packet_margin_cents")
+  createdAt             DateTime     @default(now()) @map("created_at")
   node                  ProviderNode @relation(fields: [nodeId], references: [id])
 
   @@index([nodeId, periodStart])
   @@index([periodStart])
+  @@map("provider_node_usage")
 }
 
 model ProviderPayout {
   id                 String          @id @default(cuid())
-  providerId         String
-  periodStart        DateTime
-  periodEnd          DateTime
-  grossEarningsCents Int
-  deductionsCents    Int             @default(0)
-  netPayoutCents     Int
+  providerId         String          @map("provider_id")
+  periodStart        DateTime        @map("period_start")
+  periodEnd          DateTime        @map("period_end")
+  grossEarningsCents Int             @map("gross_earnings_cents")
+  deductionsCents    Int             @default(0) @map("deductions_cents")
+  netPayoutCents     Int             @map("net_payout_cents")
   breakdown          String?
   status             String          @default("pending")
-  processedAt        DateTime?
-  paidAt             DateTime?
-  transactionRef     String?
-  failureReason      String?
-  invoiceNumber      String?
-  invoiceUrl         String?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  processedAt        DateTime?       @map("processed_at")
+  paidAt             DateTime?       @map("paid_at")
+  transactionRef     String?         @map("transaction_ref")
+  failureReason      String?         @map("failure_reason")
+  invoiceNumber      String?         @map("invoice_number")
+  invoiceUrl         String?         @map("invoice_url")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
   provider           ServiceProvider @relation(fields: [providerId], references: [id])
 
   @@index([providerId])
   @@index([status])
   @@index([periodStart])
+  @@map("provider_payout")
 }
 
 model ProviderNotification {
   id         String          @id @default(cuid())
-  providerId String
+  providerId String          @map("provider_id")
   type       String
   subject    String
-  nodeId     String?
-  payoutId   String?
-  metadata   String?
-  sentAt     DateTime        @default(now())
+  nodeId     String?         @map("node_id")
+  payoutId   String?         @map("payout_id")
+  metadata   String?         @db.Text
+  sentAt     DateTime        @default(now()) @map("sent_at")
   provider   ServiceProvider @relation(fields: [providerId], references: [id])
 
   @@index([providerId])
   @@index([type])
   @@index([sentAt])
+  @@map("provider_notification")
 }
 
 model ProviderAdminActivity {
   id         String   @id @default(cuid())
-  adminEmail String
+  adminEmail String   @map("admin_email")
   action     String
-  providerId String?
-  nodeId     String?
-  payoutId   String?
-  details    String?
-  createdAt  DateTime @default(now())
+  providerId String?  @map("provider_id")
+  nodeId     String?  @map("node_id")
+  payoutId   String?  @map("payout_id")
+  details    String?  @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
 
   @@index([adminEmail])
   @@index([providerId])
   @@index([action])
   @@index([createdAt])
+  @@map("provider_admin_activity")
 }
 
 model AllowedGpuType {
   id                         String         @id @default(cuid())
   name                       String         @unique
-  shortName                  String
+  shortName                  String         @map("short_name")
   manufacturer               String         @default("NVIDIA")
-  matchPatterns              String
-  defaultProviderRateCents   Int
-  defaultCustomerRateCents   Int
-  defaultTermsType           String         @default("fixed")
-  defaultRevenueSharePercent Float?
-  payoutModelChoice          String         @default("fixed_only")
-  minVramGb                  Int?
-  minCudaCores               Int?
-  acceptingSubmissions       Boolean        @default(true)
-  displayOrder               Int            @default(0)
-  createdAt                  DateTime       @default(now())
-  updatedAt                  DateTime       @updatedAt
+  matchPatterns              String         @map("match_patterns") @db.Text
+  defaultProviderRateCents   Int            @map("default_provider_rate_cents")
+  defaultCustomerRateCents   Int            @map("default_customer_rate_cents")
+  defaultTermsType           String         @default("fixed") @map("default_terms_type")
+  defaultRevenueSharePercent Float?         @map("default_revenue_share_percent")
+  payoutModelChoice          String         @default("fixed_only") @map("payout_model_choice")
+  minVramGb                  Int?           @map("min_vram_gb")
+  minCudaCores               Int?           @map("min_cuda_cores")
+  acceptingSubmissions       Boolean        @default(true) @map("accepting_submissions")
+  displayOrder               Int            @default(0) @map("display_order")
+  createdAt                  DateTime       @default(now()) @map("created_at")
+  updatedAt                  DateTime       @updatedAt @map("updated_at")
   nodes                      ProviderNode[]
 
   @@index([acceptingSubmissions])
+  @@map("allowed_gpu_type")
 }
 
 model ProcessedStripeEvent {
   id            String   @id @default(cuid())
-  stripeEventId String   @unique
-  eventType     String
-  processedAt   DateTime @default(now())
-  sessionId     String?
-  customerId    String?
+  stripeEventId String   @unique @map("stripe_event_id")
+  eventType     String   @map("event_type")
+  processedAt   DateTime @default(now()) @map("processed_at")
+  sessionId     String?  @map("session_id")
+  customerId    String?  @map("customer_id")
 
   @@index([stripeEventId])
   @@index([sessionId])
   @@index([customerId])
   @@index([processedAt])
+  @@map("processed_stripe_event")
 }
 
 model PodMetricsHistory {
   id             String   @id @default(cuid())
-  teamId         String
-  subscriptionId String
-  tflopsUsage    Float    @default(0)
-  vramUsageKb    Float    @default(0)
-  hoursUsed      Float    @default(0)
+  teamId         String   @map("team_id")
+  subscriptionId String   @map("subscription_id")
+  tflopsUsage    Float    @default(0) @map("tflops_usage")
+  vramUsageKb    Float    @default(0) @map("vram_usage_kb")
+  hoursUsed      Float    @default(0) @map("hours_used")
   cost           Float    @default(0)
   status         String?
-  gpuCount       Int      @default(1)
-  timestamp      DateTime @default(now())
+  gpuCount       Int      @default(1) @map("gpu_count")
+  timestamp      DateTime @default(now()) @map("recorded_at")
 
   @@index([teamId, timestamp])
   @@index([subscriptionId, timestamp])
   @@index([timestamp])
+  @@map("pod_metrics_history")
 }
 
 model GpuHardwareMetrics {
   id                   String   @id @default(cuid())
-  subscriptionId       String
-  stripeCustomerId     String
-  teamId               String?
-  poolId               Int?
-  poolName             String?
-  gpuUtilization       Float
-  memoryUsedMb         Float
-  memoryTotalMb        Float
-  memoryPercent        Float
+  subscriptionId       String   @map("subscription_id")
+  stripeCustomerId     String   @map("stripe_customer_id")
+  teamId               String?  @map("team_id")
+  poolId               Int?     @map("pool_id")
+  poolName             String?  @map("pool_name")
+  gpuUtilization       Float    @map("gpu_utilization")
+  memoryUsedMb         Float    @map("memory_used_mb")
+  memoryTotalMb        Float    @map("memory_total_mb")
+  memoryPercent        Float    @map("memory_percent")
   temperature          Float
-  powerDraw            Float
-  powerLimit           Float
-  fanSpeed             Float
-  cpuPercent           Float?
-  systemMemUsedMb      Float?
-  systemMemTotalMb     Float?
-  systemMemPercent     Float?
-  diskWorkspaceUsedMb  Float?
-  diskWorkspaceTotalMb Float?
-  diskWorkspacePercent Float?
-  diskRootUsedMb       Float?
-  diskRootTotalMb      Float?
-  diskRootPercent      Float?
-  timestamp            DateTime @default(now())
+  powerDraw            Float    @map("power_draw")
+  powerLimit           Float    @map("power_limit")
+  fanSpeed             Float    @map("fan_speed")
+  cpuPercent           Float?   @map("cpu_percent")
+  systemMemUsedMb      Float?   @map("system_mem_used_mb")
+  systemMemTotalMb     Float?   @map("system_mem_total_mb")
+  systemMemPercent     Float?   @map("system_mem_percent")
+  diskWorkspaceUsedMb  Float?   @map("disk_workspace_used_mb")
+  diskWorkspaceTotalMb Float?   @map("disk_workspace_total_mb")
+  diskWorkspacePercent Float?   @map("disk_workspace_percent")
+  diskRootUsedMb       Float?   @map("disk_root_used_mb")
+  diskRootTotalMb      Float?   @map("disk_root_total_mb")
+  diskRootPercent      Float?   @map("disk_root_percent")
+  timestamp            DateTime @default(now()) @map("recorded_at")
 
   @@index([subscriptionId, timestamp])
   @@index([stripeCustomerId, timestamp])
   @@index([teamId, timestamp])
   @@index([poolId, timestamp])
   @@index([timestamp])
+  @@map("gpu_hardware_metrics")
 }
 
 model PodUptimeDay {
   id             String   @id @default(cuid())
-  subscriptionId String
+  subscriptionId String   @map("subscription_id")
   date           String   // YYYY-MM-DD (UTC)
   heartbeats     Int      @default(0)
-  firstSeen      DateTime
-  lastSeen       DateTime
+  firstSeen      DateTime @map("first_seen")
+  lastSeen       DateTime @map("last_seen")
 
   @@unique([subscriptionId, date])
   @@index([subscriptionId])
   @@index([date])
+  @@map("pod_uptime_day")
 }
 
 model MetricsCache {
   id        String   @id @default(cuid())
-  teamId    String   @unique
-  cacheData String
-  fetchedAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  teamId    String   @unique @map("team_id")
+  cacheData String   @map("cache_data") @db.Text
+  fetchedAt DateTime @default(now()) @map("fetched_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([teamId])
   @@index([fetchedAt])
+  @@map("metrics_cache")
 }
 
 model SubscriptionLineage {
   id                     String   @id @default(cuid())
-  teamId                 String
-  rootSubscriptionId     String
-  previousSubscriptionId String
-  newSubscriptionId      String   @unique
-  poolId                 String?
-  poolName               String?
+  teamId                 String   @map("team_id")
+  rootSubscriptionId     String   @map("root_subscription_id")
+  previousSubscriptionId String   @map("previous_subscription_id")
+  newSubscriptionId      String   @unique @map("new_subscription_id")
+  poolId                 String?  @map("pool_id")
+  poolName               String?  @map("pool_name")
   reason                 String?
-  createdAt              DateTime @default(now())
+  createdAt              DateTime @default(now()) @map("created_at")
 
   @@index([teamId])
   @@index([rootSubscriptionId])
   @@index([previousSubscriptionId])
   @@index([newSubscriptionId])
+  @@map("subscription_lineage")
 }
 
 model ProviderCommercialTerms {
   id                     String          @id @default(cuid())
-  providerId             String
-  gpuTypeName            String?
-  providerRateCents      Int?
-  customerRateCents      Int?
-  termsType              String?
-  revenueSharePercent    Float?
-  minGuaranteedRateCents Int?
+  providerId             String          @map("provider_id")
+  gpuTypeName            String?         @map("gpu_type_name")
+  providerRateCents      Int?            @map("provider_rate_cents")
+  customerRateCents      Int?            @map("customer_rate_cents")
+  termsType              String?         @map("terms_type")
+  revenueSharePercent    Float?          @map("revenue_share_percent")
+  minGuaranteedRateCents Int?            @map("min_guaranteed_rate_cents")
   notes                  String?
-  effectiveFrom          DateTime        @default(now())
-  effectiveUntil         DateTime?
-  createdBy              String
-  createdAt              DateTime        @default(now())
-  updatedAt              DateTime        @updatedAt
+  effectiveFrom          DateTime        @default(now()) @map("effective_from")
+  effectiveUntil         DateTime?       @map("effective_until")
+  createdBy              String          @map("created_by")
+  createdAt              DateTime        @default(now()) @map("created_at")
+  updatedAt              DateTime        @updatedAt @map("updated_at")
   provider               ServiceProvider @relation(fields: [providerId], references: [id])
 
   @@unique([providerId, gpuTypeName])
   @@index([providerId])
+  @@map("provider_commercial_terms")
 }
 
 model PoolSettingsDefaults {
   id              String   @id @default("default")
-  timeQuantumSec  Int      @default(90)
-  overcommitRatio Float    @default(1.0)
-  securityMode    String   @default("low")
-  updatedBy       String?
-  updatedAt       DateTime @updatedAt
-  createdAt       DateTime @default(now())
+  timeQuantumSec  Int      @default(90) @map("time_quantum_sec")
+  overcommitRatio Float    @default(1.0) @map("overcommit_ratio")
+  securityMode    String   @default("low") @map("security_mode")
+  updatedBy       String?  @map("updated_by")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("pool_settings_defaults")
 }
 
 model PoolSettingsOverride {
   id              String        @id @default(cuid())
-  gpuaasPoolId    Int           @unique
-  nodeId          String?       @unique
-  poolName        String?
-  timeQuantumSec  Int?
-  overcommitRatio Float?
-  securityMode    String?
+  gpuaasPoolId    Int           @unique @map("gpuaas_pool_id")
+  nodeId          String?       @unique @map("node_id")
+  poolName        String?       @map("pool_name")
+  timeQuantumSec  Int?          @map("time_quantum_sec")
+  overcommitRatio Float?        @map("overcommit_ratio")
+  securityMode    String?       @map("security_mode")
   priority        Int?
   maintenance     Boolean       @default(false)
   notes           String?
-  createdBy       String
-  updatedBy       String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  createdBy       String        @map("created_by")
+  updatedBy       String?       @map("updated_by")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
   node            ProviderNode? @relation(fields: [nodeId], references: [id])
 
   @@index([nodeId])
+  @@map("pool_settings_override")
 }
 
 model GpuProduct {
   id                 String   @id @default(cuid())
   name               String   @unique
   description        String?
-  billingType        String   @default("hourly") // "hourly" or "monthly"
-  pricePerHourCents  Int
-  pricePerMonthCents Int?
-  stripeProductId    String?
-  stripePriceId      String?
-  poolIds            String   @default("[]")
-  displayOrder       Int      @default(0)
+  billingType        String   @default("hourly") @map("billing_type") // "hourly" or "monthly"
+  pricePerHourCents  Int      @map("price_per_hour_cents")
+  pricePerMonthCents Int?     @map("price_per_month_cents")
+  stripeProductId    String?  @map("stripe_product_id")
+  stripePriceId      String?  @map("stripe_price_id")
+  poolIds            String   @default("[]") @map("pool_ids") @db.Text
+  serviceId          String?  @map("service_id") // HostedAI 2.2 service UUID for create-instance
+  displayOrder       Int      @default(0) @map("display_order")
   active             Boolean  @default(true)
   featured           Boolean  @default(false)
-  badgeText          String?
-  vramGb             Int?
-  cudaCores          Int?
-  createdBy          String?
-  updatedBy          String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  badgeText          String?  @map("badge_text")
+  vramGb             Int?     @map("vram_gb")
+  cudaCores          Int?     @map("cuda_cores")
+  createdBy          String?  @map("created_by")
+  updatedBy          String?  @map("updated_by")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   @@index([active])
   @@index([displayOrder])
   @@index([billingType])
+  @@map("gpu_product")
 }
 
 model GpuApp {
@@ -701,55 +769,57 @@ model GpuApp {
   slug                String         @unique
   name                String
   description         String
-  longDescription     String?
+  longDescription     String?        @map("long_description") @db.Text
   category            String
-  installScript       String
-  estimatedInstallMin Int            @default(5)
-  minVramGb           Int            @default(8)
-  recommendedVramGb   Int            @default(16)
-  typicalVramUsageGb  Int?
-  defaultPort         Int?
-  webUiPort           Int?
-  serviceType         String?
+  installScript       String         @map("install_script") @db.Text
+  estimatedInstallMin Int            @default(5) @map("estimated_install_min")
+  minVramGb           Int            @default(8) @map("min_vram_gb")
+  recommendedVramGb   Int            @default(16) @map("recommended_vram_gb")
+  typicalVramUsageGb  Int?           @map("typical_vram_usage_gb")
+  defaultPort         Int?           @map("default_port")
+  webUiPort           Int?           @map("web_ui_port")
+  serviceType         String?        @map("service_type")
   icon                String?
-  badgeText           String?
-  displayOrder        Int            @default(0)
+  badgeText           String?        @map("badge_text")
+  displayOrder        Int            @default(0) @map("display_order")
   active              Boolean        @default(true)
   version             String?
-  docsUrl             String?
-  tags                String         @default("[]")
-  createdAt           DateTime       @default(now())
-  updatedAt           DateTime       @updatedAt
+  docsUrl             String?        @map("docs_url")
+  tags                String         @default("[]") @db.Text
+  createdAt           DateTime       @default(now()) @map("created_at")
+  updatedAt           DateTime       @updatedAt @map("updated_at")
   installations       InstalledApp[]
 
   @@index([category])
   @@index([active])
   @@index([displayOrder])
+  @@map("gpu_app")
 }
 
 model InstalledApp {
   id               String    @id @default(cuid())
-  subscriptionId   String
-  stripeCustomerId String
-  appId            String
+  subscriptionId   String    @map("subscription_id")
+  stripeCustomerId String    @map("stripe_customer_id")
+  appId            String    @map("app_id")
   status           String    @default("installing")
-  installProgress  Int       @default(0)
-  installOutput    String?
-  errorMessage     String?
+  installProgress  Int       @default(0) @map("install_progress")
+  installOutput    String?   @map("install_output") @db.Text
+  errorMessage     String?   @map("error_message")
   port             Int?
-  webUiPort        Int?
-  externalUrl      String?
-  webUiUrl         String?
+  webUiPort        Int?      @map("web_ui_port")
+  externalUrl      String?   @map("external_url")
+  webUiUrl         String?   @map("web_ui_url")
   pid              Int?
-  startedAt        DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  startedAt        DateTime? @map("started_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
   app              GpuApp    @relation(fields: [appId], references: [id])
 
   @@unique([subscriptionId, appId])
   @@index([subscriptionId])
   @@index([stripeCustomerId])
   @@index([status])
+  @@map("installed_app")
 }
 
 model EmailTemplate {
@@ -758,16 +828,17 @@ model EmailTemplate {
   name        String
   description String?
   subject     String
-  htmlContent String
-  textContent String?
+  htmlContent String   @map("html_content") @db.Text
+  textContent String?  @map("text_content") @db.Text
   variables   String   @default("[]")
   active      Boolean  @default(true)
-  updatedBy   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  updatedBy   String?  @map("updated_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@index([slug])
   @@index([active])
+  @@map("email_template")
 }
 
 // ── Drip Campaign System ──
@@ -779,45 +850,48 @@ model DripSequence {
   description String?
   trigger     String // "signup-free", "signup-paid", "gpu-deployed", etc.
   active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   steps       DripStep[]
   enrollments DripEnrollment[]
 
   @@index([trigger])
   @@index([active])
+  @@map("drip_sequence")
 }
 
 model DripStep {
   id           String   @id @default(cuid())
-  sequenceId   String
-  stepOrder    Int
-  delayHours   Int // hours after enrollment (or previous step) to send
-  templateSlug String // references EmailTemplate slug
+  sequenceId   String   @map("sequence_id")
+  stepOrder    Int      @map("step_order")
+  delayHours   Int      @map("delay_hours") // hours after enrollment (or previous step) to send
+  templateSlug String   @map("template_slug") // references EmailTemplate slug
   subject      String? // override template subject if set
   active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  createdAt    DateTime @default(now()) @map("created_at")
 
   sequence DripSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
 
   @@unique([sequenceId, stepOrder])
   @@index([sequenceId])
+  @@map("drip_step")
 }
 
 model DripEnrollment {
   id               String    @id @default(cuid())
-  sequenceId       String
-  stripeCustomerId String
+  sequenceId       String    @map("sequence_id")
+  stripeCustomerId String    @map("stripe_customer_id")
   email            String
-  customerName     String?
+  customerName     String?   @map("customer_name")
   status           String    @default("active") // "active", "completed", "cancelled"
-  currentStep      Int       @default(0) // last completed step (0 = none sent yet)
-  enrolledAt       DateTime  @default(now())
-  lastSentAt       DateTime?
-  completedAt      DateTime?
-  cancelledAt      DateTime?
-  metadata         String? // JSON for extra context (e.g. signup_gpu)
+  currentStep      Int       @default(0) @map("current_step") // last completed step (0 = none sent yet)
+  enrolledAt       DateTime  @default(now()) @map("enrolled_at")
+  lastSentAt       DateTime? @map("last_sent_at")
+  completedAt      DateTime? @map("completed_at")
+  cancelledAt      DateTime? @map("cancelled_at")
+  metadata         String? @db.Text // JSON for extra context (e.g. signup_gpu)
+  tenantId         String    @default("default") @map("tenant_id")
 
   sequence DripSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
 
@@ -825,135 +899,381 @@ model DripEnrollment {
   @@index([sequenceId, status])
   @@index([stripeCustomerId])
   @@index([status, lastSentAt])
+  @@index([tenantId])
+  @@map("drip_enrollment")
 }
 
 model GamePlay {
   id              String   @id @default(cuid())
   email           String?
   score           Int
-  linesCleared    Int
-  avgUtilization  Float
-  peakUtilization Float
+  linesCleared    Int      @map("lines_cleared")
+  avgUtilization  Float    @map("avg_utilization")
+  peakUtilization Float    @map("peak_utilization")
   duration        Int
   level           Int
-  piecesPlaced    Int
+  piecesPlaced    Int      @map("pieces_placed")
   won             Boolean  @default(false)
-  voucherClaimed  Boolean  @default(false)
-  voucherCode     String?
-  userAgent       String?
-  screenWidth     Int?
-  screenHeight    Int?
-  isMobile        Boolean  @default(false)
-  createdAt       DateTime @default(now())
+  voucherClaimed  Boolean  @default(false) @map("voucher_claimed")
+  voucherCode     String?  @map("voucher_code")
+  userAgent       String?  @map("user_agent")
+  screenWidth     Int?     @map("screen_width")
+  screenHeight    Int?     @map("screen_height")
+  isMobile        Boolean  @default(false) @map("is_mobile")
+  createdAt       DateTime @default(now()) @map("created_at")
 
   @@index([createdAt])
   @@index([won])
   @@index([email])
+  @@map("game_play")
 }
 
 model BudgetSettings {
   id                    String    @id @default(cuid())
-  stripeCustomerId      String    @unique
-  monthlyLimitCents     Int?
-  dailyLimitCents       Int?
-  alertAt50Percent      Boolean   @default(true)
-  alertAt80Percent      Boolean   @default(true)
-  alertAt100Percent     Boolean   @default(true)
-  autoShutdownEnabled   Boolean   @default(false)
-  autoShutdownThreshold Int       @default(100)
-  lastAlertSentAt       DateTime?
-  lastAlertPercent      Int?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  stripeCustomerId      String    @unique @map("stripe_customer_id")
+  monthlyLimitCents     Int?      @map("monthly_limit_cents")
+  dailyLimitCents       Int?      @map("daily_limit_cents")
+  alertAt50Percent      Boolean   @default(true) @map("alert_at_50_percent")
+  alertAt80Percent      Boolean   @default(true) @map("alert_at_80_percent")
+  alertAt100Percent     Boolean   @default(true) @map("alert_at_100_percent")
+  autoShutdownEnabled   Boolean   @default(false) @map("auto_shutdown_enabled")
+  autoShutdownThreshold Int       @default(100) @map("auto_shutdown_threshold")
+  lastAlertSentAt       DateTime? @map("last_alert_sent_at")
+  lastAlertPercent      Int?      @map("last_alert_percent")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
   @@index([stripeCustomerId])
+  @@map("budget_settings")
 }
 
 model BudgetAlert {
   id                String   @id @default(cuid())
-  stripeCustomerId  String
-  alertType         String
-  percentUsed       Int
-  currentSpendCents Int
-  limitCents        Int
-  sentAt            DateTime @default(now())
+  stripeCustomerId  String   @map("stripe_customer_id")
+  alertType         String   @map("alert_type")
+  percentUsed       Int      @map("percent_used")
+  currentSpendCents Int      @map("current_spend_cents")
+  limitCents        Int      @map("limit_cents")
+  sentAt            DateTime @default(now()) @map("sent_at")
 
   @@index([stripeCustomerId])
   @@index([sentAt])
+  @@map("budget_alert")
 }
 
 model CustomerSettings {
   id                  String   @id @default(cuid())
-  stripeCustomerId    String   @unique
-  sessionTimeoutHours Int      @default(1) // 1-24 hours
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  stripeCustomerId    String   @unique @map("stripe_customer_id")
+  sessionTimeoutHours Int      @default(1) @map("session_timeout_hours") // 1-24 hours
+  pixelFactoryRpm     Int?     @map("pixel_factory_rpm") // Customer's chosen RPM for Pixel Factory (null = use admin cap)
+  tenantId            String   @default("default") @map("tenant_id")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
   @@index([stripeCustomerId])
+  @@index([tenantId])
+  @@map("customer_settings")
 }
 
+// ============================================
+// Token Factory - Batch & Real-time Inference
+// ============================================
 
-model SpheronDeployment {
-  id                   String    @id @default(cuid())
-  spheronDeploymentId  String    @unique // Spheron's deployment ID
-  stripeCustomerId     String
-  teamId               String
-  name                 String?
-  provider             String // e.g. tensordock, voltagepark
-  gpuType              String // e.g. rtx-4090, h100
-  gpuCount             Int       @default(1)
-  region               String
-  operatingSystem      String
-  instanceType         String // DEDICATED, SPOT, BARE_METAL
-  offerId              String
-  status               String    @default("deploying") // deploying, running, failed, terminated
-  ipAddress            String?
-  sshUser              String?
-  sshCommand           String?
-  hourlyPriceCents     Int // Spheron price in cents
-  markupPercent        Int       @default(15) // Our markup percentage
-  totalHourlyRateCents Int // Final price to customer (price + markup)
-  lastBilledAt         DateTime? // When the last hourly charge was applied
-  // Kubernetes add-on fields
-  k8sEnabled           Boolean   @default(false)
-  k8sVersion           String? // e.g. "1.35"
-  k8sClusterId         String? // Spheron cluster ID for health checks
-  k8sKubeconfig        String? // Full kubeconfig YAML
-  k8sServiceLinks      String? // JSON object of service links
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
-  terminatedAt         DateTime?
+model InferenceModel {
+  id               String              @id @default(cuid())
+  name             String              @unique // e.g. "meta-llama/Llama-3.1-8B-Instruct"
+  displayName      String              @map("display_name") // e.g. "Llama 3.1 8B Instruct"
+  provider         String              @default("packet") // packet, openai, anthropic
+  modelType        String              @default("chat") @map("model_type") // chat, completion, embedding
+  contextLength    Int                 @default(8192) @map("context_length")
+  inputPricePer1k  Float               @default(0) @map("input_price_per_1k") // Price per 1k input tokens (cents)
+  outputPricePer1k Float               @default(0) @map("output_price_per_1k") // Price per 1k output tokens (cents)
+  batchDiscount    Float               @default(0.5) @map("batch_discount") // 50% off for batch
+  vramRequiredGb   Int?                @map("vram_required_gb") // Minimum VRAM needed
+  gpuTypes         String?             @map("gpu_types") // JSON array of compatible GPU types
+  supportsLora     Boolean             @default(true) @map("supports_lora")
+  active           Boolean             @default(true)
+  featured         Boolean             @default(false)
+  displayOrder     Int                 @default(0) @map("display_order")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  loraAdapters     LoraAdapter[]
+  batchJobs        InferenceBatchJob[]
+
+  @@index([active])
+  @@index([provider])
+  @@map("inference_model")
+}
+
+model LoraAdapter {
+  id               String              @id @default(cuid())
+  stripeCustomerId String              @map("stripe_customer_id")
+  teamId           String              @map("team_id")
+  baseModelId      String              @map("base_model_id")
+  name             String // User-defined name e.g. "support-bot-v2"
+  displayName      String?             @map("display_name") // Optional display name
+  description      String?
+  trainingFile     String?             @map("training_file") // S3 path to training JSONL
+  trainingStatus   String              @default("pending") @map("training_status") // pending, training, ready, failed
+  trainingProgress Int                 @default(0) @map("training_progress") // 0-100
+  trainingError    String?             @map("training_error") @db.Text
+  adapterPath      String?             @map("adapter_path") // Path to LoRA weights on inference server
+  adapterSizeMb    Float?              @map("adapter_size_mb")
+  epochs           Int                 @default(3)
+  learningRate     Float               @default(0.0002) @map("learning_rate")
+  rank             Int                 @default(16) // LoRA rank
+  alpha            Int                 @default(32) // LoRA alpha
+  totalTokens      BigInt              @default(0) @map("total_tokens") // Tokens used for inference
+  lastUsedAt       DateTime?           @map("last_used_at")
+  active           Boolean             @default(true)
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  baseModel        InferenceModel      @relation(fields: [baseModelId], references: [id])
+  batchJobs        InferenceBatchJob[]
+
+  @@unique([teamId, name])
+  @@index([stripeCustomerId])
+  @@index([teamId])
+  @@index([baseModelId])
+  @@index([trainingStatus])
+  @@map("lora_adapter")
+}
+
+model InferenceBatchJob {
+  id                 String             @id @default(cuid())
+  stripeCustomerId   String             @map("stripe_customer_id")
+  teamId             String             @map("team_id")
+  modelId            String             @map("model_id")
+  loraAdapterId      String?            @map("lora_adapter_id")
+  inputFile          String             @map("input_file") @db.LongText // JSONL content (can be very large)
+  outputFile         String?            @map("output_file") @db.LongText // JSONL output content
+  status             String             @default("pending") // pending, validating, queued, processing, completed, failed, cancelled
+  slaType            String             @default("24h") @map("sla_type") // 1h, 24h
+  priority           Int                @default(0) // Higher = processed first
+  totalRequests      Int                @default(0) @map("total_requests")
+  completedRequests  Int                @default(0) @map("completed_requests")
+  failedRequests     Int                @default(0) @map("failed_requests")
+  inputTokens        BigInt             @default(0) @map("input_tokens")
+  outputTokens       BigInt             @default(0) @map("output_tokens")
+  estimatedCostCents Int                @default(0) @map("estimated_cost_cents")
+  actualCostCents    Int                @default(0) @map("actual_cost_cents")
+  errorMessage       String?            @map("error_message") @db.Text
+  startedAt          DateTime?          @map("started_at")
+  completedAt        DateTime?          @map("completed_at")
+  deadline           DateTime? // SLA deadline
+  metadata           String? @db.Text // JSON metadata
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+  model              InferenceModel     @relation(fields: [modelId], references: [id])
+  loraAdapter        LoraAdapter?       @relation(fields: [loraAdapterId], references: [id])
+  requests           InferenceRequest[]
 
   @@index([stripeCustomerId])
   @@index([teamId])
   @@index([status])
+  @@index([deadline])
+  @@index([createdAt])
+  @@map("inference_batch_job")
+}
+
+model InferenceRequest {
+  id           String             @id @default(cuid())
+  batchJobId   String?            @map("batch_job_id")
+  customId     String?            @map("custom_id") // User-provided custom ID for matching
+  inputData    String             @map("input_data") @db.Text // JSON request body
+  outputData   String?            @map("output_data") @db.Text // JSON response
+  status       String             @default("pending") // pending, processing, completed, failed
+  inputTokens  Int                @default(0) @map("input_tokens")
+  outputTokens Int                @default(0) @map("output_tokens")
+  latencyMs    Int?               @map("latency_ms")
+  errorMessage String?            @map("error_message")
+  processedAt  DateTime?          @map("processed_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  batchJob     InferenceBatchJob? @relation(fields: [batchJobId], references: [id])
+
+  @@index([batchJobId])
+  @@index([status])
+  @@index([customId])
+  @@map("inference_request")
+}
+
+model InferenceUsage {
+  id               String           @id @default(cuid())
+  stripeCustomerId String           @map("stripe_customer_id")
+  teamId           String           @map("team_id")
+  modelId          String?          @map("model_id")
+  loraAdapterId    String?          @map("lora_adapter_id")
+  requestType      String           @default("realtime") @map("request_type") // realtime, batch
+  inputTokens      BigInt           @map("input_tokens")
+  outputTokens     BigInt           @map("output_tokens")
+  costCents        Int              @map("cost_cents")
+  latencyMs        Int?             @map("latency_ms")
+  serverId         String?          @map("server_id") // NEW: Track which server processed this
+  createdAt        DateTime         @default(now()) @map("created_at")
+  server           InferenceServer? @relation(fields: [serverId], references: [id])
+
+  @@index([stripeCustomerId, createdAt])
+  @@index([teamId, createdAt])
+  @@index([modelId])
+  @@index([serverId])
+  @@map("inference_usage")
+}
+
+model InferenceServer {
+  id             String                 @id @default(cuid())
+  hostname       String
+  ipAddress      String                 @map("ip_address")
+  port           Int                    @default(8000)
+  gpuType        String                 @map("gpu_type") // e.g. "RTX 4090"
+  gpuCount       Int                    @default(1) @map("gpu_count")
+  vramTotalGb    Int                    @map("vram_total_gb")
+  loadedModel    String?                @map("loaded_model") // Currently loaded model
+  loadedLoras    String?                @map("loaded_loras") @db.Text // JSON array of loaded LoRA adapter IDs
+  status         String                 @default("offline") // offline, starting, ready, busy, error
+  healthCheckAt  DateTime?              @map("health_check_at")
+  currentLoad    Float                  @default(0) @map("current_load") // 0-100 utilization
+  queueDepth     Int                    @default(0) @map("queue_depth")
+  providerNodeId String?                @map("provider_node_id") // NEW: Link to provider infrastructure
+  createdAt      DateTime               @default(now()) @map("created_at")
+  updatedAt      DateTime               @updatedAt @map("updated_at")
+  providerNode   ProviderNode?          @relation(fields: [providerNodeId], references: [id])
+  usageRecords   InferenceUsage[]
+  serverUsage    InferenceServerUsage[]
+
+  @@unique([ipAddress, port])
+  @@index([status])
+  @@index([loadedModel])
+  @@index([providerNodeId])
+  @@map("inference_server")
+}
+
+// Token usage tracking per inference server (for provider revenue)
+model InferenceServerUsage {
+  id                    String          @id @default(cuid())
+  serverId              String          @map("server_id")
+  providerId            String          @map("provider_id")
+  periodStart           DateTime        @map("period_start")
+  periodEnd             DateTime        @map("period_end")
+  inputTokens           BigInt          @map("input_tokens")
+  outputTokens          BigInt          @map("output_tokens")
+  totalTokens           BigInt          @map("total_tokens")
+  requestCount          Int             @map("request_count")
+  customerRevenueCents  Int             @default(0) @map("customer_revenue_cents") // What customers paid (whole cents)
+  providerEarningsCents Int             @default(0) @map("provider_earnings_cents") // Provider's share (whole cents)
+  packetMarginCents     Int             @default(0) @map("packet_margin_cents") // Packet's margin (whole cents)
+  createdAt             DateTime        @default(now()) @map("created_at")
+  server                InferenceServer @relation(fields: [serverId], references: [id])
+
+  @@index([serverId, periodStart])
+  @@index([providerId, periodStart])
+  @@map("inference_server_usage")
+}
+
+// Token revenue config per provider (admin managed)
+model InferenceProviderConfig {
+  id                  String          @id @default(cuid())
+  providerId          String          @unique @map("provider_id")
+  revenueSharePercent Float           @default(50) @map("revenue_share_percent") // Provider gets 50% by default
+  minGuaranteedCents  Int?            @map("min_guaranteed_cents") // Optional: Minimum per million tokens
+  customInputPer1M    Int?            @map("custom_input_per_1m") // Override global pricing
+  customOutputPer1M   Int?            @map("custom_output_per_1m")
+  notes               String?
+  effectiveFrom       DateTime        @default(now()) @map("effective_from")
+  createdBy           String          @map("created_by")
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+  provider            ServiceProvider @relation(fields: [providerId], references: [id])
+
+  @@map("inference_provider_config")
+}
+
+model SpheronDeployment {
+  id                   String    @id @default(cuid())
+  spheronDeploymentId  String    @unique @map("spheron_deployment_id") // Spheron's deployment ID
+  stripeCustomerId     String    @map("stripe_customer_id")
+  teamId               String    @map("team_id")
+  name                 String?
+  provider             String // e.g. tensordock, voltagepark
+  gpuType              String    @map("gpu_type") // e.g. rtx-4090, h100
+  gpuCount             Int       @default(1) @map("gpu_count")
+  region               String
+  operatingSystem      String    @map("operating_system")
+  instanceType         String    @map("instance_type") // DEDICATED, SPOT, BARE_METAL
+  offerId              String    @map("offer_id")
+  status               String    @default("deploying") // deploying, running, failed, terminated
+  ipAddress            String?   @map("ip_address")
+  sshUser              String?   @map("ssh_user")
+  sshCommand           String?   @map("ssh_command")
+  hourlyPriceCents     Int       @map("hourly_price_cents") // Spheron price in cents
+  markupPercent        Int       @default(15) @map("markup_percent") // Our markup percentage
+  totalHourlyRateCents Int       @map("total_hourly_rate_cents") // Final price to customer (price + markup)
+  lastBilledAt         DateTime? @map("last_billed_at") // When the last hourly charge was applied
+  // Kubernetes add-on fields
+  k8sEnabled           Boolean   @default(false) @map("k8s_enabled")
+  k8sVersion           String?   @map("k8s_version") // e.g. "1.35"
+  k8sClusterId         String?   @map("k8s_cluster_id") // Spheron cluster ID for health checks
+  k8sKubeconfig        String?   @map("k8s_kubeconfig") @db.Text // Full kubeconfig YAML
+  k8sServiceLinks      String?   @map("k8s_service_links") @db.Text // JSON object of service links
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+  terminatedAt         DateTime? @map("terminated_at")
+
+  @@index([stripeCustomerId])
+  @@index([teamId])
+  @@index([status])
+  @@map("spheron_deployment")
 }
 
 model SpheronVolume {
   id                    String    @id @default(cuid())
-  spheronVolumeId       String    @unique // Spheron's volume ID (e.g. "vol_abc123")
-  stripeCustomerId      String
-  teamId                String
+  spheronVolumeId       String    @unique @map("spheron_volume_id") // Spheron's volume ID (e.g. "vol_abc123")
+  stripeCustomerId      String    @map("stripe_customer_id")
+  teamId                String    @map("team_id")
   name                  String
   provider              String // e.g. "voltage-park"
-  sizeInGb              Int
+  sizeInGb              Int       @map("size_in_gb")
   status                String    @default("available") // available, attached, deleting, deleted
-  virtualIp             String? // Voltage Park NFS IP for mounting (e.g. "192.168.100.50")
-  hourlyPriceCents      Int // Spheron price in cents (per GB/hr * sizeInGb)
-  markupPercent         Int       @default(15)
-  totalHourlyRateCents  Int // Final price to customer
-  lastBilledAt          DateTime?
-  deleteWithInstance    Boolean   @default(false)
-  attachedDeploymentIds String? // JSON array of attached Spheron deployment IDs
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  deletedAt             DateTime?
+  virtualIp             String?   @map("virtual_ip") // Voltage Park NFS IP for mounting (e.g. "192.168.100.50")
+  hourlyPriceCents      Int       @map("hourly_price_cents") // Spheron price in cents (per GB/hr * sizeInGb)
+  markupPercent         Int       @default(15) @map("markup_percent")
+  totalHourlyRateCents  Int       @map("total_hourly_rate_cents") // Final price to customer
+  lastBilledAt          DateTime? @map("last_billed_at")
+  deleteWithInstance    Boolean   @default(false) @map("delete_with_instance")
+  attachedDeploymentIds String?   @map("attached_deployment_ids") @db.Text // JSON array of attached Spheron deployment IDs
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+  deletedAt             DateTime? @map("deleted_at")
 
   @@index([stripeCustomerId])
   @@index([teamId])
   @@index([status])
+  @@map("spheron_volume")
 }
 
+model InferencePricingConfig {
+  id                               String   @id @default("default")
+  // Real-time pricing (per 1M tokens, in cents) - 50% of Together.ai
+  realtimeInputPer1M               Int      @default(10) @map("realtime_input_per_1m") // $0.10 per 1M input tokens
+  realtimeOutputPer1M              Int      @default(10) @map("realtime_output_per_1m") // $0.10 per 1M output tokens
+  // Batch pricing (per 1M tokens, in cents) - discounted
+  batch1hInputPer1M                Int      @default(7) @map("batch_1h_input_per_1m") // $0.07 per 1M - 30% discount
+  batch1hOutputPer1M               Int      @default(7) @map("batch_1h_output_per_1m") // $0.07 per 1M
+  batch24hInputPer1M               Int      @default(5) @map("batch_24h_input_per_1m") // $0.05 per 1M - 50% discount
+  batch24hOutputPer1M              Int      @default(5) @map("batch_24h_output_per_1m") // $0.05 per 1M
+  // Fine-tuning pricing
+  fineTuningPer1kTokens            Int      @default(100) @map("fine_tuning_per_1k_tokens") // $1.00 per 1k training tokens
+  loraStoragePerMonthCents         Int      @default(50) @map("lora_storage_per_month_cents") // $0.50 per LoRA per month
+  // Playground
+  playgroundFreeTierTokens         Int      @default(10000) @map("playground_free_tier_tokens") // Free tokens per day for playground
+  // Provider revenue sharing (NEW)
+  tokenProviderRevenueSharePercent Float    @default(50) @map("token_provider_revenue_share_percent") // Default 50% to providers
+  // Settings
+  enabled                          Boolean  @default(true)
+  updatedAt                        DateTime @updatedAt @map("updated_at")
+  updatedBy                        String?  @map("updated_by")
+
+  @@map("inference_pricing_config")
+}
 
 // ============================================
 // Wallet Transactions - Local billing log
@@ -961,19 +1281,19 @@ model SpheronVolume {
 
 model WalletTransaction {
   id               String   @id @default(cuid())
-  stripeCustomerId String
-  teamId           String?
+  stripeCustomerId String   @map("stripe_customer_id")
+  teamId           String?  @map("team_id")
   type             String // "gpu_usage", "gpu_deploy", "storage", "stopped_reservation", "bare_metal", "token_inference", "refund"
-  amountCents      Int // Positive = debit (charge), Negative = credit (refund)
-  description      String
-  subscriptionId   String? // GPUaaS subscription ID (links charge to a specific pod)
-  poolId           Int? // GPUaaS pool ID (links charge to a specific GPU pool -> investor node)
-  gpuCount         Int?
-  hourlyRateCents  Int?
-  billingMinutes   Int?
-  syncCycleId      String? // Deduplication ID
-  metadata         String? // JSON for any extra context
-  createdAt        DateTime @default(now())
+  amountCents      Int      @map("amount_cents") // Positive = debit (charge), Negative = credit (refund)
+  description      String   @db.Text
+  subscriptionId   String?  @map("subscription_id") // GPUaaS subscription ID (links charge to a specific pod)
+  poolId           Int?     @map("pool_id") // GPUaaS pool ID (links charge to a specific GPU pool -> investor node)
+  gpuCount         Int?     @map("gpu_count")
+  hourlyRateCents  Int?     @map("hourly_rate_cents")
+  billingMinutes   Int?     @map("billing_minutes")
+  syncCycleId      String?  @map("sync_cycle_id") // Deduplication ID
+  metadata         String?  @db.Text // JSON for any extra context
+  createdAt        DateTime @default(now()) @map("created_at")
 
   @@index([stripeCustomerId, createdAt])
   @@index([teamId, createdAt])
@@ -982,47 +1302,50 @@ model WalletTransaction {
   @@index([type, createdAt])
   @@index([createdAt])
   @@index([syncCycleId])
+  @@map("wallet_transaction")
 }
 
 model CampaignBanner {
   id              String    @id @default(cuid())
-  text            String
-  linkUrl         String?
-  linkText        String?
-  backgroundColor String    @default("#1a4fff")
-  textColor       String    @default("#ffffff")
+  text            String    @db.Text
+  linkUrl         String?   @map("link_url")
+  linkText        String?   @map("link_text")
+  backgroundColor String    @default("#1a4fff") @map("background_color")
+  textColor       String    @default("#ffffff") @map("text_color")
   active          Boolean   @default(true)
   dismissible     Boolean   @default(true)
-  startsAt        DateTime?
-  expiresAt       DateTime?
-  displayOrder    Int       @default(0)
-  createdBy       String?
-  updatedBy       String?
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  startsAt        DateTime? @map("starts_at")
+  expiresAt       DateTime? @map("expires_at")
+  displayOrder    Int       @default(0) @map("display_order")
+  createdBy       String?   @map("created_by")
+  updatedBy       String?   @map("updated_by")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@index([active, displayOrder])
+  @@map("campaign_banner")
 }
 
 // ─── Marketing: anonymous page-view tracking (cookie-free) ───
 model PageView {
   id                  String   @id @default(cuid())
-  sessionId           String // random ID per browser session (sessionStorage)
+  sessionId           String   @map("session_id") // random ID per browser session (sessionStorage)
   page                String // pathname, e.g. "/", "/account", "/features"
-  referrer            String?
-  utmSource           String?
-  utmMedium           String?
-  utmCampaign         String?
-  utmContent          String?
-  utmTerm             String?
-  convertedCustomerId String? // filled on signup, links to Stripe customer
-  createdAt           DateTime @default(now())
+  referrer            String?  @db.Text
+  utmSource           String?  @map("utm_source")
+  utmMedium           String?  @map("utm_medium")
+  utmCampaign         String?  @map("utm_campaign")
+  utmContent          String?  @map("utm_content")
+  utmTerm             String?  @map("utm_term")
+  convertedCustomerId String?  @map("converted_customer_id") // filled on signup, links to Stripe customer
+  createdAt           DateTime @default(now()) @map("created_at")
 
   @@index([utmSource])
   @@index([utmCampaign])
   @@index([createdAt])
   @@index([sessionId])
   @@index([convertedCustomerId])
+  @@map("page_view")
 }
 
 // ─── Marketing: full customer lifecycle with attribution ───
@@ -1030,42 +1353,43 @@ model PageView {
 // Updated by signup API, webhook handlers, and cron jobs as events happen.
 model CustomerLifecycle {
   id               String @id @default(cuid())
-  stripeCustomerId String @unique
+  stripeCustomerId String @unique @map("stripe_customer_id")
   email            String
+  tenantId         String @default("default") @map("tenant_id")
 
   // ── Attribution (set once at signup, never overwritten) ──
-  utmSource   String?
-  utmMedium   String?
-  utmCampaign String?
-  utmContent  String?
-  utmTerm     String?
-  landingPage String?
-  referrer    String?
-  sessionId   String? // links to PageView records
+  utmSource   String? @map("utm_source")
+  utmMedium   String? @map("utm_medium")
+  utmCampaign String? @map("utm_campaign")
+  utmContent  String? @map("utm_content")
+  utmTerm     String? @map("utm_term")
+  landingPage String? @map("landing_page") @db.Text
+  referrer    String? @db.Text
+  sessionId   String? @map("session_id") // links to PageView records
 
   // ── Lifecycle milestones (timestamps, null = not reached yet) ──
-  signedUpAt       DateTime // when account was created
-  firstLoginAt     DateTime? // first dashboard access
-  firstApiCallAt   DateTime? // first inference API call
-  firstDepositAt   DateTime? // first wallet topup
-  firstGpuDeployAt DateTime? // first pod launched
-  subscribedAt     DateTime? // converted to monthly subscription
-  churnedAt        DateTime? // stopped paying / all pods terminated
-  reactivatedAt    DateTime? // came back after churn
+  signedUpAt       DateTime  @map("signed_up_at") // when account was created
+  firstLoginAt     DateTime? @map("first_login_at") // first dashboard access
+  firstApiCallAt   DateTime? @map("first_api_call_at") // first Token Factory call
+  firstDepositAt   DateTime? @map("first_deposit_at") // first wallet topup
+  firstGpuDeployAt DateTime? @map("first_gpu_deploy_at") // first pod launched
+  subscribedAt     DateTime? @map("subscribed_at") // converted to monthly subscription
+  churnedAt        DateTime? @map("churned_at") // stopped paying / all pods terminated
+  reactivatedAt    DateTime? @map("reactivated_at") // came back after churn
 
   // ── Financials (running totals, updated on each event) ──
-  totalDepositsCents Int    @default(0) // lifetime wallet deposits
-  totalSpendCents    Int    @default(0) // lifetime spend (GPU + inference)
-  depositCount       Int    @default(0) // number of topups
-  currentBillingType String @default("free") // free, hourly, monthly
+  totalDepositsCents Int    @default(0) @map("total_deposits_cents") // lifetime wallet deposits
+  totalSpendCents    Int    @default(0) @map("total_spend_cents") // lifetime spend (GPU + inference)
+  depositCount       Int    @default(0) @map("deposit_count") // number of topups
+  currentBillingType String @default("free") @map("current_billing_type") // free, hourly, monthly
 
   // ── Engagement ──
-  lastActiveAt    DateTime? // last meaningful action
-  gpuHoursTotal   Float     @default(0) // lifetime GPU hours
-  inferenceTokens Int       @default(0) // lifetime tokens used
+  lastActiveAt    DateTime? @map("last_active_at") // last meaningful action
+  gpuHoursTotal   Float     @default(0) @map("gpu_hours_total") // lifetime GPU hours
+  inferenceTokens Int       @default(0) @map("inference_tokens") // lifetime tokens used
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([utmSource])
   @@index([utmCampaign])
@@ -1074,44 +1398,286 @@ model CustomerLifecycle {
   @@index([currentBillingType])
   @@index([totalDepositsCents])
   @@index([churnedAt])
+  @@index([tenantId])
+  @@map("customer_lifecycle")
 }
 
+model ImageModel {
+  id              String   @id @default(cuid())
+  name            String   @unique // "flux-1-schnell", "sdxl-1.0", "wan2.1-t2v-1.3b"
+  displayName     String   @map("display_name") // "FLUX.1 Schnell"
+  provider        String // "black-forest-labs", "stability-ai", "wan-ai"
+  architecture    String // "flux", "sdxl", "sd15", "wan"
+  modelType       String   @default("image") @map("model_type") // "image", "video"
+  vramRequiredGb  Float    @map("vram_required_gb")
+  defaultSteps    Int      @map("default_steps")
+  defaultCfg      Float    @map("default_cfg")
+  maxWidth        Int      @default(2048) @map("max_width")
+  maxHeight       Int      @default(2048) @map("max_height")
+  pricePer1Image  Int      @map("price_per_1_image") // cost in cents * 100 at 1024x1024 (e.g., 30 = $0.0030)
+  priceMultiplier Float    @default(1.0) @map("price_multiplier") // resolution multiplier
+  comfyWorkflow   String   @default("flux") @map("comfy_workflow") // workflow type: "flux", "sdxl", "wan_t2v"
+  comfyModelFile  String   @map("comfy_model_file") // filename in ComfyUI models dir
+  active          Boolean  @default(true)
+  featured        Boolean  @default(false)
+  displayOrder    Int      @default(0) @map("display_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([active])
+  @@index([modelType])
+  @@index([architecture])
+  @@map("image_model")
+}
+
+model ImageGeneration {
+  id               String   @id @default(cuid())
+  stripeCustomerId String   @map("stripe_customer_id")
+  teamId           String?  @map("team_id")
+  modelId          String   @map("model_id")
+  modelName        String   @map("model_name")
+  serverId         String?  @map("server_id")
+  serverGpuIndex   Int?     @map("server_gpu_index")
+  prompt           String   @db.Text
+  negativePrompt   String?  @map("negative_prompt") @db.Text
+  width            Int
+  height           Int
+  steps            Int
+  cfgScale         Float    @map("cfg_scale")
+  seed             BigInt?
+  n                Int      @default(1)
+  outputFormat     String   @default("png") @map("output_format") // "png", "jpg", "webp"
+  outputUrls       String?  @map("output_urls") @db.Text // JSON array of output URLs/base64
+  costCents        Int      @map("cost_cents")
+  durationMs       Int?     @map("duration_ms")
+  status           String   @default("pending") // "pending", "generating", "completed", "failed"
+  errorMessage     String?  @map("error_message")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([stripeCustomerId, createdAt])
+  @@index([teamId, createdAt])
+  @@index([modelId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("image_generation")
+}
+
+// ============================================================
+// WHITE-LABEL MULTI-TENANCY
+// ============================================================
+
+model Tenant {
+  id                    String   @id @default(cuid())
+  slug                  String   @unique
+  status                String   @default("active")
+
+  // Contact (reseller admin)
+  contactEmail          String?  @map("contact_email")
+  contactName           String?  @map("contact_name")
+
+  // Branding
+  brandName             String   @map("brand_name")
+  logoUrl               String   @default("") @map("logo_url")
+  faviconUrl            String?  @map("favicon_url")
+  ogImageUrl            String?  @map("og_image_url")
+  primaryColor          String   @default("#1a4fff") @map("primary_color")
+  accentColor           String   @default("#18b6a8") @map("accent_color")
+  bgColor               String   @default("#f7f8fb") @map("bg_color")
+  textColor             String   @default("#0b0f1c") @map("text_color")
+  customCss             String?  @map("custom_css") @db.Text
+  customStrings         Json?    @map("custom_strings")
+
+  // Their Stripe (encrypted at rest via src/lib/crypto.ts)
+  stripeSecretKey       String   @default("") @map("stripe_secret_key")
+  stripePublishableKey  String   @default("") @map("stripe_publishable_key")
+  stripeWebhookSecret   String   @default("") @map("stripe_webhook_secret")
+
+  // Our billing to them
+  wholesaleCustomerId   String?  @map("wholesale_customer_id")
+
+  // Pricing
+  signupCreditCents     Int      @default(0) @map("signup_credit_cents")
+  billingModels         String   @default("hourly,monthly") @map("billing_models")
+
+  // Support & operations
+  supportEmail          String   @default("") @map("support_email")
+  supportUrl            String?  @map("support_url")
+  statusPageEnabled     Boolean  @default(true) @map("status_page_enabled")
+  alertWebhookUrl       String?  @map("alert_webhook_url")
+
+  // GTM & integrations
+  leadWebhookUrl        String?  @map("lead_webhook_url")
+  analyticsId           String?  @map("analytics_id")
+  dripEmailEnabled      Boolean  @default(true) @map("drip_email_enabled")
+
+  // Access control
+  adminDomains          String   @default("hosted.ai") @map("admin_domains")
+  allowedGpuTypes       String   @default("rtx-pro-6000,b200,h200") @map("allowed_gpu_types")
+  maxConcurrentGpus     Int?     @map("max_concurrent_gpus")
+
+  // API access (for WHMCS / custom integrations)
+  apiKey                String?  @unique @map("api_key")
+  webhookUrl            String?  @map("webhook_url")
+
+  // CLI
+  cliName               String?  @map("cli_name")
+  cliDownloadUrl        String?  @map("cli_download_url")
+
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  domains               TenantDomain[]
+  gpuPricing            TenantGpuPricing[]
+  customers             TenantCustomer[]
+  dripTemplates         TenantDripTemplate[]
+
+  @@map("tenant")
+}
+
+model TenantDomain {
+  id         String    @id @default(cuid())
+  tenantId   String    @map("tenant_id")
+  domain     String    @unique
+  isPrimary  Boolean   @default(false) @map("is_primary")
+  verifiedAt DateTime? @map("verified_at")
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([domain])
+  @@map("tenant_domain")
+}
+
+model TenantGpuPricing {
+  id                 String  @id @default(cuid())
+  tenantId           String  @map("tenant_id")
+  gpuType            String  @map("gpu_type")
+  hourlyRateCents    Int     @map("hourly_rate_cents")
+  monthlyRateCents   Int?    @map("monthly_rate_cents")
+  wholesaleCostCents Int     @map("wholesale_cost_cents")
+  enabled            Boolean @default(true)
+  tenant             Tenant  @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, gpuType])
+  @@map("tenant_gpu_pricing")
+}
+
+model TenantCustomer {
+  id                    String   @id @default(cuid())
+  tenantId              String   @map("tenant_id")
+  stripeCustomerId      String   @map("stripe_customer_id")
+  email                 String
+  name                  String?
+  balanceCents          Int      @default(0) @map("balance_cents")     // Positive = credit available
+  walletEnabled         Boolean  @default(false) @map("wallet_enabled")  // Whether wallet billing is active
+  lowBalanceAlertSent   Boolean  @default(false) @map("low_balance_alert_sent")  // Prevent repeated low-balance webhooks
+  createdAt             DateTime @default(now()) @map("created_at")
+  tenant                Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, stripeCustomerId])
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("tenant_customer")
+}
+
+// ============================================================
+// TENANT WALLET TRANSACTIONS
+// ============================================================
+
+model TenantWalletTransaction {
+  id              String    @id @default(cuid())
+  tenantId        String    @map("tenant_id")
+  customerId      String    @map("customer_id")
+  type            String    // "credit" or "debit"
+  amountCents     Int       @map("amount_cents")
+  balanceAfter    Int       @map("balance_after")
+  description     String
+  idempotencyKey  String?   @unique @map("idempotency_key")
+  metadata        String?   @map("metadata") @db.Text // JSON stringified
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([customerId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("tenant_wallet_transaction")
+}
+
+// ============================================================
+// WEBHOOK EVENT DELIVERY TRACKING
+// ============================================================
+
+model WebhookEvent {
+  id          String    @id @default(cuid())
+  tenantId    String    @map("tenant_id")
+  event       String
+  payload     String // JSON stringified
+  status      String    @default("pending") // pending, delivered, failed
+  statusCode  Int?      @map("status_code")
+  error       String?
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  deliveredAt DateTime? @map("delivered_at")
+
+  @@index([tenantId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("webhook_event")
+}
+
+model TenantDripTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String   @map("tenant_id")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  emailType String   @map("email_type") // e.g. "gpu-1-inventory", "gpu-2-usecases", "gpu-3-credit", "api-1-quickstart", "api-2-features", "api-3-credit"
+  subject   String
+  bodyHtml  String   @map("body_html") @db.Text // custom HTML body content (not full layout, just the inner content)
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, emailType])
+  @@index([tenantId])
+  @@map("tenant_drip_template")
+}
 
 model AdminStatsSnapshot {
   id              String   @id @default(cuid())
   date            String   @unique // YYYY-MM-DD
-  totalCustomers  Int
-  activeGPUs      Int
-  mrrCents        Int
-  newThisWeek     Int
-  revenueWeekCents Int
-  createdAt       DateTime @default(now())
+  totalCustomers  Int      @map("total_customers")
+  activeGPUs      Int      @map("active_gpus")
+  mrrCents        Int      @map("mrr_cents")
+  newThisWeek     Int      @map("new_this_week")
+  revenueWeekCents Int     @map("revenue_week_cents")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("admin_stats_snapshot")
+}
+
+// ── OSS Platform Settings (DB-backed config for self-hosted deployments) ──
+model SystemSetting {
+  key       String   @id
+  value     String   @db.Text
+  encrypted Boolean  @default(false)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_setting")
 }
 
 model CustomerCache {
   id              String   @id // Stripe customer ID (cus_xxx)
   email           String?
   name            String?
-  stripeCreatedAt DateTime
-  balanceCents    Int      @default(0) // raw Stripe balance (negative = credit)
-  billingType     String?
-  teamId          String? // metadata.hostedai_team_id
-  productId       String? // metadata.packet_product_id
-  metadataJson    String? // full metadata JSON fallback
-  activePods      Int      @default(0) // live pod count from hosted.ai
-  isDeleted       Boolean  @default(false)
-  lastSyncedAt    DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  stripeCreatedAt DateTime @map("stripe_created_at")
+  balanceCents    Int      @default(0) @map("balance_cents") // raw Stripe balance (negative = credit)
+  billingType     String?  @map("billing_type")
+  teamId          String?  @map("team_id") // metadata.hostedai_team_id
+  productId       String?  @map("product_id") // metadata.packet_product_id
+  metadataJson    String?  @map("metadata_json") @db.Text // full metadata JSON fallback
+  activePods      Int      @default(0) @map("active_pods") // live pod count from hosted.ai
+  isDeleted       Boolean  @default(false) @map("is_deleted")
+  lastSyncedAt    DateTime @default(now()) @map("last_synced_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@index([email])
   @@index([billingType])
   @@index([teamId])
   @@index([stripeCreatedAt])
-}
-
-model SystemSetting {
-  key       String   @id
-  value     String
-  encrypted Boolean  @default(false)
-  updatedAt DateTime @updatedAt
+  @@map("customer_cache")
 }

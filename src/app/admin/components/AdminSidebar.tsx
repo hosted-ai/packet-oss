@@ -1,16 +1,22 @@
 "use client";
 
 import type { AdminTab } from "../types";
+import { PREMIUM_ADMIN_TABS, OSS_ONLY_ADMIN_TABS } from "../types";
+import { isPro, isOSS } from "@/lib/edition";
 import {
   Users,
   Shield,
   LineChart,
+  Server,
+  FileText,
   Share2,
   Tag,
   Activity,
   Settings,
+  CalculatorIcon,
   FlaskConical,
   Building,
+  Building2,
   LogOut,
   ChevronLeft,
   ChevronRight,
@@ -22,14 +28,19 @@ import {
   Monitor,
   Layers,
   TrendingUp,
+  ShoppingCart,
+  Database,
+  Coins,
   Cloud,
   Headphones,
-
+  Globe,
   DollarSign,
   Megaphone,
   BarChart3,
+  ImageIcon,
   Clock,
   Wallet,
+  Wrench,
 } from "lucide-react";
 
 interface AdminSidebarProps {
@@ -54,9 +65,9 @@ interface NavGroup {
 
 const navGroups: NavGroup[] = [
   {
-    label: "Setup",
+    label: "White Label",
     items: [
-      { id: "platform-settings" as AdminTab, label: "Platform Settings", icon: Settings },
+      { id: "tenants" as AdminTab, label: "Tenants", icon: Building2 },
     ],
   },
   {
@@ -74,8 +85,9 @@ const navGroups: NavGroup[] = [
       { id: "pods", label: "GPU Pods", icon: Cpu },
       { id: "pools", label: "Pool Overview", icon: Layers },
       { id: "nodes", label: "Node Monitoring", icon: Monitor },
+      { id: "token-providers", label: "Token Providers", icon: Coins },
       { id: "skypilot", label: "SkyPilot", icon: Cloud },
-
+      { id: "spheron", label: "Spheron Inventory", icon: Globe },
       { id: "uptime", label: "Pod Uptime", icon: Clock },
     ],
   },
@@ -84,10 +96,14 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "payouts", label: "Investor Payouts", icon: Wallet },
       { id: "node-revenue", label: "Node Revenue", icon: DollarSign },
+      { id: "pixel-factory", label: "Pixel Factory", icon: ImageIcon },
       { id: "marketing", label: "Marketing", icon: BarChart3 },
       { id: "business", label: "Business Metrics", icon: TrendingUp },
       { id: "products", label: "Products", icon: Package },
       { id: "landing", label: "Landing Page", icon: LayoutDashboard },
+      { id: "clusters", label: "Clusters", icon: Server },
+      { id: "demand", label: "Demand", icon: ShoppingCart },
+      { id: "quotes", label: "Quotes", icon: FileText },
       { id: "referrals", label: "Referrals", icon: Share2 },
       { id: "vouchers", label: "Vouchers", icon: Tag },
       { id: "banners", label: "Banners", icon: Megaphone },
@@ -97,12 +113,15 @@ const navGroups: NavGroup[] = [
     label: "Tools",
     items: [
       { id: "support", label: "Support", icon: Headphones },
+      { id: "batches", label: "Batch Jobs", icon: Database },
       { id: "emails", label: "Email Templates", icon: Mail },
       { id: "drip", label: "Drip Campaigns", icon: Mail },
       { id: "game", label: "Game Stats", icon: Gamepad2 },
       { id: "activity", label: "Activity", icon: Activity },
+      { id: "calculator", label: "Calculator", icon: CalculatorIcon },
       { id: "qa", label: "QA", icon: FlaskConical },
       { id: "settings", label: "Settings", icon: Settings },
+      { id: "platform-settings" as AdminTab, label: "Platform Settings", icon: Wrench },
     ],
   },
 ];
@@ -137,7 +156,14 @@ export function AdminSidebar({
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto py-4">
-        {navGroups.map((group) => (
+        {navGroups.map((group) => {
+          const items = group.items.filter((item) => {
+            if (PREMIUM_ADMIN_TABS.has(item.id)) return isPro();
+            if (OSS_ONLY_ADMIN_TABS.has(item.id)) return isOSS();
+            return true;
+          });
+          if (items.length === 0) return null;
+          return (
           <div key={group.label} className="mb-6">
             {!isCollapsed && (
               <h2 className="px-6 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
@@ -145,7 +171,7 @@ export function AdminSidebar({
               </h2>
             )}
             <ul className="space-y-1">
-              {group.items.map((item) => {
+              {items.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeTab === item.id;
                 return (
@@ -169,8 +195,16 @@ export function AdminSidebar({
               })}
             </ul>
           </div>
-        ))}
+          );
+        })}
       </nav>
+
+      {/* Version */}
+      {!isCollapsed && process.env.NEXT_PUBLIC_APP_VERSION && (
+        <div className="px-6 py-2 border-t border-white/10">
+          <p className="text-xs text-gray-500">v{process.env.NEXT_PUBLIC_APP_VERSION}</p>
+        </div>
+      )}
 
       {/* Collapse Toggle */}
       <div className="border-t border-white/10">

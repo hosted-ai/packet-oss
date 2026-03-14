@@ -6,11 +6,11 @@ import { setApiKey, getApiUrl } from "../config.js";
 
 export const loginCommand = new Command("login")
   .description("Authenticate with the GPU cloud platform")
-  .option("-k, --key <apiKey>", "API key (or set PACKET_API_KEY env var)")
+  .option("-k, --key <apiKey>", "API key (or set GPU_CLOUD_API_KEY env var)")
   .option("-i, --interactive", "Open browser to get API key")
   .action(async (options) => {
     // Check for API key in options or environment
-    let apiKey = options.key || process.env.PACKET_API_KEY;
+    let apiKey = options.key || process.env.GPU_CLOUD_API_KEY || process.env.PACKET_API_KEY;
 
     if (options.interactive || !apiKey) {
       console.log(chalk.cyan("\n  Opening dashboard to get your API key...\n"));
@@ -39,10 +39,10 @@ export const loginCommand = new Command("login")
     if (!apiKey) {
       console.log(chalk.red("\n  Error: No API key provided.\n"));
       console.log(
-        chalk.gray("  Use: packet login --key <your-api-key>")
+        chalk.gray("  Use: gpu-cloud login --key <your-api-key>")
       );
       console.log(
-        chalk.gray("  Or:  packet login --interactive")
+        chalk.gray("  Or:  gpu-cloud login --interactive")
       );
       process.exit(1);
     }

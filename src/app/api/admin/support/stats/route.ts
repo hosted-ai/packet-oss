@@ -73,7 +73,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(statsCache.data);
     }
 
-    // Fetch all tickets (already filtered to GPU Cloud groups)
+    // Fetch all tickets (already filtered to platform groups)
     const tickets = await getAllTickets({ state: "all", perPage: 10000 });
 
     // Period filter for volume metrics

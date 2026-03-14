@@ -1,16 +1,7 @@
-import { PrismaClient, SSHKey } from "@prisma/client";
+import { SSHKey } from "@prisma/client";
 import crypto from "crypto";
 import { validateSSHParams } from "./ssh-validation";
-
-// Lazy initialization to avoid build-time connection issues
-let prisma: PrismaClient | null = null;
-
-function getPrisma(): PrismaClient {
-  if (!prisma) {
-    prisma = new PrismaClient();
-  }
-  return prisma;
-}
+import { prisma } from "@/lib/prisma";
 
 // Calculate SSH key fingerprint (MD5 format like ssh-keygen -l)
 export function calculateFingerprint(publicKey: string): string {
@@ -69,8 +60,7 @@ export function validatePublicKey(publicKey: string): {
 
 // Get all SSH keys for a customer
 export async function getSSHKeys(stripeCustomerId: string): Promise<SSHKey[]> {
-  const db = getPrisma();
-  return db.sSHKey.findMany({
+  return prisma.sSHKey.findMany({
     where: { stripeCustomerId },
     orderBy: { createdAt: "desc" },
   });
@@ -93,17 +83,15 @@ export async function addSSHKey(params: {
   // Calculate fingerprint
   const fingerprint = calculateFingerprint(publicKey);
 
-  const db = getPrisma();
-
   // Check if this key already exists for this customer
-  const existing = await db.sSHKey.findFirst({
+  const existing = await prisma.sSHKey.findFirst({
     where: { stripeCustomerId, fingerprint },
   });
   if (existing) {
     throw new Error(`This SSH key is already added as "${existing.name}"`);
   }
 
-  return db.sSHKey.create({
+  return prisma.sSHKey.create({
     data: {
       stripeCustomerId,
       name: name.trim(),
@@ -118,8 +106,7 @@ export async function deleteSSHKey(
   keyId: string,
   stripeCustomerId: string
 ): Promise<void> {
-  const db = getPrisma();
-  await db.sSHKey.delete({
+  await prisma.sSHKey.delete({
     where: {
       id: keyId,
       stripeCustomerId, // Ensure ownership
@@ -132,8 +119,7 @@ export async function getSSHKey(
   keyId: string,
   stripeCustomerId: string
 ): Promise<SSHKey | null> {
-  const db = getPrisma();
-  return db.sSHKey.findFirst({
+  return prisma.sSHKey.findFirst({
     where: {
       id: keyId,
       stripeCustomerId,
@@ -144,7 +130,7 @@ export async function getSSHKey(
 // Server-side SSH key management for app installations
 // The key is stored in the database with a special "server" customer ID
 const SERVER_KEY_CUSTOMER_ID = "__SERVER__";
-const SERVER_KEY_NAME = "packet-apps-server";
+const SERVER_KEY_NAME = "gpu-cloud-server";
 
 import { generateKeyPairSync } from "crypto";
 import { execSync } from "child_process";
@@ -157,10 +143,9 @@ export async function getOrCreateServerSSHKey(): Promise<{
   publicKey: string;
   privateKeyPath: string;
 }> {
-  const db = getPrisma();
 
   // Check if server key already exists in database
-  let serverKey = await db.sSHKey.findFirst({
+  let serverKey = await prisma.sSHKey.findFirst({
     where: {
       stripeCustomerId: SERVER_KEY_CUSTOMER_ID,
       name: SERVER_KEY_NAME,
@@ -168,7 +153,7 @@ export async function getOrCreateServerSSHKey(): Promise<{
   });
 
   // Key file paths - use a consistent location
-  const keyDir = path.join(os.tmpdir(), "packet-server-keys");
+  const keyDir = path.join(os.tmpdir(), "gpu-cloud-server-keys");
   const privateKeyPath = path.join(keyDir, "id_ed25519");
   const publicKeyPath = path.join(keyDir, "id_ed25519.pub");
 
@@ -183,7 +168,7 @@ export async function getOrCreateServerSSHKey(): Promise<{
     if (!fs.existsSync(privateKeyPath)) {
       // We need to regenerate since we can't recover private key from DB
       // (DB only stores public key)
-      await db.sSHKey.delete({ where: { id: serverKey.id } });
+      await prisma.sSHKey.delete({ where: { id: serverKey.id } });
       serverKey = null;
     } else {
       // Files exist, return them
@@ -200,7 +185,7 @@ export async function getOrCreateServerSSHKey(): Promise<{
   try {
     // Use ssh-keygen for proper OpenSSH format
     execSync(
-      `ssh-keygen -t ed25519 -f "${privateKeyPath}" -N "" -C "${SERVER_KEY_NAME}@gpu-cloud"`,
+      `ssh-keygen -t ed25519 -f "${privateKeyPath}" -N "" -C "${SERVER_KEY_NAME}@${new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000").hostname}"`,
       { stdio: "pipe" }
     );
 
@@ -212,7 +197,7 @@ export async function getOrCreateServerSSHKey(): Promise<{
     const fingerprint = calculateFingerprint(publicKey);
 
     // Store public key in database
-    await db.sSHKey.create({
+    await prisma.sSHKey.create({
       data: {
         stripeCustomerId: SERVER_KEY_CUSTOMER_ID,
         name: SERVER_KEY_NAME,
@@ -386,6 +371,9 @@ export async function executeSSHWithKey(
   const { spawn } = await import("child_process");
 
   return new Promise((resolve) => {
+    // Pass script via stdin ("bash -s") instead of as SSH command argument.
+    // This avoids the script text appearing in the SSH process command line,
+    // which caused pkill -f patterns in scripts to kill their own SSH session.
     const args = [
       "-i", privateKeyPath,
       "-o", "StrictHostKeyChecking=no",
@@ -393,9 +381,12 @@ export async function executeSSHWithKey(
       "-o", "LogLevel=ERROR",
       "-o", "ConnectTimeout=30",
       "-o", "BatchMode=yes", // Fail immediately if key auth doesn't work
+      "-o", "ServerAliveInterval=15",
+      "-o", "ServerAliveCountMax=20",
+      "-o", "TCPKeepAlive=yes",
       "-p", String(port),
       `${username}@${host}`,
-      command,
+      "bash -s",
     ];
 
     let stdout = "";
@@ -405,6 +396,10 @@ export async function executeSSHWithKey(
     const proc = spawn("ssh", args, {
       timeout: timeoutMs,
     });
+
+    // Write the script to stdin
+    proc.stdin.write(command);
+    proc.stdin.end();
 
     proc.stdout.on("data", (data) => {
       stdout += data.toString();

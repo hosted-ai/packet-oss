@@ -18,19 +18,20 @@ vi.mock('fs');
 
 describe('Admin Authentication Module', () => {
   const TEST_SECRET = 'test-secret-key-for-testing';
-  const TEST_EMAIL = 'admin@example.com';
-  const TEST_EMAIL_ALT = 'admin@testcompany.com';
+  const TEST_EMAIL = 'admin@hosted.ai';
+  const TEST_EMAIL_PACKET = 'admin@packet.ai';
+  const INVALID_DOMAIN_EMAIL = 'admin@example.com';
   const ADMINS_FILE = path.join(process.cwd(), 'data', 'admins.json');
 
   const mockAdminsData = {
     admins: [
       {
-        email: 'admin@example.com',
+        email: 'admin@hosted.ai',
         addedAt: '2024-01-01T00:00:00.000Z',
         addedBy: 'system',
       },
       {
-        email: 'admin@testcompany.com',
+        email: 'admin@packet.ai',
         addedAt: '2024-01-01T00:00:00.000Z',
         addedBy: 'system',
       },
@@ -39,8 +40,6 @@ describe('Admin Authentication Module', () => {
 
   beforeEach(() => {
     process.env.ADMIN_JWT_SECRET = TEST_SECRET;
-    // No ADMIN_EMAIL_DOMAINS set = all domains allowed
-    delete process.env.ADMIN_EMAIL_DOMAINS;
     vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockAdminsData));
     vi.mocked(fs.writeFileSync).mockImplementation(() => {});
   });
@@ -58,9 +57,9 @@ describe('Admin Authentication Module', () => {
     });
 
     it('should include admin email in payload (lowercase)', () => {
-      const token = generateAdminToken('ADMIN@EXAMPLE.COM');
+      const token = generateAdminToken('ADMIN@HOSTED.AI');
       const decoded = jwt.verify(token, TEST_SECRET) as any;
-      expect(decoded.email).toBe('admin@example.com');
+      expect(decoded.email).toBe('admin@hosted.ai');
     });
 
     it('should include correct type in payload', () => {
@@ -81,21 +80,21 @@ describe('Admin Authentication Module', () => {
     it('should throw error when JWT secret is missing', () => {
       delete process.env.ADMIN_JWT_SECRET;
       expect(() => generateAdminToken(TEST_EMAIL)).toThrow(
-        'ADMIN_JWT_SECRET'
+        'ADMIN_JWT_SECRET environment variable is required'
       );
     });
 
     it('should handle emails with special characters', () => {
-      const specialEmail = 'admin+test@example.com';
+      const specialEmail = 'admin+test@hosted.ai';
       const token = generateAdminToken(specialEmail);
       const decoded = jwt.verify(token, TEST_SECRET) as any;
       expect(decoded.email).toBe(specialEmail.toLowerCase());
     });
 
-    it('should work with alternate domain', () => {
-      const token = generateAdminToken(TEST_EMAIL_ALT);
+    it('should work with packet.ai domain', () => {
+      const token = generateAdminToken(TEST_EMAIL_PACKET);
       const decoded = jwt.verify(token, TEST_SECRET) as any;
-      expect(decoded.email).toBe(TEST_EMAIL_ALT.toLowerCase());
+      expect(decoded.email).toBe(TEST_EMAIL_PACKET.toLowerCase());
     });
   });
 
@@ -175,15 +174,15 @@ describe('Admin Authentication Module', () => {
     });
 
     it('should normalize email to lowercase', () => {
-      const token = generateSessionToken('ADMIN@EXAMPLE.COM');
+      const token = generateSessionToken('ADMIN@HOSTED.AI');
       const decoded = jwt.verify(token, TEST_SECRET) as any;
-      expect(decoded.email).toBe('admin@example.com');
+      expect(decoded.email).toBe('admin@hosted.ai');
     });
 
     it('should throw error when JWT secret is missing', () => {
       delete process.env.ADMIN_JWT_SECRET;
       expect(() => generateSessionToken(TEST_EMAIL)).toThrow(
-        'ADMIN_JWT_SECRET'
+        'ADMIN_JWT_SECRET environment variable is required'
       );
     });
   });
@@ -197,7 +196,7 @@ describe('Admin Authentication Module', () => {
     });
 
     it('should return null for non-admin emails', () => {
-      const token = generateSessionToken('notanadmin@example.com');
+      const token = generateSessionToken('notanadmin@hosted.ai');
       const result = verifySessionToken(token);
       expect(result).toBeNull();
     });
@@ -228,59 +227,70 @@ describe('Admin Authentication Module', () => {
     });
 
     it('should verify session token for admins from both domains', () => {
-      const tokenPrimary = generateSessionToken(TEST_EMAIL);
-      const tokenAlt = generateSessionToken(TEST_EMAIL_ALT);
+      const tokenHosted = generateSessionToken(TEST_EMAIL);
+      const tokenPacket = generateSessionToken(TEST_EMAIL_PACKET);
 
-      expect(verifySessionToken(tokenPrimary)).toBeTruthy();
-      expect(verifySessionToken(tokenAlt)).toBeTruthy();
+      expect(verifySessionToken(tokenHosted)).toBeTruthy();
+      expect(verifySessionToken(tokenPacket)).toBeTruthy();
     });
   });
 
   describe('isAdmin', () => {
     it('should return true for existing admins', () => {
-      expect(isAdmin('admin@example.com')).toBe(true);
-      expect(isAdmin('admin@testcompany.com')).toBe(true);
+      expect(isAdmin('admin@hosted.ai')).toBe(true);
+      expect(isAdmin('admin@packet.ai')).toBe(true);
     });
 
     it('should return false for non-admins', () => {
-      expect(isAdmin('notanadmin@example.com')).toBe(false);
+      expect(isAdmin('notanadmin@hosted.ai')).toBe(false);
     });
 
     it('should be case-insensitive', () => {
-      expect(isAdmin('ADMIN@EXAMPLE.COM')).toBe(true);
+      expect(isAdmin('ADMIN@HOSTED.AI')).toBe(true);
     });
 
     it('should handle empty email', () => {
       expect(isAdmin('')).toBe(false);
     });
+
+    it('should return false for admins from non-allowed domains', () => {
+      expect(isAdmin('admin@example.com')).toBe(false);
+    });
   });
 
   describe('addAdmin', () => {
-    it('should add new admin', () => {
+    it('should add new admin from hosted.ai domain', () => {
       vi.mocked(fs.writeFileSync).mockClear();
-      const result = addAdmin('newadmin@example.com', 'system');
+      const result = addAdmin('newadmin@hosted.ai', 'system');
       expect(result).toBe(true);
       expect(fs.writeFileSync).toHaveBeenCalled();
     });
 
-    it('should add new admin from alternate domain', () => {
+    it('should add new admin from packet.ai domain', () => {
       vi.mocked(fs.writeFileSync).mockClear();
-      const result = addAdmin('newadmin@testcompany.com', 'system');
+      const result = addAdmin('newadmin@packet.ai', 'system');
       expect(result).toBe(true);
       expect(fs.writeFileSync).toHaveBeenCalled();
+    });
+
+    it('should reject admins from non-allowed domains', () => {
+      vi.mocked(fs.writeFileSync).mockClear();
+      const result = addAdmin(INVALID_DOMAIN_EMAIL, 'system');
+      expect(result).toBe(false);
+      expect(fs.writeFileSync).not.toHaveBeenCalled();
     });
 
     it('should return false if admin already exists', () => {
-      const result = addAdmin('admin@example.com', 'system');
+      const result = addAdmin('admin@hosted.ai', 'system');
       expect(result).toBe(false);
     });
 
     it('should normalize email to lowercase when adding', () => {
-      addAdmin('NewAdmin@Example.Com', 'system');
+      addAdmin('NewAdmin@Hosted.Ai', 'system');
       const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
       const writtenData = JSON.parse(writeCall[1] as string);
       const newAdmin = writtenData.admins.find((a: any) =>
-        a.email === 'newadmin@example.com'
+        a.email === 'newadmin@hosted.ai'
       );
       expect(newAdmin).toBeTruthy();
     });
@@ -288,47 +298,52 @@ describe('Admin Authentication Module', () => {
     it('should set addedAt timestamp', () => {
       vi.mocked(fs.writeFileSync).mockClear();
       const beforeTime = new Date().toISOString();
-      addAdmin('newadmin@example.com', 'system');
+      addAdmin('newadmin@hosted.ai', 'system');
       expect(fs.writeFileSync).toHaveBeenCalled();
       const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
       const writtenData = JSON.parse(writeCall[1] as string);
       const newAdmin = writtenData.admins.find((a: any) =>
-        a.email === 'newadmin@example.com'
+        a.email === 'newadmin@hosted.ai'
       );
       expect(newAdmin.addedAt).toBeTruthy();
       expect(new Date(newAdmin.addedAt) >= new Date(beforeTime)).toBe(true);
     });
 
     it('should set addedBy field', () => {
-      addAdmin('newadmin@example.com', 'system');
+      addAdmin('newadmin@hosted.ai', 'system');
       const writeCall = vi.mocked(fs.writeFileSync).mock.calls[0];
       const writtenData = JSON.parse(writeCall[1] as string);
       const newAdmin = writtenData.admins.find((a: any) =>
-        a.email === 'newadmin@example.com'
+        a.email === 'newadmin@hosted.ai'
       );
       expect(newAdmin.addedBy).toBe('system');
+    });
+
+    it('should silently reject emails with subdomain tricks', () => {
+      const result = addAdmin('attacker@hosted.ai.evil.com', 'system');
+      expect(result).toBe(false);
     });
   });
 
   describe('removeAdmin', () => {
     it('should remove admin successfully', () => {
-      const result = removeAdmin('admin@example.com');
+      const result = removeAdmin('admin@hosted.ai');
       expect(result).toBe(true);
       expect(fs.writeFileSync).toHaveBeenCalled();
     });
 
     it('should return false for non-existent admins', () => {
-      const result = removeAdmin('notfound@example.com');
+      const result = removeAdmin('notfound@hosted.ai');
       expect(result).toBe(false);
     });
 
     it('should be case-insensitive', () => {
-      const result = removeAdmin('ADMIN@EXAMPLE.COM');
+      const result = removeAdmin('ADMIN@HOSTED.AI');
       expect(result).toBe(true);
     });
 
-    it('should remove admin from alternate domain', () => {
-      const result = removeAdmin('admin@testcompany.com');
+    it('should remove admin from packet.ai domain', () => {
+      const result = removeAdmin('admin@packet.ai');
       expect(result).toBe(true);
     });
   });
@@ -360,30 +375,53 @@ describe('Admin Authentication Module', () => {
   });
 
   describe('Domain Validation Security', () => {
-    it('should allow all domains when ADMIN_EMAIL_DOMAINS is not set', () => {
-      // ADMIN_EMAIL_DOMAINS is read at module load time (not set = all allowed)
+    it('should only accept hosted.ai and packet.ai domains', () => {
       vi.mocked(fs.writeFileSync).mockClear();
+
+      const validDomains = [
+        'admin@hosted.ai',
+        'test@packet.ai',
+        'admin+tag@hosted.ai',
+      ];
+
+      const invalidDomains = [
+        'admin@example.com',
+        'admin@hosted.ai.evil.com',
+        'admin@hostedai.com',
+        'admin@packet-ai.com',
+        'admin@hosted.com',
+      ];
+
+      // Mock to return data without the new email so addAdmin thinks it doesn't exist
       vi.mocked(fs.readFileSync).mockImplementation(() =>
         JSON.stringify({ admins: [] })
       );
 
-      expect(addAdmin('admin@anydomain.com', 'system')).toBe(true);
+      validDomains.forEach(email => {
+        vi.mocked(fs.writeFileSync).mockClear();
+        expect(addAdmin(email, 'system')).toBe(true);
+      });
 
-      // Restore
+      invalidDomains.forEach(email => {
+        vi.mocked(fs.writeFileSync).mockClear();
+        expect(addAdmin(email, 'system')).toBe(false);
+      });
+
+      // Restore original mock
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockAdminsData));
     });
 
-    it('should handle case variations', () => {
+    it('should handle case variations in domain validation', () => {
       vi.mocked(fs.writeFileSync).mockClear();
       vi.mocked(fs.readFileSync).mockImplementation(() =>
         JSON.stringify({ admins: [] })
       );
 
-      expect(addAdmin('admin@EXAMPLE.COM', 'system')).toBe(true);
+      expect(addAdmin('admin@HOSTED.AI', 'system')).toBe(true);
       vi.mocked(fs.writeFileSync).mockClear();
-      expect(addAdmin('admin@TestCompany.Com', 'system')).toBe(true);
+      expect(addAdmin('admin@Packet.Ai', 'system')).toBe(true);
 
-      // Restore
+      // Restore original mock
       vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify(mockAdminsData));
     });
   });
@@ -408,14 +446,15 @@ describe('Admin Authentication Module', () => {
     });
 
     it('should handle very long email addresses', () => {
-      const longEmail = 'a'.repeat(100) + '@example.com';
+      const longEmail = 'a'.repeat(100) + '@hosted.ai';
       const token = generateAdminToken(longEmail);
       const decoded = jwt.verify(token, TEST_SECRET) as any;
       expect(decoded.email).toBe(longEmail.toLowerCase());
     });
 
-    it('should handle empty string email for isAdmin', () => {
+    it('should handle empty string email', () => {
       expect(isAdmin('')).toBe(false);
+      expect(addAdmin('', 'system')).toBe(false);
     });
 
     it('should differentiate between login and session tokens', () => {

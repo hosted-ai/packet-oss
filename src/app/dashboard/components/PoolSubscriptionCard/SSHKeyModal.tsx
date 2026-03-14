@@ -92,6 +92,7 @@ export function SSHKeyModal({
         throw new Error(data.error || "Failed to inject SSH key");
       }
 
+      import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.SSH_KEY_ADDED)).catch(() => {});
       setSuccess(`SSH key "${keyName}" added! You can now connect without a password.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to inject SSH key");
@@ -151,6 +152,7 @@ export function SSHKeyModal({
         throw new Error(injectData.error || "Failed to inject SSH key");
       }
 
+      import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.SSH_KEY_ADDED)).catch(() => {});
       setSuccess("SSH key added! You can now connect without a password.");
       setShowNewKeyForm(false);
       setNewKeyName("");

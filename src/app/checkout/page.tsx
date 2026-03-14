@@ -4,6 +4,8 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import { getBrandName } from "@/lib/branding";
+
 interface GpuProduct {
   id: string;
   name: string;
@@ -41,6 +43,7 @@ function CheckoutContent() {
     code: string;
     name: string;
     creditCents: number;
+    minTopupCents: number | null;
   } | null>(null);
   const [voucherError, setVoucherError] = useState<string | null>(null);
 
@@ -96,6 +99,7 @@ function CheckoutContent() {
       const result = await res.json();
 
       if (result.success && result.voucher) {
+        import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.VOUCHER_REDEEMED)).catch(() => {});
         setValidatedVoucher(result.voucher);
         setVoucherError(null);
       } else {
@@ -152,6 +156,7 @@ function CheckoutContent() {
       }
 
       if (data.url) {
+        import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.DEPOSIT_STARTED, { revenue: getDepositAmount() })).catch(() => {});
         window.location.href = data.url;
       }
     } catch (err) {
@@ -164,10 +169,14 @@ function CheckoutContent() {
   const getDepositAmount = () => {
     const baseDeposit = 50;
 
-    // If voucher is validated, subtract from deposit
     if (validatedVoucher) {
+      // If voucher requires a minimum deposit, use the higher of base or minimum
+      const minDeposit = validatedVoucher.minTopupCents
+        ? validatedVoucher.minTopupCents / 100
+        : baseDeposit;
+      const deposit = Math.max(baseDeposit, minDeposit);
       const voucherAmount = validatedVoucher.creditCents / 100;
-      return Math.max(0, baseDeposit - voucherAmount);
+      return Math.max(0, deposit - voucherAmount);
     }
 
     return baseDeposit;
@@ -179,7 +188,7 @@ function CheckoutContent() {
         <Link href="/" className="inline-flex items-center justify-center gap-2 mb-6">
           <Image
             src="/packet-logo.png"
-            alt="GPU Cloud"
+            alt={getBrandName()}
             width={180}
             height={64}
             className="h-12 w-auto"
@@ -357,6 +366,11 @@ function CheckoutContent() {
                         ${(validatedVoucher.creditCents / 100).toFixed(0)} credit applied
                         {getDepositAmount() === 0 && " - No payment required!"}
                       </p>
+                      {validatedVoucher.minTopupCents && (
+                        <p className="text-amber-600 text-xs mt-1">
+                          Requires a minimum ${(validatedVoucher.minTopupCents / 100).toFixed(0)} deposit
+                        </p>
+                      )}
                     </div>
                   )}
                 </>

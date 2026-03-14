@@ -7,6 +7,7 @@
 import { sendEmail } from "../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButton, emailWarningBox, emailDangerBox, emailMuted, emailSignoff, plainTextFooter } from "../utils";
 import { loadTemplate } from "../template-loader";
+import { getBrandName, getSupportEmail } from "@/lib/branding";
 
 interface BudgetAlertParams {
   to: string;
@@ -96,7 +97,7 @@ export async function sendBudgetAlertEmail(params: BudgetAlertParams): Promise<v
     ${emailSignoff()}
   `;
 
-  const subject = `${alertTitle}`;
+  const subject = `${getBrandName()} ${alertTitle}`;
   const fallbackHtml = emailLayout({ preheader: `${alertTitle} — ${currentSpend} of ${limit}`, body });
   const fallbackText = `${alertTitle}
 
@@ -113,7 +114,7 @@ Manage your budget settings: ${dashboardUrl}
 
 You can adjust your budget limits, alert thresholds, or enable/disable auto-shutdown from your dashboard.
 
-The ${process.env.NEXT_PUBLIC_BRAND_NAME || "GPU Cloud"} Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(
@@ -176,7 +177,7 @@ export async function sendAutoShutdownNotificationEmail(params: {
     ${emailSignoff()}
   `;
 
-  const subject = `GPU instances stopped - ${limitTypeLabel} budget threshold reached`;
+  const subject = `${getBrandName()}: GPU instances stopped - ${limitTypeLabel} budget threshold reached`;
   const fallbackHtml = emailLayout({ preheader: `${stoppedInstances.length} instance${stoppedInstances.length > 1 ? "s" : ""} stopped — budget threshold reached`, body });
   const fallbackText = `Instances Auto-Shutdown
 
@@ -194,7 +195,7 @@ To restart your instances, either increase your budget limit or wait for the nex
 
 Manage your budget settings: ${dashboardUrl}
 
-The ${process.env.NEXT_PUBLIC_BRAND_NAME || "GPU Cloud"} Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(
@@ -251,14 +252,14 @@ export async function sendNegativeBalanceShutdownEmail(params: {
       </table>
     </div>
     ${emailDangerBox(`<p style="margin: 0; color: #991b1b; font-size: 14px;">
-      <strong>Important:</strong> Any data stored on deleted volumes has been permanently removed. To continue using the platform, please add funds to your wallet.
+      <strong>Important:</strong> Any data stored on deleted volumes has been permanently removed. To continue using ${getBrandName()}, please add funds to your wallet.
     </p>`)}
     ${emailButton("Add Funds to Wallet", dashboardUrl)}
-    ${emailMuted(`If you believe this was an error, please contact support at ${process.env.SUPPORT_EMAIL || "support@example.com"}`)}
+    ${emailMuted(`If you believe this was an error, please contact support at ${getSupportEmail()}`)}
     ${emailSignoff()}
   `;
 
-  const subject = "Account resources terminated - Negative balance";
+  const subject = `${getBrandName()}: Account resources terminated - Negative balance`;
   const fallbackHtml = emailLayout({ preheader: `Account balance negative — ${podsTerminated} pod${podsTerminated !== 1 ? "s" : ""} terminated`, body });
   const fallbackText = `Account Resources Terminated
 
@@ -270,13 +271,13 @@ Balance Owed: ${balanceOwed}
 ${podsTerminated > 0 ? `GPU Pods Terminated: ${podsTerminated}` : ""}
 ${volumesDeleted > 0 ? `Storage Volumes Deleted: ${volumesDeleted}` : ""}
 
-Important: Any data stored on deleted volumes has been permanently removed. To continue using the platform, please add funds to your wallet.
+Important: Any data stored on deleted volumes has been permanently removed. To continue using ${getBrandName()}, please add funds to your wallet.
 
 Add funds: ${dashboardUrl}
 
-If you believe this was an error, please contact support at ${process.env.SUPPORT_EMAIL || "support@example.com"}
+If you believe this was an error, please contact support at ${getSupportEmail()}
 
-The ${process.env.NEXT_PUBLIC_BRAND_NAME || "GPU Cloud"} Team
+The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(

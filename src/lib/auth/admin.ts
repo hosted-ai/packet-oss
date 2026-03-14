@@ -1,28 +1,18 @@
 import fs from "fs";
 import path from "path";
 import jwt from "jsonwebtoken";
-import { scryptSync, randomBytes, timingSafeEqual } from "crypto";
+import type { TenantConfig } from '@/lib/tenant/types';
+import { isOSS } from '@/lib/edition';
+import { getSecret } from './secrets';
 
 const ADMINS_FILE = path.join(process.cwd(), "data", "admins.json");
 
-// Configurable admin domains via env (defaults to allowing all domains)
-const ALLOWED_ADMIN_DOMAINS = process.env.ADMIN_EMAIL_DOMAINS
-  ? process.env.ADMIN_EMAIL_DOMAINS.split(",").map((d) => d.trim().toLowerCase())
-  : null; // null = all domains allowed
-
 function getJwtSecret(): string {
-  const secret = process.env.ADMIN_JWT_SECRET;
-  if (!secret) {
-    throw new Error(
-      "ADMIN_JWT_SECRET is not configured. Run the setup wizard at /admin or set the environment variable."
-    );
-  }
-  return secret;
+  return getSecret("ADMIN_JWT_SECRET");
 }
 
 export interface Admin {
   email: string;
-  passwordHash?: string;
   addedAt: string;
   addedBy: string;
 }
@@ -31,12 +21,24 @@ interface AdminsData {
   admins: Admin[];
 }
 
+function ensureAdminsFile(): void {
+  const dir = path.dirname(ADMINS_FILE);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  if (!fs.existsSync(ADMINS_FILE)) {
+    fs.writeFileSync(ADMINS_FILE, JSON.stringify({ admins: [] }, null, 2));
+  }
+}
+
 function readAdmins(): AdminsData {
   try {
+    ensureAdminsFile();
     const data = fs.readFileSync(ADMINS_FILE, "utf-8");
     const parsed = JSON.parse(data);
     return parsed;
-  } catch {
+  } catch (error) {
+    console.error(`Failed to read admins file: ${error}`);
     return { admins: [] };
   }
 }
@@ -54,80 +56,66 @@ export function isAdmin(email: string): boolean {
   return admins.some((a) => a.email.toLowerCase() === email.toLowerCase());
 }
 
+// Only allow admins from these domains (OSS defaults to * = any domain)
+const ALLOWED_ADMIN_DOMAINS = (
+  process.env.ADMIN_ALLOWED_DOMAINS || (isOSS() ? "*" : "hosted.ai,packet.ai")
+).split(",").map(d => d.trim());
+
 function isAllowedAdminDomain(email: string): boolean {
-  if (!ALLOWED_ADMIN_DOMAINS) return true; // All domains allowed
+  if (ALLOWED_ADMIN_DOMAINS.includes("*")) return true;
   const domain = email.toLowerCase().split("@")[1];
   return ALLOWED_ADMIN_DOMAINS.includes(domain);
 }
 
-// Password hashing using scrypt with strong parameters (no external dependency)
-function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString("hex");
-  return `${salt}:${hash}`;
+/**
+ * Get allowed admin domains for a tenant.
+ * For the default tenant (or when no tenant is provided),
+ * returns the default allowed domains.
+ */
+export function getAllowedAdminDomains(tenantConfig?: TenantConfig): string[] {
+  if (!tenantConfig || tenantConfig.isDefault) {
+    return ALLOWED_ADMIN_DOMAINS;
+  }
+  return tenantConfig.adminDomains;
 }
 
-function verifyPassword(password: string, stored: string): boolean {
-  const [salt, hash] = stored.split(":");
-  if (!salt || !hash) return false;
-  const hashBuffer = Buffer.from(hash, "hex");
-  const derivedKey = scryptSync(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 });
-  return timingSafeEqual(hashBuffer, derivedKey);
+export function isAllowedAdminDomainForTenant(email: string, tenantConfig?: TenantConfig): boolean {
+  const domain = email.toLowerCase().split("@")[1];
+  const allowed = getAllowedAdminDomains(tenantConfig);
+  return allowed.includes(domain);
 }
 
 /**
- * Add an admin with password (for setup wizard).
+ * Bootstrap the first admin in OSS mode. If no admins exist, the first
+ * person to request a login link is automatically added as admin.
+ * Returns true if bootstrapped, false if admins already exist or not OSS.
  */
-export async function addAdminWithPassword(
-  email: string,
-  password: string,
-  addedBy: string
-): Promise<boolean> {
+export function bootstrapFirstAdmin(email: string): boolean {
+  if (!isOSS()) return false;
   const data = readAdmins();
-
-  if (data.admins.some((a) => a.email.toLowerCase() === email.toLowerCase())) {
-    return false; // Already exists
-  }
+  if (data.admins.length > 0) return false;
+  if (!isAllowedAdminDomain(email)) return false;
 
   data.admins.push({
     email: email.toLowerCase(),
-    passwordHash: hashPassword(password),
     addedAt: new Date().toISOString(),
-    addedBy,
+    addedBy: "system-bootstrap",
   });
-
   writeAdmins(data);
+  console.log(`[OSS Bootstrap] First admin created: ${email}`);
   return true;
-}
-
-/**
- * Verify admin password for login.
- */
-export function verifyAdminPassword(email: string, password: string): boolean {
-  const admins = getAdmins();
-  const admin = admins.find((a) => a.email.toLowerCase() === email.toLowerCase());
-  if (!admin || !admin.passwordHash) return false;
-  return verifyPassword(password, admin.passwordHash);
-}
-
-/**
- * Check if an admin has a password set (for UI to decide which login form to show).
- */
-export function adminHasPassword(email: string): boolean {
-  const admins = getAdmins();
-  const admin = admins.find((a) => a.email.toLowerCase() === email.toLowerCase());
-  return !!(admin && admin.passwordHash);
 }
 
 export function addAdmin(email: string, addedBy: string): boolean {
   const data = readAdmins();
 
-  if (ALLOWED_ADMIN_DOMAINS && !isAllowedAdminDomain(email)) {
+  // Silently reject emails from non-allowed domains
+  if (!isAllowedAdminDomain(email)) {
     return false;
   }
 
   if (data.admins.some((a) => a.email.toLowerCase() === email.toLowerCase())) {
-    return false;
+    return false; // Already exists
   }
 
   data.admins.push({
@@ -149,7 +137,7 @@ export function removeAdmin(email: string): boolean {
   );
 
   if (data.admins.length === initialLength) {
-    return false;
+    return false; // Not found
   }
 
   writeAdmins(data);
@@ -180,7 +168,7 @@ export function generateSessionToken(email: string): string {
   return jwt.sign(
     { email: email.toLowerCase(), type: "admin-session" },
     getJwtSecret(),
-    { expiresIn: "4h" }
+    { expiresIn: "1h" }
   );
 }
 

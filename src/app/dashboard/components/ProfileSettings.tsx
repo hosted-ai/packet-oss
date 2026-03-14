@@ -69,6 +69,7 @@ export function ProfileSettings({ token }: ProfileSettingsProps) {
 
       const data = await res.json();
       if (data.success) {
+        import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.PROFILE_UPDATED)).catch(() => {});
         setProfile(data.profile);
         setMessage({ type: "success", text: "Profile updated successfully!" });
       } else {

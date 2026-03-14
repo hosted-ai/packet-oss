@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { isPro } from '@/lib/edition';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -8,24 +9,46 @@ const CORS_HEADERS = {
 };
 
 /** GPU catalog for display names. */
-const GPU_TYPES: { gpuType: string; name: string }[] = [
-  { gpuType: 'rtx-pro-6000', name: 'RTX PRO 6000' },
-  { gpuType: 'b200', name: 'NVIDIA B200' },
-  { gpuType: 'h200', name: 'NVIDIA H200' },
-  { gpuType: 'h100', name: 'NVIDIA H100' },
-];
+const GPU_NAMES: Record<string, string> = {
+  'rtx-pro-6000': 'RTX PRO 6000',
+  'b200': 'NVIDIA B200',
+  'h200': 'NVIDIA H200',
+  'h100': 'NVIDIA H100',
+};
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // In Pro edition with multi-tenancy, resolve tenant GPU types
+    let allowedGpuTypes: string[] = Object.keys(GPU_NAMES);
+    let statusPageEnabled = true;
+
+    if (isPro()) {
+      try {
+        const { getTenantFromRequest } = await import('@/lib/tenant');
+        const tenant = await getTenantFromRequest(request);
+        statusPageEnabled = tenant.statusPageEnabled;
+        allowedGpuTypes = tenant.allowedGpuTypes;
+      } catch {
+        // Fall through to default behavior
+      }
+    }
+
+    if (!statusPageEnabled) {
+      return NextResponse.json(
+        { error: 'Status page is not enabled for this tenant' },
+        { status: 404, headers: CORS_HEADERS },
+      );
+    }
+
     // Build per-GPU statuses. All operational for now;
     // real monitoring integration will replace this later.
-    const gpus = GPU_TYPES.map(({ gpuType, name }) => ({
+    const gpus = allowedGpuTypes.map((gpuType) => ({
       gpuType,
-      name,
+      name: GPU_NAMES[gpuType] ?? gpuType,
       status: 'operational' as const,
     }));
 

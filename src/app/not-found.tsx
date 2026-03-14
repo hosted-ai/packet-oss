@@ -74,7 +74,7 @@ export default function NotFound() {
         <Link href="/" className="inline-block mb-8 opacity-60 hover:opacity-100 transition-opacity">
           <Image
             src="/packet-logo.png"
-            alt="GPU Cloud"
+            alt="Logo"
             width={120}
             height={40}
             className="h-8 w-auto invert"

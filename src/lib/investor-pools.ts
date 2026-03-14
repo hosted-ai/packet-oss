@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 
 export interface ResolvedInvestorPools {
   poolIds: number[];
+  hasPixelFactory: boolean;
 }
 
 /**
@@ -22,8 +23,10 @@ export async function resolveInvestorPoolIds(email: string): Promise<ResolvedInv
   const assignedNodeIds = await getInvestorAssignedNodes(email);
 
   if (assignedNodeIds.length === 0) {
-    return { poolIds: [] };
+    return { poolIds: [], hasPixelFactory: false };
   }
+
+  const hasPixelFactory = assignedNodeIds.includes("pixel-factory");
 
   // Split IDs: Prisma ProviderNode IDs vs GPUaaS synthetic IDs
   const prismaNodeIds: string[] = [];
@@ -32,6 +35,7 @@ export async function resolveInvestorPoolIds(email: string): Promise<ResolvedInv
   const directPoolRefs: Array<{ poolIds: number[] }> = [];
 
   for (const nid of assignedNodeIds) {
+    if (nid === "pixel-factory") continue;
     const poolsMatch = nid.match(/^pools:(.+)$/);
     if (poolsMatch) {
       const pids = poolsMatch[1].split(",").map(Number).filter((n) => !isNaN(n) && n > 0);
@@ -110,5 +114,5 @@ export async function resolveInvestorPoolIds(email: string): Promise<ResolvedInv
     if (n.gpuaasPoolId != null) allPoolIds.add(n.gpuaasPoolId);
   }
 
-  return { poolIds: [...allPoolIds] };
+  return { poolIds: [...allPoolIds], hasPixelFactory };
 }

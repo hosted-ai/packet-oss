@@ -1,7 +1,7 @@
 /**
  * Midnight Status Report Email
  *
- * Sends a daily KPI snapshot to STATUS_EMAIL_TO at midnight.
+ * Sends a daily KPI snapshot to partners@hosted.ai at midnight.
  * Compares today's metrics against the same day last week,
  * and includes 7-day trend history for all key metrics.
  */
@@ -14,6 +14,7 @@ import {
   emailSignoff,
   plainTextFooter,
 } from "../utils";
+import { getBrandName, getAppUrl } from "@/lib/branding";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,9 @@ export interface DailySnapshot {
   walletBalanceCents: number; // aggregate wallet balance
   activeProviders: number;
   activeNodes: number;
+  tokenInferenceRequests: number;
+  tokenInputTokens: number;
+  tokenOutputTokens: number;
   voucherRedemptions: number;
   referralClaims: number;
 }
@@ -110,7 +114,7 @@ export async function sendMidnightStatusEmail(params: MidnightStatusEmailParams)
   const todayLabel = dayLabel(today.date);
   const lwLabel = dayLabel(lw.date);
 
-  const subject = `GPU Cloud Daily Status \u2014 ${todayLabel} \u2014 ${fmtNum(today.newSignups)} signups, ${fmtNum(today.activePods)} pods, ${fmtCents(today.walletRevenueCents)} deposited`;
+  const subject = `${getBrandName()} Daily Status \u2014 ${todayLabel} \u2014 ${fmtNum(today.newSignups)} signups, ${fmtNum(today.activePods)} pods, ${fmtCents(today.walletRevenueCents)} deposited`;
 
   // Extract 7-day sparkline data
   const signupSpark = sparkline(weekHistory.map((d) => d.newSignups));
@@ -120,6 +124,7 @@ export async function sendMidnightStatusEmail(params: MidnightStatusEmailParams)
   const customerSpark = sparkline(weekHistory.map((d) => d.totalCustomers));
   const balanceSpark = sparkline(weekHistory.map((d) => d.walletBalanceCents));
   const nodeSpark = sparkline(weekHistory.map((d) => d.activeNodes));
+  const tokenSpark = sparkline(weekHistory.map((d) => d.tokenInferenceRequests));
   const voucherSpark = sparkline(weekHistory.map((d) => d.voucherRedemptions));
   const referralSpark = sparkline(weekHistory.map((d) => d.referralClaims));
 
@@ -156,6 +161,10 @@ export async function sendMidnightStatusEmail(params: MidnightStatusEmailParams)
         ${kpiRow("Active Pods", fmtNum(today.activePods), fmtNum(lw.activePods), pct(today.activePods, lw.activePods), pctColor(today.activePods, lw.activePods), podSpark)}
         ${kpiRow("Active GPUs", fmtNum(today.activeGPUs), fmtNum(lw.activeGPUs), pct(today.activeGPUs, lw.activeGPUs), pctColor(today.activeGPUs, lw.activeGPUs), gpuSpark)}
         ${kpiRow("Active Nodes", fmtNum(today.activeNodes), fmtNum(lw.activeNodes), pct(today.activeNodes, lw.activeNodes), pctColor(today.activeNodes, lw.activeNodes), nodeSpark)}
+
+        <!-- Token Factory -->
+        <tr><td colspan="5" style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #1a4fff; text-transform: uppercase; letter-spacing: 1px; background-color: #f7f8fb;">Token Factory</td></tr>
+        ${kpiRow("Inference Requests", fmtNum(today.tokenInferenceRequests), fmtNum(lw.tokenInferenceRequests), pct(today.tokenInferenceRequests, lw.tokenInferenceRequests), pctColor(today.tokenInferenceRequests, lw.tokenInferenceRequests), tokenSpark)}
 
         <!-- Marketing -->
         <tr><td colspan="5" style="padding: 8px 12px; font-size: 11px; font-weight: 700; color: #1a4fff; text-transform: uppercase; letter-spacing: 1px; background-color: #f7f8fb;">Marketing</td></tr>
@@ -200,7 +209,7 @@ export async function sendMidnightStatusEmail(params: MidnightStatusEmailParams)
     </div>
 
     ${emailDivider()}
-    ${emailText('<a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/admin?tab=business" style="color: #1a4fff;">View full dashboard \u2192</a>')}
+    ${emailText(`<a href="${getAppUrl()}/admin?tab=business" style="color: #1a4fff;">View full dashboard \u2192</a>`)}
     ${emailSignoff()}
   `;
 
@@ -227,7 +236,7 @@ function buildPlainText(params: MidnightStatusEmailParams): string {
   const { today, lastWeekSameDay: lw, weekHistory, mrrCents, previousMrrCents } = params;
 
   const lines: string[] = [
-    "PACKET.AI DAILY STATUS REPORT",
+    `${getBrandName().toUpperCase()} DAILY STATUS REPORT`,
     `${dayLabel(today.date)} vs ${dayLabel(lw.date)} (same day last week)`,
     "",
     "=== GROWTH ===",
@@ -245,6 +254,9 @@ function buildPlainText(params: MidnightStatusEmailParams): string {
     `Active GPUs:      ${fmtNum(today.activeGPUs)} (was ${fmtNum(lw.activeGPUs)}, ${pct(today.activeGPUs, lw.activeGPUs)})`,
     `Active Nodes:     ${fmtNum(today.activeNodes)} (was ${fmtNum(lw.activeNodes)}, ${pct(today.activeNodes, lw.activeNodes)})`,
     "",
+    "=== TOKEN FACTORY ===",
+    `Inference Reqs:   ${fmtNum(today.tokenInferenceRequests)} (was ${fmtNum(lw.tokenInferenceRequests)}, ${pct(today.tokenInferenceRequests, lw.tokenInferenceRequests)})`,
+    "",
     "=== MARKETING ===",
     `Voucher Redeemed: ${fmtNum(today.voucherRedemptions)} (was ${fmtNum(lw.voucherRedemptions)}, ${pct(today.voucherRedemptions, lw.voucherRedemptions)})`,
     `Referral Claims:  ${fmtNum(today.referralClaims)} (was ${fmtNum(lw.referralClaims)}, ${pct(today.referralClaims, lw.referralClaims)})`,
@@ -260,7 +272,7 @@ function buildPlainText(params: MidnightStatusEmailParams): string {
     );
   }
 
-  lines.push("", `View full dashboard: ${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/admin?tab=business`);
+  lines.push("", `View full dashboard: ${getAppUrl()}/admin?tab=business`);
   lines.push(plainTextFooter());
 
   return lines.join("\n");

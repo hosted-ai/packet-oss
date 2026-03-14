@@ -60,6 +60,7 @@ export {
   stopInstance,
   restartInstance,
   deleteInstance,
+  getInstanceCredentials,
   getTeamInstances,
   startVNCSession,
   stopVNCSession,
@@ -88,8 +89,10 @@ export {
   getAllPoolsWithRegions,
   getConnectionInfo,
   podAction,
+  restartPoolSubscription,
   reimagePoolSubscription,
   getPoolSubscriptionStoragePricing,
+  addStorageToPoolSubscription,
   // Shared volume management
   createSharedVolume,
   getSharedVolumes,
@@ -100,6 +103,7 @@ export {
 } from "./pools";
 
 export type {
+  AddStorageToSubscriptionParams,
   StoragePricingInfo,
   SelectOptimalPoolParams,
   SelectOptimalPoolResult,
@@ -141,3 +145,23 @@ export type {
   ResourcePolicyRegion,
   UpdateResourcePolicyInput,
 } from "./policies";
+
+// Re-export default policies functions
+export {
+  getDefaultPolicies,
+  getDefaultPoliciesSync,
+  clearDefaultPoliciesCache,
+  initializeDefaultPolicies,
+  DEFAULT_POLICIES,
+  FALLBACK_POLICIES,
+} from "./default-policies";
+
+// Re-export default roles functions
+export {
+  getRoles,
+  getRolesSync,
+  clearRolesCache,
+  initializeRoles,
+  ROLES,
+  FALLBACK_ROLES,
+} from "./default-roles";

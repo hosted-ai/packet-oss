@@ -81,7 +81,7 @@ Access Ray cluster monitoring dashboard.
 
 The Service Exposure feature is integrated into your GPU instance cards:
 
-1. **Navigate** to your dashboard
+1. **Navigate** to https://packet.ai/dashboard
 2. **Find** your active GPU instance in the list
 3. **Click** on the GPU card to expand it
 4. **Scroll** down to the "Exposed Services" section (below SSH connection info, above HuggingFace deployments)
@@ -378,7 +378,7 @@ For developers building integrations or automation, the Service Exposure feature
 All endpoints require JWT authentication:
 
 ```bash
-curl https://YOUR_DOMAIN/api/services \
+curl https://packet.ai/api/services \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
 
@@ -739,7 +739,7 @@ If you encounter issues or have questions:
 - Check the [Troubleshooting](#troubleshooting) section above
 - Review application logs in your pod
 - Contact support via the dashboard
-- Report bugs via the project's issue tracker
+- Report bugs at https://github.com/packet-ai/support
 
 ---
 

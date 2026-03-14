@@ -5,6 +5,7 @@ import { resolveAllTeamsForEmail } from "@/lib/customer-resolver";
 import {
   getTeamInstances,
   createInstance,
+  getInstanceCredentials,
   subscribeToPool,
   getPoolSubscriptions,
   getAllPools,
@@ -13,6 +14,9 @@ import {
   getPoolPersistentStorageBlocks,
   selectOptimalPool,
   subscribeWithFallback,
+  getStorageBlocks,
+  getCompatibleImages,
+  getInstanceTypes,
   Instance,
   PoolSubscription,
 } from "@/lib/hostedai";
@@ -101,8 +105,9 @@ export async function GET(request: NextRequest) {
 
     console.log(`[Instances GET] Consolidated: ${instances.length} instances, ${poolSubscriptions.length} pool subscriptions across ${resolved.allTeamIds.length} team(s)`);
 
-    // Fetch pod metadata for all subscriptions
+    // Fetch pod metadata for all subscriptions AND unified instances
     const subscriptionIds = poolSubscriptions.map(s => String(s.id));
+    const instanceIds = instances.map(i => i.id);
     let podMetadata: Record<string, { displayName: string | null; notes: string | null; hourlyRate?: number; startupScriptStatus?: string | null; stripeSubscriptionId?: string; billingType?: string }> = {};
     let hfDeployments: Record<string, {
       id: string;
@@ -117,23 +122,32 @@ export async function GET(request: NextRequest) {
       webUiPort?: number | null;
     }> = {};
 
-    if (subscriptionIds.length > 0) {
+    if (subscriptionIds.length > 0 || instanceIds.length > 0) {
       try {
+        // Fetch metadata by subscriptionId (legacy) AND instanceId (HAI 2.2)
         const metadata = await prisma.podMetadata.findMany({
-          where: { subscriptionId: { in: subscriptionIds } },
+          where: {
+            OR: [
+              ...(subscriptionIds.length > 0 ? [{ subscriptionId: { in: subscriptionIds } }] : []),
+              ...(instanceIds.length > 0 ? [{ instanceId: { in: instanceIds } }] : []),
+            ],
+          },
         });
         podMetadata = metadata.reduce((acc, m) => {
-          acc[m.subscriptionId] = {
+          const metaValue = {
             displayName: m.displayName,
             notes: m.notes,
-            // Include hourly rate from billing data (in dollars, e.g., 0.66)
             hourlyRate: m.hourlyRateCents ? m.hourlyRateCents / 100 : undefined,
-            // Include startup script status for dashboard state display
             startupScriptStatus: m.startupScriptStatus,
-            // Include billing fields so frontend can match subscriptions to pods
             stripeSubscriptionId: m.stripeSubscriptionId || undefined,
             billingType: m.billingType || undefined,
           };
+          // Index by subscriptionId for legacy pool subscriptions
+          acc[m.subscriptionId] = metaValue;
+          // Also index by instanceId for unified instances (HAI 2.2)
+          if (m.instanceId) {
+            acc[m.instanceId] = metaValue;
+          }
           return acc;
         }, {} as Record<string, { displayName: string | null; notes: string | null; hourlyRate?: number; startupScriptStatus?: string | null; stripeSubscriptionId?: string; billingType?: string }>);
 
@@ -370,7 +384,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // GPUaaS pool-based creation
+    // ============================================================
+    // HAI 2.2 UNIFIED INSTANCE CREATION
+    // When the GpuProduct has a serviceId, use the unified create-instance API
+    // instead of the legacy pool subscription flow.
+    // ============================================================
+    if (product_id) {
+      const gpuProduct = await prisma.gpuProduct.findUnique({
+        where: { id: product_id },
+      });
+
+      if (gpuProduct?.serviceId) {
+        return await handleUnifiedInstanceCreate({
+          request,
+          body,
+          gpuProduct,
+          teamId,
+          customer,
+          payload,
+          stripe: getStripe(),
+        });
+      }
+    }
+
+    // GPUaaS pool-based creation (legacy — products without serviceId)
     if (pool_id) {
       const gpuCount = vgpus || 1;
 
@@ -1238,3 +1275,439 @@ export async function POST(request: NextRequest) {
 // Metrics collector and startup script runner are imported from shared modules
 import { runStartupScript } from "@/lib/startup-script-runner";
 import { WORKSPACE_SETUP_SCRIPT } from "@/lib/startup-scripts";
+
+// ============================================================
+// HAI 2.2 Unified Instance Creation Handler
+// Uses create-instance API instead of pool subscription
+// ============================================================
+
+interface UnifiedCreateParams {
+  request: NextRequest;
+  body: Record<string, unknown>;
+  gpuProduct: {
+    id: string;
+    name: string;
+    serviceId: string | null;
+    pricePerHourCents: number;
+    billingType: string;
+    stripePriceId: string | null;
+  };
+  teamId: string;
+  customer: Stripe.Customer;
+  payload: { email: string; customerId: string };
+  stripe: Stripe;
+}
+
+async function handleUnifiedInstanceCreate({
+  body,
+  gpuProduct,
+  teamId,
+  customer,
+  payload,
+  stripe,
+}: UnifiedCreateParams): Promise<NextResponse> {
+  const {
+    name,
+    instance_type_id,
+    image_uuid,
+    image_hash_id,
+    storage_block_id,
+    persistent_storage_block_id,
+    existing_shared_volume_id,
+    skip_auto_storage,
+    startup_script,
+    startup_script_preset_id,
+    billingType: requestedBillingType,
+    stripeSubscriptionId,
+  } = body as Record<string, string | number | boolean | undefined>;
+
+  const serviceId = gpuProduct.serviceId!;
+  const gpuCount = 1; // Unified instances are single-GPU
+
+  // DEPLOYMENT LOCK
+  const lockKey = "deploy_lock";
+  const lockTimestamp = customer.metadata?.[lockKey];
+  const now = Math.floor(Date.now() / 1000);
+
+  if (lockTimestamp) {
+    const lockTime = parseInt(lockTimestamp, 10);
+    if (now - lockTime < 60) {
+      return NextResponse.json(
+        { error: "Another GPU deployment is in progress. Please wait a moment." },
+        { status: 429 }
+      );
+    }
+  }
+
+  try {
+    await stripe.customers.update(payload.customerId, {
+      metadata: { ...customer.metadata, [lockKey]: now.toString() },
+    });
+  } catch (lockErr) {
+    console.error("[Billing] Failed to acquire lock:", lockErr);
+  }
+
+  const clearDeployLock = async () => {
+    try {
+      const fresh = await stripe.customers.retrieve(payload.customerId) as Stripe.Customer;
+      cacheCustomer(fresh).catch(() => {});
+      const meta = { ...fresh.metadata };
+      delete meta[lockKey];
+      const unlocked = await stripe.customers.update(payload.customerId, { metadata: meta });
+      cacheCustomer(unlocked as Stripe.Customer).catch(() => {});
+    } catch (e) {
+      console.error("[Billing] Failed to release lock:", e);
+    }
+  };
+
+  try {
+    // Resolve instance_type_id if not provided (auto-select from service)
+    let selectedInstanceType = instance_type_id as string | undefined;
+    if (!selectedInstanceType) {
+      const types = await getInstanceTypes(serviceId, teamId);
+      if (types.length > 0) {
+        // Pick the first available — service should have instance_type_locked
+        selectedInstanceType = types[0].id;
+        console.log(`[HAI 2.2] Auto-selected instance type: ${types[0].name} (${selectedInstanceType})`);
+      } else {
+        await clearDeployLock();
+        return NextResponse.json(
+          { error: "No compatible instance types available for this GPU" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Resolve image — use image_hash_id, image_uuid, or auto-select from service
+    let selectedImage = (image_hash_id || image_uuid) as string | undefined;
+    if (!selectedImage) {
+      const images = await getCompatibleImages(serviceId, teamId);
+      if (images.length > 0) {
+        selectedImage = images[0].id;
+        console.log(`[HAI 2.2] Auto-selected image: ${images[0].name} (${selectedImage})`);
+      } else {
+        await clearDeployLock();
+        return NextResponse.json(
+          { error: "No compatible images available for this GPU" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Resolve storage_block_id if not provided
+    let selectedStorage = storage_block_id as string | undefined;
+    if (!selectedStorage) {
+      const blocks = await getStorageBlocks();
+      // Filter for ephemeral-capable blocks
+      const ephemeral = blocks.filter(b => b.is_available !== false);
+      if (ephemeral.length > 0) {
+        selectedStorage = ephemeral[0].id;
+        console.log(`[HAI 2.2] Auto-selected storage: ${ephemeral[0].name} (${selectedStorage})`);
+      } else {
+        await clearDeployLock();
+        return NextResponse.json(
+          { error: "No storage blocks available" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Handle persistent storage (additional disks)
+    const additionalDisks: Array<{ storage_block_id: string; disk_position: number }> = [];
+
+    if (existing_shared_volume_id) {
+      // Existing shared volumes are attached via workspace_id in 2.2
+      console.log("[HAI 2.2] Attaching existing shared volume:", existing_shared_volume_id);
+    } else if (persistent_storage_block_id) {
+      additionalDisks.push({
+        storage_block_id: persistent_storage_block_id as string,
+        disk_position: 1,
+      });
+    } else if (!skip_auto_storage) {
+      // Auto-create workspace storage — find persistent storage blocks
+      try {
+        const existingVolumes = await getSharedVolumes(teamId);
+        if (existingVolumes.length === 0) {
+          const storageBlocks = await getStorageBlocks();
+          const persistent = storageBlocks.filter(b => b.shared_storage_usage !== false && b.is_available !== false);
+          const sorted = [...persistent].sort((a, b) => {
+            const aSize = a.size_gb || a.size_in_gb || 0;
+            const bSize = b.size_gb || b.size_in_gb || 0;
+            const aOk = aSize >= 100 ? 0 : 1;
+            const bOk = bSize >= 100 ? 0 : 1;
+            if (aOk !== bOk) return aOk - bOk;
+            return aSize - bSize;
+          });
+          if (sorted.length > 0) {
+            additionalDisks.push({
+              storage_block_id: sorted[0].id,
+              disk_position: 1,
+            });
+          }
+        }
+      } catch (autoStorageErr) {
+        console.error("[HAI 2.2] Auto-create workspace storage failed:", autoStorageErr);
+      }
+    }
+
+    // === MONTHLY BILLING FLOW ===
+    let resolvedBillingType = requestedBillingType as string | undefined;
+    let resolvedStripeSubId = stripeSubscriptionId as string | undefined;
+
+    if (!resolvedStripeSubId && gpuProduct.billingType === "monthly" && gpuProduct.stripePriceId) {
+      resolvedBillingType = "monthly";
+      const customerEmail = customer.email;
+      if (customerEmail) {
+        const allCustomers = await stripe.customers.list({ email: customerEmail, limit: 10 });
+        for (const sc of allCustomers.data) {
+          const subs = await stripe.subscriptions.list({ customer: sc.id, status: "active", limit: 20 });
+          for (const sub of subs.data) {
+            if (sub.items.data.some(item => item.price.id === gpuProduct.stripePriceId)) {
+              resolvedStripeSubId = sub.id;
+              break;
+            }
+          }
+          if (resolvedStripeSubId) break;
+        }
+      }
+      if (!resolvedStripeSubId) {
+        await clearDeployLock();
+        return NextResponse.json(
+          { error: "No active subscription found for this monthly product." },
+          { status: 400 }
+        );
+      }
+    }
+
+    const isMonthlyDeploy = resolvedBillingType === "monthly" && resolvedStripeSubId;
+
+    // === WALLET CHECK (hourly only) ===
+    const hourlyRateCents = gpuProduct.pricePerHourCents;
+    const prepaidMinutes = MINIMUM_BILLING_MINUTES;
+    const prepaidAmountCents = Math.round((prepaidMinutes / 60) * hourlyRateCents * gpuCount);
+    let deployTime = new Date();
+    let prepaidUntil: Date | null = null;
+
+    if (isMonthlyDeploy) {
+      // Validate Stripe subscription
+      const stripeSub = await stripe.subscriptions.retrieve(resolvedStripeSubId!);
+      if (stripeSub.status !== "active") {
+        await clearDeployLock();
+        return NextResponse.json(
+          { error: "Your subscription is not active." },
+          { status: 400 }
+        );
+      }
+      // Check entitlement: 1 GPU per subscription
+      const existing = await prisma.podMetadata.findFirst({
+        where: { stripeSubscriptionId: resolvedStripeSubId },
+      });
+      if (existing) {
+        // Check if pod actually running
+        let stillRunning = false;
+        try {
+          const instances = await getTeamInstances(teamId);
+          stillRunning = instances.some(i => i.id === existing.instanceId);
+        } catch {
+          stillRunning = true;
+        }
+        if (stillRunning) {
+          await clearDeployLock();
+          return NextResponse.json(
+            { error: "You already have a GPU deployed for this subscription. Terminate it first to redeploy." },
+            { status: 409 }
+          );
+        }
+        await prisma.podMetadata.delete({ where: { id: existing.id } });
+      }
+    } else {
+      // Hourly billing — check wallet and pre-charge
+      if (hourlyRateCents === 0) {
+        await clearDeployLock();
+        return NextResponse.json(
+          { error: "No valid pricing found." },
+          { status: 400 }
+        );
+      }
+
+      const walletBalance = await getWalletBalance(payload.customerId);
+      if (walletBalance.availableBalance < prepaidAmountCents) {
+        await clearDeployLock();
+        return NextResponse.json(
+          { error: `Insufficient wallet balance. Need $${(prepaidAmountCents / 100).toFixed(2)}, have $${(walletBalance.availableBalance / 100).toFixed(2)}.` },
+          { status: 402 }
+        );
+      }
+
+      deployTime = new Date();
+      prepaidUntil = new Date(deployTime.getTime() + prepaidMinutes * 60 * 1000);
+      const preDeployId = `predeploy_${payload.customerId}_${Date.now()}`;
+
+      const deductResult = await deductUsage(
+        payload.customerId,
+        (prepaidMinutes / 60) * gpuCount,
+        `GPU deploy: ${gpuProduct.name} @ $${(hourlyRateCents / 100).toFixed(2)}/hr`,
+        hourlyRateCents,
+        preDeployId
+      );
+
+      if (!deductResult.success) {
+        await clearDeployLock();
+        return NextResponse.json(
+          { error: "Failed to process payment. Please try again." },
+          { status: 402 }
+        );
+      }
+    }
+
+    // === DEPLOY via create-instance ===
+    console.log("[HAI 2.2] Creating instance:", {
+      name: name as string,
+      service_id: serviceId,
+      instance_type_id: selectedInstanceType,
+      image_hash_id: selectedImage,
+      storage_block_id: selectedStorage,
+      team_id: teamId,
+      additional_disks: additionalDisks.length > 0 ? additionalDisks : undefined,
+    });
+
+    let instance: Instance;
+    try {
+      instance = await createInstance({
+        name: name as string,
+        service_id: serviceId,
+        instance_type_id: selectedInstanceType,
+        image_hash_id: selectedImage,
+        storage_block_id: selectedStorage,
+        team_id: teamId,
+        additional_disks: additionalDisks.length > 0 ? additionalDisks : undefined,
+      });
+    } catch (deployError) {
+      if (!isMonthlyDeploy && prepaidAmountCents > 0) {
+        const errMsg = deployError instanceof Error ? deployError.message : "";
+        console.log(`[Billing] Deployment failed, refunding $${(prepaidAmountCents / 100).toFixed(2)}`);
+        await refundDeployment(
+          payload.customerId,
+          prepaidAmountCents,
+          `Refund: deployment failed - ${errMsg.slice(0, 100)}`
+        );
+      }
+      await clearDeployLock();
+      throw deployError;
+    }
+
+    await clearDeployLock();
+
+    const instanceId = instance.id;
+    const metricsToken = randomBytes(32).toString("hex");
+
+    // Save PodMetadata with instanceId
+    try {
+      await prisma.podMetadata.create({
+        data: {
+          subscriptionId: `instance-${instanceId}`, // Unique placeholder for legacy compat
+          instanceId,
+          stripeCustomerId: payload.customerId,
+          displayName: name as string,
+          deployTime,
+          prepaidUntil: isMonthlyDeploy ? null : prepaidUntil,
+          prepaidAmountCents: isMonthlyDeploy ? 0 : prepaidAmountCents,
+          poolId: null,
+          productId: gpuProduct.id,
+          hourlyRateCents: isMonthlyDeploy ? 0 : hourlyRateCents,
+          metricsToken,
+          startupScript: (startup_script as string) || null,
+          startupScriptStatus: "pending",
+          billingType: isMonthlyDeploy ? "monthly" : "hourly",
+          stripeSubscriptionId: resolvedStripeSubId || null,
+        },
+      });
+      console.log(`[HAI 2.2] Saved PodMetadata for instance ${instanceId}`);
+
+      // Install metrics collector and run startup script
+      installMetricsCollector(instanceId, teamId, metricsToken).catch((err) => {
+        console.error(`[Metrics] Failed to install for ${instanceId}:`, err);
+      });
+
+      const fullStartup = WORKSPACE_SETUP_SCRIPT + "\n" + ((startup_script as string) || "");
+      runStartupScript(instanceId, teamId, fullStartup, startup_script_preset_id as string | undefined).catch((err) => {
+        console.error(`[Startup] Failed for ${instanceId}:`, err);
+      });
+    } catch (metaErr) {
+      console.error("[HAI 2.2] Failed to save PodMetadata:", metaErr);
+    }
+
+    // Log wallet transaction (hourly only)
+    if (!isMonthlyDeploy && prepaidAmountCents > 0) {
+      await prisma.walletTransaction.create({
+        data: {
+          stripeCustomerId: payload.customerId,
+          teamId,
+          type: "gpu_deploy",
+          amountCents: prepaidAmountCents,
+          description: `GPU deploy: ${gpuProduct.name} @ $${(hourlyRateCents / 100).toFixed(2)}/hr`,
+          subscriptionId: instanceId,
+          gpuCount,
+          hourlyRateCents,
+          billingMinutes: prepaidMinutes,
+          syncCycleId: `deploy_${instanceId}`,
+        },
+      }).catch((e) => console.error("[Billing] Failed to log WalletTransaction:", e));
+    }
+
+    // Activity logging and email
+    const priorLaunch = await getFirstGpuLaunch(payload.customerId);
+    await logGPULaunched(payload.customerId, gpuProduct.name, gpuCount, name as string, instanceId);
+
+    sendOnboardingEvent({
+      type: "gpu.launched",
+      email: payload.email,
+      name: customer.name || customer.email?.split("@")[0] || "Unknown",
+      metadata: {
+        "Stripe Customer ID": payload.customerId,
+        "GPU Type": gpuProduct.name,
+        "Pod Name": name as string,
+        "GPU Count": gpuCount,
+        "Billing Type": isMonthlyDeploy ? "monthly" : "hourly",
+        "Instance ID": instanceId,
+        "First GPU": !priorLaunch ? "Yes" : "No",
+      },
+    });
+
+    try {
+      const dashboardToken = generateCustomerToken(payload.email.toLowerCase(), payload.customerId);
+      const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${dashboardToken}`;
+      await sendGpuLaunchedEmail({
+        to: customer.email!,
+        customerName: customer.name || customer.email!.split("@")[0],
+        poolName: gpuProduct.name,
+        gpuCount,
+        dashboardUrl,
+      });
+    } catch (emailErr) {
+      console.error("Failed to send GPU launched email:", emailErr);
+    }
+
+    return NextResponse.json({
+      success: true,
+      instance_id: instanceId,
+      message: isMonthlyDeploy ? "Monthly GPU deployed successfully" : "GPU deployed successfully",
+    });
+  } catch (error) {
+    await clearDeployLock();
+    console.error("[HAI 2.2] Create instance error:", error);
+    const errorMessage = error instanceof Error ? error.message : "Failed to create instance";
+
+    if (errorMessage.includes("Insufficient resources") || errorMessage.includes("10189007")) {
+      return NextResponse.json(
+        { error: "No GPUs currently available. Please try again later." },
+        { status: 503 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: errorMessage },
+      { status: 500 }
+    );
+  }
+}

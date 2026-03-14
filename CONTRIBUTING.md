@@ -1,6 +1,6 @@
-# Contributing to Packet-OSS
+# Contributing to GPU Cloud Dashboard
 
-Thank you for your interest in contributing to Packet-OSS! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing! This document provides guidelines and information for contributors.
 
 > **Note:** This platform is built on [hosted.ai](https://hosted.ai). GPU features require a hosted.ai account and API credentials. Visit [hosted.ai](https://hosted.ai) to get access for development and testing.
 
@@ -19,24 +19,24 @@ Thank you for your interest in contributing to Packet-OSS! This document provide
 - **[hosted.ai](https://hosted.ai) account** - Required for GPU features (API URL + API key)
 - Node.js 18+
 - pnpm (recommended) or npm
-- SQLite (included, no separate installation needed)
+- MariaDB 10.6+ (or MySQL 8.0+)
 
 ### Initial Setup
 
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd packet
+cd gpu-cloud-dashboard
 
 # Install dependencies
 pnpm install
 
 # Copy environment variables
 cp .env.example .env.local
-# Edit .env.local with your API keys
+# Edit .env.local with your database URL and API keys
 
 # Run database migrations
-npx prisma migrate dev
+npx prisma db push
 
 # Start development server
 pnpm dev
@@ -44,16 +44,19 @@ pnpm dev
 
 ### Environment Variables
 
-See `.env.example` for all required environment variables. Key variables:
+See `.env.example` for all available environment variables. Key variables:
 
-- `STRIPE_SECRET_KEY` - Stripe API key for payments
+- `DATABASE_URL` - MariaDB connection string (required)
 - `HOSTEDAI_API_URL` / `HOSTEDAI_API_KEY` - GPU infrastructure API
+- `STRIPE_SECRET_KEY` - Stripe API key for payments
 - `EMAILIT_API_KEY` - Transactional email service
 - `ADMIN_JWT_SECRET` - JWT signing secret
 
+All optional settings can also be configured in **Admin > Platform Settings** instead of environment variables.
+
 ## Architecture Overview
 
-Packet-OSS is a Next.js 16 application that provides:
+GPU Cloud Dashboard is a Next.js 16 application that provides:
 
 1. **Customer Dashboard** - GPU instance management, billing, SSH access
 2. **Admin Dashboard** - Customer management, system configuration
@@ -62,8 +65,8 @@ Packet-OSS is a Next.js 16 application that provides:
 ### Technology Stack
 
 - **Framework**: Next.js 16 (App Router)
-- **Styling**: Tailwind CSS
-- **Database**: SQLite with Prisma ORM
+- **Styling**: Tailwind CSS 4
+- **Database**: MariaDB with Prisma ORM
 - **Authentication**: JWT-based with magic link login
 - **Payments**: Stripe (subscriptions + wallet)
 - **GPU Infrastructure**: hosted.ai API
@@ -72,12 +75,12 @@ Packet-OSS is a Next.js 16 application that provides:
 
 ```
 src/app/
-├── (marketing)/    # Public landing page
-├── account/        # Customer login flow
-├── dashboard/      # Authenticated customer area
-├── admin/          # Admin dashboard
-├── investors/      # Investor portal
-└── api/            # API routes
+  (marketing)/    # Public landing page
+  account/        # Customer login flow
+  dashboard/      # Authenticated customer area
+  admin/          # Admin dashboard
+  investors/      # Investor portal
+  api/            # API routes
 ```
 
 ## Module Structure
@@ -88,40 +91,27 @@ The `src/lib/` directory contains shared business logic organized by domain:
 
 ```
 src/lib/
-├── auth/           # Authentication (customer, admin, investor, 2FA)
-│   ├── customer.ts # Customer JWT tokens
-│   ├── admin.ts    # Admin JWT + file-based storage
-│   ├── investor.ts # Investor JWT + file-based storage
-│   ├── two-factor.ts # TOTP 2FA implementation
-│   └── index.ts    # Barrel exports
-│
-├── email/          # Email services
-│   ├── client.ts   # Emailit API client
-│   ├── templates/  # Email templates (welcome, login, etc.)
-│   └── index.ts    # Barrel exports
-│
-├── hostedai/       # GPU infrastructure integration
-│   ├── client.ts   # API client with caching
-│   ├── pools.ts    # GPU pool subscriptions
-│   ├── teams.ts    # Team management
-│   ├── billing.ts  # Usage and billing data
-│   ├── types.ts    # TypeScript interfaces
-│   └── index.ts    # Barrel exports
-│
-└── [other modules] # Standalone utilities
-```
+  auth/           # Authentication (customer, admin, investor, 2FA)
+    customer.ts   # Customer JWT tokens
+    admin.ts      # Admin JWT + session management
+    investor.ts   # Investor JWT
+    two-factor.ts # TOTP 2FA implementation
+    index.ts      # Barrel exports
 
-### Backwards Compatibility
+  email/          # Email services
+    client.ts     # Emailit API client
+    templates/    # Email templates (welcome, login, etc.)
+    index.ts      # Barrel exports
 
-Legacy import paths (e.g., `@/lib/customer-auth`) are maintained via re-export shims. New code should import from the modular paths:
+  hostedai/       # GPU infrastructure integration
+    client.ts     # API client with caching
+    pools.ts      # GPU pool subscriptions
+    teams.ts      # Team management
+    billing.ts    # Usage and billing data
+    types.ts      # TypeScript interfaces
+    index.ts      # Barrel exports
 
-```typescript
-// Preferred
-import { generateCustomerToken } from "@/lib/auth/customer";
-import { sendWelcomeEmail } from "@/lib/email";
-
-// Legacy (still works)
-import { generateCustomerToken } from "@/lib/customer-auth";
+  settings.ts     # Platform settings (DB-backed, encrypted)
 ```
 
 ## Coding Standards
@@ -153,7 +143,7 @@ import { generateCustomerToken } from "@/lib/customer-auth";
 
 ### Security
 
-- Never hardcode secrets - use environment variables
+- Never hardcode secrets - use environment variables or Platform Settings
 - Validate all user input
 - Use parameterized queries (Prisma handles this)
 - Sanitize data before rendering

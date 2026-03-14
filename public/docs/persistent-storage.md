@@ -1,6 +1,6 @@
 # Persistent Storage Guide
 
-This guide covers persistent storage for GPU pods on the GPU Cloud Platform.
+This guide covers persistent storage for GPU pods on Packet.ai.
 
 ## Overview
 
@@ -271,4 +271,4 @@ Storage volumes are currently tied to pod subscriptions. When you terminate a po
 ---
 
 **Last Updated**: January 2025
-**Questions?** Contact support@example.com
+**Questions?** Contact support@packet.ai

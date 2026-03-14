@@ -6,7 +6,7 @@ import { generateCustomerToken } from "@/lib/customer-auth";
 import { generateApiKey } from "@/lib/api";
 import { sendEmail, escapeHtml } from "@/lib/email";
 import { loadTemplate } from "@/lib/email/template-loader";
-import { syncCustomerToPipedrive } from "@/lib/pipedrive";
+import { isPro } from "@/lib/edition";
 import {
   createTeam,
   createOneTimeLogin,
@@ -17,6 +17,7 @@ import {
 import { logAccountCreated, logApiKeyCreated } from "@/lib/activity";
 import { sendOnboardingEvent } from "@/lib/email/onboarding-events";
 import { cacheCustomer } from "@/lib/customer-cache";
+import { getBrandName, getDashboardUrl, getCompanyName } from "@/lib/branding";
 import crypto from "crypto";
 
 const FREE_TRIAL_TOKENS = 10000;
@@ -47,12 +48,12 @@ async function sendWelcomeAccountEmail(params: {
   const hasGpu = !!gpu;
 
   const subject = hasGpu
-    ? `Your GPU Cloud account is ready — deploy ${gpuName}`
-    : "Your GPU Cloud account is ready";
+    ? `Your ${getBrandName()} account is ready — deploy ${gpuName}`
+    : `Your ${getBrandName()} account is ready`;
 
   const introParagraph = hasGpu
-    ? `Your GPU Cloud account has been created. You were looking at <strong>${gpuName}</strong> — your dashboard is ready for you to browse live inventory, check pricing, and deploy when you're ready.`
-    : `Your GPU Cloud account has been created. You have 10,000 tokens included to explore our LLM inference API.`;
+    ? `Your ${getBrandName()} account has been created. You were looking at <strong>${gpuName}</strong> — your dashboard is ready for you to browse live inventory, check pricing, and deploy when you're ready.`
+    : `Your ${getBrandName()} account has been created. You have 10,000 tokens included to explore our Token Factory LLM inference API.`;
 
   const ctaText = hasGpu ? "Browse GPU Inventory" : "Open Dashboard";
 
@@ -61,7 +62,7 @@ async function sendWelcomeAccountEmail(params: {
             <li>Configure and save deployment settings</li>
             <li>Use 10,000 free tokens for LLM inference</li>
             <li>Add $50 to your wallet when you're ready to deploy</li>`
-    : `<li>Use the inference playground for LLM tasks</li>
+    : `<li>Use the Token Factory playground for LLM inference</li>
             <li>Make OpenAI-compatible API calls</li>
             <li>Create batch processing jobs</li>`;
 
@@ -70,7 +71,7 @@ async function sendWelcomeAccountEmail(params: {
 - Configure and save deployment settings
 - Use 10,000 free tokens for LLM inference
 - Add $50 to your wallet when you're ready to deploy`
-    : `- Use the inference playground for LLM tasks
+    : `- Use the Token Factory playground for LLM inference
 - Make OpenAI-compatible API calls
 - Create batch processing jobs`;
 
@@ -82,7 +83,7 @@ async function sendWelcomeAccountEmail(params: {
 <html>
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.7; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="text-align: center; margin-bottom: 30px;"><h1 style="color: #000; margin: 0; font-size: 28px;">GPU Cloud</h1></div>
+  <div style="text-align: center; margin-bottom: 30px;"><h1 style="color: #000; margin: 0; font-size: 28px;">${getBrandName()}</h1></div>
   <h2 style="color: #000; font-size: 22px;">Hi ${safeCustomerName},</h2>
   <p style="font-size: 16px;">${introParagraph}</p>
   <div style="text-align: center; margin: 30px 0;">
@@ -96,20 +97,20 @@ async function sendWelcomeAccountEmail(params: {
   <p style="font-size: 15px;">With your account you can:</p>
   <ul style="font-size: 15px; color: #555; padding-left: 20px;">${bulletPoints}</ul>
   <p style="font-size: 14px; color: #666; margin-top: 25px;">${closingParagraph}</p>
-  <p style="color: #888; font-size: 14px; margin-top: 20px;">This login link expires in 1 hour. You can request a new one anytime at <a href="${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account" style="color: #1A4FFF;">${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account</a></p>
+  <p style="color: #888; font-size: 14px; margin-top: 20px;">This login link expires in 1 hour. You can request a new one anytime at <a href="${getDashboardUrl()}/account" style="color: #1A4FFF;">${getDashboardUrl()}/account</a></p>
   <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
-  <p style="color: #999; font-size: 13px; text-align: center;"><strong>The GPU Cloud Team</strong></p>
+  <p style="color: #999; font-size: 13px; text-align: center;"><strong>The ${getBrandName()} Team</strong></p>
   <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #eee; text-align: center; color: #9ca3af; font-size: 12px;">
-    <p style="margin: 0 0 8px 0;">GPU Cloud by Hosted AI Inc.</p>
+    <p style="margin: 0 0 8px 0;">${getBrandName()}${getCompanyName() ? ` by ${getCompanyName()}` : ''}</p>
     <p style="margin: 0 0 8px 0;">622 North 9th Street, San Jose, CA 95112, USA</p>
-    <p style="margin: 0; font-size: 11px;">This is a transactional email related to your GPU Cloud account.</p>
+    <p style="margin: 0; font-size: 11px;">This is a transactional email related to your ${getBrandName()} account.</p>
   </div>
 </body>
 </html>`;
 
   const fallbackText = `Hi ${customerName},
 
-${hasGpu ? `Your GPU Cloud account has been created. You were looking at ${gpuName} — your dashboard is ready for you to browse live inventory, check pricing, and deploy when you're ready.` : `Your GPU Cloud account has been created. You have 10,000 tokens included to explore our LLM inference API.`}
+${hasGpu ? `Your ${getBrandName()} account has been created. You were looking at ${gpuName} — your dashboard is ready for you to browse live inventory, check pricing, and deploy when you're ready.` : `Your ${getBrandName()} account has been created. You have 10,000 tokens included to explore our Token Factory LLM inference API.`}
 
 ${ctaText}: ${dashboardUrl}
 
@@ -123,14 +124,14 @@ ${bulletPointsText}
 
 ${closingParagraph}
 
-This login link expires in 1 hour. You can request a new one anytime at ${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/account
+This login link expires in 1 hour. You can request a new one anytime at ${getDashboardUrl()}/account
 
-The GPU Cloud Team
+The ${getBrandName()} Team
 
 ---
-GPU Cloud by Hosted AI Inc.
+${getBrandName()}${getCompanyName() ? ` by ${getCompanyName()}` : ''}
 622 North 9th Street, San Jose, CA 95112, USA
-This is a transactional email related to your GPU Cloud account.`;
+This is a transactional email related to your ${getBrandName()} account.`;
 
   const template = await loadTemplate(
     "signup-welcome",
@@ -205,7 +206,7 @@ export async function POST(request: NextRequest) {
     const rawName = customerEmail.split("@")[0];
     const customerName = rawName.replace(/[^a-zA-Z0-9- ]/g, "").trim() || "User";
 
-    console.log(`Creating free account for ${customerEmail}${gpu ? ` (from GPU: ${gpu})` : ""}`);
+    console.log(`=== FREE SIGNUP: Creating account for ${customerEmail}${gpu ? ` (from GPU: ${gpu})` : ""} ===`);
 
     // Create Stripe customer (no charge, no balance credit)
     const signupSource = gpu ? `gpu-${gpu}` : "direct";
@@ -215,7 +216,7 @@ export async function POST(request: NextRequest) {
       metadata: {
         billing_type: "free",
         free_tokens_limit: FREE_TRIAL_TOKENS.toString(),
-        source: "gpu-cloud",
+        source: getBrandName(),
         signup_type: "free",
         signup_source: signupSource,
         ...(gpu ? { signup_gpu: gpu } : {}),
@@ -231,7 +232,7 @@ export async function POST(request: NextRequest) {
       },
     });
     cacheCustomer(stripeCustomer).catch(() => {});
-    console.log(`Created Stripe customer: ${stripeCustomer.id}`);
+    console.log(`✅ Created Stripe customer: ${stripeCustomer.id}`);
 
     // Create hosted.ai team for free trial user (same as paid users)
     const generatedPassword = generateSecurePassword();
@@ -241,7 +242,7 @@ export async function POST(request: NextRequest) {
     try {
       team = await createTeam({
         name: teamName,
-        description: `GPU Cloud - Free Trial`,
+        description: `${getBrandName()} - Free Trial`,
         color: "#6366F1",
         members: [
           {
@@ -259,19 +260,19 @@ export async function POST(request: NextRequest) {
         instance_type_policy_id: DEFAULT_POLICIES.instanceType,
         image_policy_id: DEFAULT_POLICIES.image,
       });
-      console.log(`Created hosted.ai team ${team.id} for free trial`);
+      console.log(`✅ Created hosted.ai team ${team.id} for free trial`);
 
       // CRITICAL: Add team to resource policy's teams array
       // Without this, the team cannot access GPU pools (error: "unable to retrieve resource access permissions")
       try {
         await syncTeamsToDefaultPolicy([team.id]);
-        console.log(`Added team ${team.id} to default resource policy`);
+        console.log(`✅ Added team ${team.id} to default resource policy`);
       } catch (policyError) {
-        console.error(`Failed to add team to resource policy:`, policyError);
+        console.error(`⚠️ WARNING: Failed to add team to resource policy:`, policyError);
         // Don't throw - team is created, they just might have access issues until manually fixed
       }
     } catch (teamError) {
-      console.error("Failed to create hosted.ai team for free trial:", teamError);
+      console.error("❌ FATAL: Failed to create hosted.ai team for free trial:", teamError);
       throw new Error(`Failed to create hosted.ai team: ${teamError instanceof Error ? teamError.message : String(teamError)}`);
     }
 
@@ -283,9 +284,9 @@ export async function POST(request: NextRequest) {
         teamId: team.id,
         roleId: ROLES.teamAdmin,
       });
-      console.log(`Created OTL for ${customerEmail}`);
+      console.log(`✅ Created OTL for ${customerEmail}`);
     } catch (otlError) {
-      console.error("Failed to create OTL (non-fatal):", otlError);
+      console.error("❌ WARNING: Failed to create OTL (non-fatal):", otlError);
     }
 
     // Update Stripe customer with hosted.ai team ID
@@ -300,7 +301,7 @@ export async function POST(request: NextRequest) {
     });
     cacheCustomer(updatedCustomer as import("stripe").default.Customer).catch(() => {});
 
-    // Generate API key for inference API
+    // Generate API key for Token Factory
     const { key, keyHash, keyPrefix } = generateApiKey();
 
     // Store API key with actual team ID
@@ -314,7 +315,7 @@ export async function POST(request: NextRequest) {
         scopes: "*",
       },
     });
-    console.log(`Created API key for ${customerEmail}`);
+    console.log(`✅ Created API key for ${customerEmail}`);
 
     // Generate dashboard URL with token
     const token = generateCustomerToken(customerEmail, stripeCustomer.id);
@@ -329,9 +330,9 @@ export async function POST(request: NextRequest) {
         apiKey: key,
         gpu: gpu || undefined,
       });
-      console.log(`Sent welcome email to ${customerEmail}`);
+      console.log(`✅ Sent welcome email to ${customerEmail}`);
     } catch (emailError) {
-      console.error("Failed to send welcome email (non-fatal):", emailError);
+      console.error("❌ WARNING: Failed to send welcome email (non-fatal):", emailError);
     }
 
     // Create CustomerLifecycle record (marketing attribution + milestone tracking)
@@ -360,9 +361,9 @@ export async function POST(request: NextRequest) {
           data: { convertedCustomerId: stripeCustomer.id },
         });
       }
-      console.log(`Created CustomerLifecycle for ${customerEmail}`);
+      console.log(`✅ Created CustomerLifecycle for ${customerEmail}`);
     } catch (lifecycleError) {
-      console.error("Failed to create CustomerLifecycle (non-fatal):", lifecycleError);
+      console.error("⚠️ Failed to create CustomerLifecycle (non-fatal):", lifecycleError);
     }
 
     // Enroll in free signup drip campaign
@@ -380,27 +381,31 @@ export async function POST(request: NextRequest) {
             metadata: JSON.stringify({ gpu: gpu || null, plan: plan || null }),
           },
         });
-        console.log(`Enrolled ${customerEmail} in drip sequence: ${dripSequence.slug}`);
+        console.log(`✅ Enrolled ${customerEmail} in drip sequence: ${dripSequence.slug}`);
       }
     } catch (dripError) {
-      console.error("Failed to enroll in drip campaign (non-fatal):", dripError);
+      console.error("⚠️ Failed to enroll in drip campaign (non-fatal):", dripError);
     }
 
     // Log activity events
     logAccountCreated(stripeCustomer.id, customerEmail, gpu ? `free-gpu-${gpu}` : "free").catch(() => {});
     logApiKeyCreated(stripeCustomer.id, "Default API Key").catch(() => {});
 
-    // Sync to Pipedrive (async, don't block response)
+    // Sync to Pipedrive (async, don't block response — Pro only)
     const gpuDisplayName = gpu ? (GPU_DISPLAY_NAMES[gpu] || gpu.toUpperCase()) : "";
-    syncCustomerToPipedrive({
-      name: customerName,
-      email: customerEmail,
-      productName: gpu ? `Free Signup (${gpuDisplayName})` : "Free Signup",
-      billingType: "free",
-      stripeCustomerId: stripeCustomer.id,
-    }).catch((err) => console.error("[Pipedrive] Customer sync failed:", err));
+    if (isPro()) {
+      import("@/lib/pipedrive").then(({ syncCustomerToPipedrive }) =>
+        syncCustomerToPipedrive({
+          name: customerName,
+          email: customerEmail,
+          productName: gpu ? `Free Signup (${gpuDisplayName})` : "Free Signup",
+          billingType: "free",
+          stripeCustomerId: stripeCustomer.id,
+        })
+      ).catch((err) => console.error("[Pipedrive] Customer sync failed:", err));
+    }
 
-    console.log(`Free signup complete: ${customerEmail}`);
+    console.log(`=== FREE SIGNUP COMPLETE: ${customerEmail} ===`);
 
     // Notify onboarding system
     sendOnboardingEvent({

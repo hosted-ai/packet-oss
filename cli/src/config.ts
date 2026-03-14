@@ -6,9 +6,9 @@ interface ConfigSchema {
 }
 
 export const config = new Conf<ConfigSchema>({
-  projectName: "packet-cli",
+  projectName: "gpu-cloud-cli",
   defaults: {
-    apiUrl: process.env.PACKET_API_URL || "http://localhost:3000",
+    apiUrl: process.env.GPU_CLOUD_API_URL || process.env.PACKET_API_URL || "http://localhost:3000",
   },
 });
 

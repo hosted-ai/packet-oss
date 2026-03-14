@@ -12,7 +12,7 @@
                                 │ HTTPS
                                 ▼
                     ┌───────────────────────┐
-                    │   your-domain.com      │
+                    │   packet.ai      │
                     │   (Next.js Frontend)  │
                     └───────────┬───────────┘
                                 │
@@ -443,7 +443,7 @@ Production Environment
 ┌────────────────────────────────────────────────────────────────┐
 │                          Nginx (Port 80/443)                    │
 │                                                                 │
-│  your-domain.com                                                │
+│  packet.ai                                                │
 │  ├─ HTTPS termination                                          │
 │  ├─ SSL certificates                                           │
 │  └─ Proxy to → localhost:3001                                  │

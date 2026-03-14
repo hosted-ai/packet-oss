@@ -1,4 +1,5 @@
 import { MetadataRoute } from "next";
+import { getAppUrl } from "@/lib/branding";
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -9,6 +10,6 @@ export default function robots(): MetadataRoute.Robots {
         disallow: ["/admin", "/dashboard", "/api/", "/checkout", "/account"],
       },
     ],
-    sitemap: "https://the platform/sitemap.xml",
+    sitemap: `${getAppUrl()}/sitemap.xml`,
   };
 }

@@ -1,19 +1,9 @@
-import { PrismaClient, TeamMember } from "@prisma/client";
-
-// Lazy initialization to avoid build-time connection issues
-let prisma: PrismaClient | null = null;
-
-function getPrisma(): PrismaClient {
-  if (!prisma) {
-    prisma = new PrismaClient();
-  }
-  return prisma;
-}
+import { TeamMember } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
 
 // Get all team members for a Stripe customer
 export async function getTeamMembers(stripeCustomerId: string): Promise<TeamMember[]> {
-  const db = getPrisma();
-  return db.teamMember.findMany({
+  return prisma.teamMember.findMany({
     where: { stripeCustomerId },
     orderBy: { invitedAt: "asc" },
   });
@@ -21,8 +11,7 @@ export async function getTeamMembers(stripeCustomerId: string): Promise<TeamMemb
 
 // Get a team member by email (for login - may belong to multiple teams)
 export async function getTeamMemberByEmail(email: string): Promise<TeamMember | null> {
-  const db = getPrisma();
-  return db.teamMember.findFirst({
+  return prisma.teamMember.findFirst({
     where: { email: email.toLowerCase() },
     orderBy: { invitedAt: "desc" }, // Return most recent if multiple
   });
@@ -30,8 +19,7 @@ export async function getTeamMemberByEmail(email: string): Promise<TeamMember | 
 
 // Get all teams a user belongs to (as a member)
 export async function getTeamMemberships(email: string): Promise<TeamMember[]> {
-  const db = getPrisma();
-  return db.teamMember.findMany({
+  return prisma.teamMember.findMany({
     where: { email: email.toLowerCase() },
     orderBy: { invitedAt: "desc" },
   });
@@ -44,8 +32,7 @@ export async function addTeamMember(params: {
   stripeCustomerId: string;
   invitedBy?: string;
 }): Promise<TeamMember> {
-  const db = getPrisma();
-  return db.teamMember.create({
+  return prisma.teamMember.create({
     data: {
       email: params.email.toLowerCase(),
       name: params.name,
@@ -58,8 +45,7 @@ export async function addTeamMember(params: {
 
 // Mark team member as having accepted (first login)
 export async function acceptTeamInvite(memberId: string): Promise<TeamMember> {
-  const db = getPrisma();
-  return db.teamMember.update({
+  return prisma.teamMember.update({
     where: { id: memberId },
     data: { acceptedAt: new Date() },
   });
@@ -70,8 +56,7 @@ export async function removeTeamMember(
   memberId: string,
   stripeCustomerId: string
 ): Promise<void> {
-  const db = getPrisma();
-  await db.teamMember.delete({
+  await prisma.teamMember.delete({
     where: {
       id: memberId,
       stripeCustomerId, // Ensure ownership
@@ -84,8 +69,7 @@ export async function isTeamMember(
   email: string,
   stripeCustomerId: string
 ): Promise<boolean> {
-  const db = getPrisma();
-  const member = await db.teamMember.findUnique({
+  const member = await prisma.teamMember.findUnique({
     where: {
       email_stripeCustomerId: {
         email: email.toLowerCase(),
@@ -102,8 +86,7 @@ export async function ensureOwnerRecord(
   stripeCustomerId: string,
   name?: string
 ): Promise<TeamMember> {
-  const db = getPrisma();
-  const existing = await db.teamMember.findUnique({
+  const existing = await prisma.teamMember.findUnique({
     where: {
       email_stripeCustomerId: {
         email: email.toLowerCase(),
@@ -117,7 +100,7 @@ export async function ensureOwnerRecord(
   }
 
   // Create owner record
-  return db.teamMember.create({
+  return prisma.teamMember.create({
     data: {
       email: email.toLowerCase(),
       name,

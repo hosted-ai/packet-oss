@@ -1,9 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
-import { podAction, getPoolSubscriptions, getConnectionInfo } from "@/lib/hostedai";
+import {
+  podAction,
+  getPoolSubscriptions,
+  getConnectionInfo,
+  restartInstance,
+  getInstanceCredentials,
+  getTeamInstances,
+} from "@/lib/hostedai";
 import { logGPURestarted } from "@/lib/activity";
 import { prisma } from "@/lib/prisma";
-import { injectServerKeyUsingSSHInfo } from "@/lib/ssh-keys";
+import { injectServerKeyUsingSSHInfo, injectServerKeyIntoPod } from "@/lib/ssh-keys";
+
+// Check if the ID looks like an HAI 2.2 instance (i-{uuid}) vs numeric (legacy pool subscription)
+function isInstanceId(id: string): boolean {
+  return /^i-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
 
 // POST - Restart a pod using the pod action API
 export async function POST(
@@ -22,9 +34,73 @@ export async function POST(
       );
     }
 
-    const { id: subscriptionId } = await params;
+    const { id } = await params;
 
-    // Optionally get pod name from request body (for multi-pod subscriptions)
+    // === HAI 2.2: Unified instance restart ===
+    if (isInstanceId(id)) {
+      console.log("[HAI 2.2] Restarting instance:", id);
+
+      let found = false;
+      for (const tid of allTeamIds) {
+        const instances = await getTeamInstances(tid);
+        if (instances.some(i => i.id === id)) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        return NextResponse.json({ error: "Instance not found" }, { status: 404 });
+      }
+
+      await restartInstance(id);
+
+      // Clear installed apps
+      try {
+        await prisma.installedApp.deleteMany({
+          where: { subscriptionId: id, stripeCustomerId: payload.customerId },
+        });
+      } catch { /* ignore */ }
+
+      // Log activity
+      let displayNameForLog: string | undefined;
+      try {
+        const meta = await prisma.podMetadata.findFirst({
+          where: { instanceId: id },
+          select: { displayName: true },
+        });
+        displayNameForLog = meta?.displayName || undefined;
+      } catch { /* ignore */ }
+      await logGPURestarted(payload.customerId, "GPU Instance", displayNameForLog, id);
+
+      // Schedule SSH key injection after boot
+      setTimeout(async () => {
+        try {
+          const creds = await getInstanceCredentials(id);
+          if (creds.ip && creds.username && creds.password && creds.port) {
+            console.log(`[Restart] Injecting server SSH key into instance ${id}...`);
+            const result = await injectServerKeyIntoPod(
+              creds.ip, creds.port, creds.username, creds.password
+            );
+            if (result.success) {
+              console.log(`[Restart] Server key injected into instance ${id}`);
+            }
+          }
+        } catch (keyErr) {
+          console.error("[Restart] Error injecting server SSH key:", keyErr);
+        }
+      }, 30000);
+
+      return NextResponse.json({
+        success: true,
+        instance_id: id,
+        message: "Restart initiated - GPU will be back online shortly",
+      });
+    }
+
+    // === Legacy: Pool subscription restart ===
+    const subscriptionId = id;
+
+    // Optionally get pod name from request body
     let targetPodName: string | undefined;
     try {
       const body = await request.json();
@@ -67,7 +143,6 @@ export async function POST(
       );
     }
 
-    // Find the target pod (by name or use first one)
     let podToRestart = subConnectionInfo.pods[0];
     if (targetPodName) {
       const found = subConnectionInfo.pods.find(p => p.pod_name === targetPodName);
@@ -86,10 +161,9 @@ export async function POST(
 
     console.log("Restarting pod:", podName, "for subscription:", subscriptionId);
 
-    // Call the pod action API
     await podAction(podName, subscriptionId, "restart");
 
-    // Clear installed apps for this subscription since pod filesystem is wiped on restart
+    // Clear installed apps
     try {
       const deletedApps = await prisma.installedApp.deleteMany({
         where: {
@@ -102,10 +176,8 @@ export async function POST(
       }
     } catch (appErr) {
       console.error("Error clearing installed apps after restart:", appErr);
-      // Don't fail the restart if app cleanup fails
     }
 
-    // Log the activity (include pod name for tracking)
     let displayNameForLog: string | undefined;
     try {
       const meta = await prisma.podMetadata.findUnique({
@@ -116,11 +188,9 @@ export async function POST(
     } catch { /* ignore */ }
     await logGPURestarted(payload.customerId, poolName, displayNameForLog, String(subscriptionId));
 
-    // Schedule server SSH key injection after pod boots (runs in background)
-    // This ensures we can always access the pod even if the user changes the password
+    // Schedule server SSH key injection after pod boots
     setTimeout(async () => {
       try {
-        // Fetch fresh connection info after restart
         const freshConnectionInfo = await getConnectionInfo(ownerTeamId, subscriptionId);
         const freshSub = freshConnectionInfo?.find(c => String(c.id) === String(subscriptionId));
         const freshPod = freshSub?.pods?.find(p => p.pod_name === podName) || freshSub?.pods?.[0];
@@ -140,7 +210,7 @@ export async function POST(
       } catch (keyErr) {
         console.error("[Restart] Error injecting server SSH key:", keyErr);
       }
-    }, 30000); // Wait 30 seconds for pod to boot
+    }, 30000);
 
     return NextResponse.json({
       success: true,

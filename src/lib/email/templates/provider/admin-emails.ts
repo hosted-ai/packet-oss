@@ -7,8 +7,9 @@
 import { sendEmailDirect, ADMIN_BCC_EMAIL } from "../../client";
 import { escapeHtml, emailLayout, emailButton, emailDetailBox, emailMuted, plainTextFooter } from "../../utils";
 import { generateAdminToken } from "@/lib/auth/admin";
+import { getAppUrl } from "@/lib/branding";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://example.com";
+const APP_URL = getAppUrl();
 
 /**
  * Notify admins of new provider application

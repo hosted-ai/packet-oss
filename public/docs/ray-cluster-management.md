@@ -5,7 +5,7 @@
 
 ## Overview
 
-Ray clusters provide a general-purpose distributed computing layer for GPU Cloud Platform users. This is independent of any specific workload (vLLM, training, etc.) and serves as infrastructure that applications can run on top of.
+Ray clusters provide a general-purpose distributed computing layer for Packet.ai users. This is independent of any specific workload (vLLM, training, etc.) and serves as infrastructure that applications can run on top of.
 
 ---
 
@@ -21,7 +21,7 @@ Ray clusters provide a general-purpose distributed computing layer for GPU Cloud
 └─────────────────────────────────────────────────────────────────────────┘
                                   ↓
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Ray Cluster Layer (Platform Manages)                                    │
+│  Ray Cluster Layer (Packet.ai Manages)                                  │
 │  ┌─────────────────────────────────────────────────────────────────────┐│
 │  │ Ray Cluster                                                         ││
 │  │ • Head node (coordinator, GCS, dashboard)                           ││
@@ -64,7 +64,7 @@ Ray is the standard for distributed Python workloads:
 User requests: "Create 3-node Ray cluster"
     ↓
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Platform creates 3 GPU subscriptions                                   │
+│  Packet.ai creates 3 GPU subscriptions                                  │
 │  (or uses existing subscriptions selected by user)                      │
 └─────────────────────────────────────────────────────────────────────────┘
     ↓
@@ -105,7 +105,7 @@ python my_training_script.py
 ray job submit --address http://10.0.1.5:8265 -- python my_script.py
 ```
 
-**Option C: Use platform deploy buttons**
+**Option C: Use Packet.ai deploy buttons**
 - "Deploy vLLM to cluster" (for LLM inference)
 - "Run training job" (for distributed training)
 

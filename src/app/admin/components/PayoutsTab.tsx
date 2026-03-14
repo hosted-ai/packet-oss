@@ -8,6 +8,7 @@ interface InvestorPayoutRow {
   revenueSharePercent: number;
   grossRevenueCents: number;
   payoutAmountCents: number;
+  pixelFactoryRevenueCents: number;
 }
 
 interface PayoutsData {
@@ -186,13 +187,14 @@ export function PayoutsTab() {
                   <th className="px-6 py-3 text-left font-medium text-[#4b5563]">Investor</th>
                   <th className="px-6 py-3 text-right font-medium text-[#4b5563]">Revenue Share</th>
                   <th className="px-6 py-3 text-right font-medium text-[#4b5563]">Gross Revenue</th>
+                  <th className="px-6 py-3 text-right font-medium text-[#4b5563]">Pixel Factory</th>
                   <th className="px-6 py-3 text-right font-medium text-[#4b5563]">Payout Amount</th>
                 </tr>
               </thead>
               <tbody>
                 {data.investors.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-6 py-8 text-center text-[#4b5563]">
+                    <td colSpan={5} className="px-6 py-8 text-center text-[#4b5563]">
                       No investors found for this period.
                     </td>
                   </tr>
@@ -202,6 +204,9 @@ export function PayoutsTab() {
                     <td className="px-6 py-3 font-medium text-[#0b0f1c]">{row.email}</td>
                     <td className="px-6 py-3 text-right text-[#4b5563]">{row.revenueSharePercent}%</td>
                     <td className="px-6 py-3 text-right text-[#0b0f1c]">{formatDollars(row.grossRevenueCents)}</td>
+                    <td className="px-6 py-3 text-right text-[#4b5563]">
+                      {row.pixelFactoryRevenueCents > 0 ? formatDollars(row.pixelFactoryRevenueCents) : "—"}
+                    </td>
                     <td className="px-6 py-3 text-right font-semibold text-[#1a4fff]">
                       {formatDollars(row.payoutAmountCents)}
                     </td>
@@ -216,6 +221,7 @@ export function PayoutsTab() {
                     <td className="px-6 py-3 text-right text-[#0b0f1c]">
                       {formatDollars(data.totals.grossRevenueCents)}
                     </td>
+                    <td className="px-6 py-3" />
                     <td className="px-6 py-3 text-right text-[#1a4fff]">
                       {formatDollars(data.totals.payoutAmountCents)}
                     </td>

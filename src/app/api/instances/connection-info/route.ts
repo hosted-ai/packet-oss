@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
-import { getConnectionInfo, SubscriptionConnectionInfo, PodConnectionInfo } from "@/lib/hostedai";
+import {
+  getConnectionInfo,
+  getInstanceCredentials,
+  getTeamInstances,
+  SubscriptionConnectionInfo,
+  PodConnectionInfo,
+} from "@/lib/hostedai";
+import { prisma } from "@/lib/prisma";
 import { spawn } from "child_process";
 import { validateSSHParams } from "@/lib/ssh-validation";
 
@@ -105,10 +112,61 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Get optional subscription_id and refresh flag from query params
+    // Get optional subscription_id/instance_id and refresh flag from query params
     const { searchParams } = new URL(request.url);
     const subscriptionId = searchParams.get("subscription_id");
+    const instanceId = searchParams.get("instance_id");
     const forceRefresh = searchParams.get("refresh") === "true";
+
+    // === HAI 2.2: Single instance credentials ===
+    if (instanceId) {
+      try {
+        const creds = await getInstanceCredentials(instanceId);
+        // Format as SubscriptionConnectionInfo for frontend compatibility
+        const sshCmd = creds.ip && creds.port && creds.username
+          ? `ssh -p ${creds.port} ${creds.username}@${creds.ip}`
+          : undefined;
+
+        const podInfo: PodConnectionInfo = {
+          pod_name: instanceId,
+          pod_status: "running",
+          ssh_info: sshCmd && creds.password ? { cmd: sshCmd, pass: creds.password } : undefined,
+        };
+
+        // Try to enrich with internal IP
+        if (creds.ip && creds.port && creds.username && creds.password) {
+          try {
+            const internalIP = await fetchInternalIP(
+              creds.ip, creds.port, creds.username, creds.password
+            );
+            if (internalIP) {
+              podInfo.internal_ip = internalIP;
+            }
+          } catch { /* ignore */ }
+        }
+
+        // Get the display name from metadata if available
+        const meta = await prisma.podMetadata.findFirst({
+          where: { instanceId },
+          select: { displayName: true },
+        }).catch(() => null);
+
+        const result: SubscriptionConnectionInfo = {
+          id: 0, // Not a pool subscription
+          pool_name: meta?.displayName || "GPU Instance",
+          region_id: 0,
+          pods: [podInfo],
+        };
+
+        return NextResponse.json({ connectionInfo: [result], instanceCredentials: creds });
+      } catch (error) {
+        console.error(`[ConnectionInfo] Failed to fetch instance credentials for ${instanceId}:`, error);
+        return NextResponse.json(
+          { error: "Failed to get instance credentials" },
+          { status: 500 }
+        );
+      }
+    }
 
     // Check cache first (unless refresh is requested) — use all team IDs as cache key
     const cacheKey = `${allTeamIds.sort().join("+")}:${subscriptionId || "all"}`;

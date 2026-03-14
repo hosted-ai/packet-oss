@@ -48,13 +48,13 @@ export async function GET(request: NextRequest) {
       }),
       // Get the most recent poolName per subscription from GpuHardwareMetrics
       prisma.$queryRaw<Array<{ subscriptionId: string; poolName: string | null }>>`
-        SELECT m.subscriptionId, m.poolName
-        FROM GpuHardwareMetrics m
+        SELECT m.subscription_id as subscriptionId, m.pool_name as poolName
+        FROM gpu_hardware_metrics m
         INNER JOIN (
-          SELECT subscriptionId, MAX(timestamp) as maxTs
-          FROM GpuHardwareMetrics
-          GROUP BY subscriptionId
-        ) latest ON m.subscriptionId = latest.subscriptionId AND m.timestamp = latest.maxTs
+          SELECT subscription_id, MAX(recorded_at) as maxTs
+          FROM gpu_hardware_metrics
+          GROUP BY subscription_id
+        ) latest ON m.subscription_id = latest.subscription_id AND m.recorded_at = latest.maxTs
       `,
     ]);
 
