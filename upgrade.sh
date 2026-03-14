@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-APP_NAME="gpu-cloud-dashboard"
+APP_NAME="packet-oss"
 INSTALL_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="${APP_NAME}"
 APP_USER="${APP_NAME}"
@@ -80,14 +80,16 @@ if ! $SKIP_BACKUP; then
     DB_PORT=$(echo "$DB_URL" | cut -d@ -f2 | cut -d: -f2 | cut -d/ -f1)
     DB_NAME=$(echo "$DB_URL" | rev | cut -d/ -f1 | rev)
 
-    BACKUP_FILE="${INSTALL_DIR}/backup-${CURRENT_VERSION}-$(date +%Y%m%d%H%M%S).sql"
+    BACKUP_DIR="${INSTALL_DIR}/backups"
+    mkdir -p "$BACKUP_DIR"
+    BACKUP_FILE="${BACKUP_DIR}/backup-${CURRENT_VERSION}-$(date +%Y%m%d%H%M%S).sql"
 
     DUMP_CMD="mysqldump"
     command -v mariadb-dump &>/dev/null && DUMP_CMD="mariadb-dump"
 
     $DUMP_CMD -u "$DB_USER" -p"$DB_PASS" -h "$DB_HOST" -P "$DB_PORT" "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null
     chown "${APP_USER}:${APP_USER}" "$BACKUP_FILE"
-    success "Database backed up to $(basename "$BACKUP_FILE")"
+    success "Database backed up to backups/$(basename "$BACKUP_FILE")"
   else
     warn "Could not parse DATABASE_URL for backup — skipping"
   fi
@@ -117,10 +119,14 @@ log "Installing dependencies..."
 sudo -u "$APP_USER" pnpm install --frozen-lockfile 2>/dev/null || sudo -u "$APP_USER" pnpm install
 success "Dependencies installed"
 
-# ── Step 5: Run database migrations ─────────────────────────────────────────
+# ── Step 5: Generate Prisma client & run migrations ──────────────────────────
+
+log "Generating Prisma client..."
+sudo -u "$APP_USER" node node_modules/prisma/build/index.js generate
+success "Prisma client generated"
 
 log "Running database migrations..."
-sudo -u "$APP_USER" npx prisma migrate deploy 2>/dev/null || sudo -u "$APP_USER" npx prisma db push
+sudo -u "$APP_USER" npx prisma db push
 success "Database migrated"
 
 # ── Step 6: Build ───────────────────────────────────────────────────────────

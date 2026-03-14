@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-APP_NAME="gpu-cloud-dashboard"
+APP_NAME="packet-oss"
 INSTALL_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="${APP_NAME}"
 APP_USER="${APP_NAME}"
@@ -114,13 +114,43 @@ else
   log "Keeping database (--keep-db)"
 fi
 
-# ── Step 3: Remove nginx config ─────────────────────────────────────────────
+# ── Step 3: Remove Apache config ─────────────────────────────────────────────
 
-if [[ -f "/etc/nginx/sites-enabled/${APP_NAME}" ]]; then
-  rm -f "/etc/nginx/sites-enabled/${APP_NAME}"
-  rm -f "/etc/nginx/sites-available/${APP_NAME}"
-  nginx -t 2>/dev/null && systemctl reload nginx 2>/dev/null
-  success "Nginx configuration removed"
+# Check for Apache2 vhost
+if [[ -f "/etc/apache2/sites-enabled/${APP_NAME}.conf" ]] || \
+   [[ -f "/etc/apache2/sites-available/${APP_NAME}.conf" ]]; then
+  if confirm "Remove Apache vhost configuration?"; then
+    a2dissite "${APP_NAME}.conf" 2>/dev/null || true
+    a2dissite "${APP_NAME}-le-ssl.conf" 2>/dev/null || true
+    rm -f "/etc/apache2/sites-available/${APP_NAME}.conf"
+    rm -f "/etc/apache2/sites-available/${APP_NAME}-le-ssl.conf"
+    apache2ctl configtest 2>/dev/null && systemctl reload apache2 2>/dev/null
+    success "Apache configuration removed"
+  else
+    log "Keeping Apache configuration"
+  fi
+fi
+
+# Optionally revoke SSL certificate
+if command -v certbot &>/dev/null; then
+  CERT_DOMAIN=""
+  if [[ -f "/etc/apache2/sites-available/${APP_NAME}-le-ssl.conf" ]] 2>/dev/null; then
+    CERT_DOMAIN=$(grep -oP 'ServerName\s+\K\S+' "/etc/apache2/sites-available/${APP_NAME}-le-ssl.conf" 2>/dev/null || true)
+  elif [[ -f "${INSTALL_DIR}/.env.local" ]]; then
+    APP_URL=$(grep '^NEXT_PUBLIC_APP_URL' "${INSTALL_DIR}/.env.local" 2>/dev/null | sed 's/NEXT_PUBLIC_APP_URL=//' | tr -d '"' || true)
+    CERT_DOMAIN=$(echo "$APP_URL" | sed 's|https://||' | sed 's|http://||' | cut -d/ -f1)
+  fi
+
+  if [[ -n "$CERT_DOMAIN" ]] && [[ "$CERT_DOMAIN" != "localhost" ]]; then
+    if confirm "Revoke SSL certificate for '${CERT_DOMAIN}'?"; then
+      certbot revoke --cert-name "$CERT_DOMAIN" --non-interactive 2>/dev/null && \
+        certbot delete --cert-name "$CERT_DOMAIN" --non-interactive 2>/dev/null && \
+        success "SSL certificate revoked for ${CERT_DOMAIN}" || \
+        warn "Could not revoke certificate (may require manual cleanup)"
+    else
+      log "Keeping SSL certificate"
+    fi
+  fi
 fi
 
 # ── Step 4: Remove install directory ─────────────────────────────────────────
