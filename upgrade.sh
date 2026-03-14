@@ -16,7 +16,7 @@ APP_NAME="packet-oss"
 INSTALL_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="${APP_NAME}"
 APP_USER="${APP_NAME}"
-BRANCH="${BRANCH:-main}"
+BRANCH="${BRANCH:-upgrade/hai-2.2}"
 
 # Colors
 RED='\033[0;31m'
@@ -58,19 +58,25 @@ fi
 
 cd "$INSTALL_DIR"
 
+# Mark repo as safe for git (owner is APP_USER, script runs as root)
+git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+
+# Load env vars for prisma and build steps
+ENV_VARS=$(grep -v '^#' "${INSTALL_DIR}/.env.local" | grep '=' | xargs)
+
+# Extract DATABASE_URL for prisma
+DB_URL=$(grep '^DATABASE_URL' "${INSTALL_DIR}/.env.local" | sed 's/DATABASE_URL=//' | tr -d '"')
+
 # ── Get current version ─────────────────────────────────────────────────────
 
 CURRENT_VERSION=$(node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "unknown")
 log "Current version: ${CURRENT_VERSION}"
-log "Upgrading from branch: ${BRANCH}"
+log "Upgrading to branch: ${BRANCH}"
 
 # ── Step 1: Backup database ─────────────────────────────────────────────────
 
 if ! $SKIP_BACKUP; then
   log "Backing up database..."
-
-  # Extract DB credentials from .env.local
-  DB_URL=$(grep '^DATABASE_URL' "${INSTALL_DIR}/.env.local" | sed 's/DATABASE_URL=//' | tr -d '"')
 
   if [[ "$DB_URL" == mysql://* ]]; then
     # Parse mysql://user:pass@host:port/dbname
@@ -82,14 +88,19 @@ if ! $SKIP_BACKUP; then
 
     BACKUP_DIR="${INSTALL_DIR}/backups"
     mkdir -p "$BACKUP_DIR"
+    chown "${APP_USER}:${APP_USER}" "$BACKUP_DIR"
     BACKUP_FILE="${BACKUP_DIR}/backup-${CURRENT_VERSION}-$(date +%Y%m%d%H%M%S).sql"
 
     DUMP_CMD="mysqldump"
     command -v mariadb-dump &>/dev/null && DUMP_CMD="mariadb-dump"
 
-    $DUMP_CMD -u "$DB_USER" -p"$DB_PASS" -h "$DB_HOST" -P "$DB_PORT" "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null
-    chown "${APP_USER}:${APP_USER}" "$BACKUP_FILE"
-    success "Database backed up to backups/$(basename "$BACKUP_FILE")"
+    if $DUMP_CMD -u "$DB_USER" -p"$DB_PASS" -h "$DB_HOST" -P "$DB_PORT" "$DB_NAME" > "$BACKUP_FILE" 2>/dev/null; then
+      chown "${APP_USER}:${APP_USER}" "$BACKUP_FILE"
+      success "Database backed up to backups/$(basename "$BACKUP_FILE")"
+    else
+      warn "Database backup failed — continuing upgrade anyway"
+      rm -f "$BACKUP_FILE"
+    fi
   else
     warn "Could not parse DATABASE_URL for backup — skipping"
   fi
@@ -107,7 +118,7 @@ success "Service stopped"
 
 log "Pulling latest code..."
 sudo -u "$APP_USER" git fetch origin "$BRANCH"
-sudo -u "$APP_USER" git checkout "$BRANCH"
+sudo -u "$APP_USER" git checkout "$BRANCH" 2>/dev/null || sudo -u "$APP_USER" git checkout -b "$BRANCH" "origin/$BRANCH"
 sudo -u "$APP_USER" git pull origin "$BRANCH"
 
 NEW_VERSION=$(node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "unknown")
@@ -119,20 +130,20 @@ log "Installing dependencies..."
 sudo -u "$APP_USER" pnpm install --frozen-lockfile 2>/dev/null || sudo -u "$APP_USER" pnpm install
 success "Dependencies installed"
 
-# ── Step 5: Generate Prisma client & run migrations ──────────────────────────
+# ── Step 5: Generate Prisma client & push schema ────────────────────────────
 
 log "Generating Prisma client..."
 sudo -u "$APP_USER" node node_modules/prisma/build/index.js generate
 success "Prisma client generated"
 
-log "Running database migrations..."
-sudo -u "$APP_USER" npx prisma db push
-success "Database migrated"
+log "Pushing database schema..."
+sudo -u "$APP_USER" env DATABASE_URL="${DB_URL}" npx prisma db push --skip-generate
+success "Database schema applied"
 
 # ── Step 6: Build ───────────────────────────────────────────────────────────
 
 log "Building application..."
-sudo -u "$APP_USER" pnpm build
+sudo -u "$APP_USER" env ${ENV_VARS} pnpm build
 success "Application built"
 
 # ── Step 7: Start service ───────────────────────────────────────────────────

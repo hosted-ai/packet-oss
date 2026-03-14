@@ -1,10 +1,6 @@
 import { delay } from "./utils";
 import { getBrandName, getDashboardUrl } from "@/lib/branding";
-
-const EMAILIT_API_KEY = process.env.EMAILIT_API_KEY;
-// Admin email for receiving copies of all transactional emails
-// Configure via ADMIN_BCC_EMAIL environment variable
-const ADMIN_BCC_EMAIL = process.env.ADMIN_BCC_EMAIL;
+import { getSetting } from "@/lib/settings";
 
 export interface EmailParams {
   to: string;
@@ -13,9 +9,25 @@ export interface EmailParams {
   text: string;
 }
 
+/**
+ * Resolve the Emailit API key. Checks DB-backed platform settings first
+ * (set via admin UI), then falls back to process.env.
+ */
+async function getEmailitApiKey(): Promise<string | null> {
+  return getSetting("EMAILIT_API_KEY");
+}
+
+/**
+ * Resolve the admin BCC email address.
+ */
+async function getAdminBccEmail(): Promise<string | null> {
+  return getSetting("ADMIN_BCC_EMAIL");
+}
+
 async function sendEmailToRecipient(params: EmailParams, retries = 4): Promise<void> {
-  if (!EMAILIT_API_KEY) {
-    throw new Error("EMAILIT_API_KEY is not set");
+  const apiKey = await getEmailitApiKey();
+  if (!apiKey) {
+    throw new Error("EMAILIT_API_KEY is not set — configure in Platform Settings or .env.local");
   }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -23,7 +35,7 @@ async function sendEmailToRecipient(params: EmailParams, retries = 4): Promise<v
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${EMAILIT_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
@@ -54,7 +66,8 @@ export async function sendEmail(params: EmailParams): Promise<void> {
   await sendEmailToRecipient(params);
 
   // Send admin copy if ADMIN_BCC_EMAIL is configured
-  if (ADMIN_BCC_EMAIL) {
+  const adminBcc = await getAdminBccEmail();
+  if (adminBcc) {
     // Wait 5 seconds to avoid Emailit rate limit
     await delay(5000);
 
@@ -62,7 +75,7 @@ export async function sendEmail(params: EmailParams): Promise<void> {
     try {
       await sendEmailToRecipient({
         ...params,
-        to: ADMIN_BCC_EMAIL,
+        to: adminBcc,
         subject: `[Copy to: ${params.to}] ${params.subject}`,
       });
     } catch (error) {
@@ -86,8 +99,9 @@ export async function sendEmailDirect(params: {
     disposition?: string;
   }>;
 }): Promise<void> {
-  if (!EMAILIT_API_KEY) {
-    throw new Error("EMAILIT_API_KEY is not set");
+  const apiKey = await getEmailitApiKey();
+  if (!apiKey) {
+    throw new Error("EMAILIT_API_KEY is not set — configure in Platform Settings or .env.local");
   }
 
   const retries = 4;
@@ -96,7 +110,7 @@ export async function sendEmailDirect(params: {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${EMAILIT_API_KEY}`,
+        Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
         from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
@@ -125,12 +139,13 @@ export async function sendAdminCopy(params: {
   html: string;
   text: string;
 }): Promise<void> {
-  if (!ADMIN_BCC_EMAIL) {
+  const adminBcc = await getAdminBccEmail();
+  if (!adminBcc) {
     return; // Skip if admin email not configured
   }
   try {
     await sendEmailDirect({
-      to: ADMIN_BCC_EMAIL,
+      to: adminBcc,
       subject: `[Copy to: ${params.originalTo}] ${params.subject}`,
       html: params.html,
       text: params.text,
@@ -140,4 +155,9 @@ export async function sendAdminCopy(params: {
   }
 }
 
-export { ADMIN_BCC_EMAIL };
+/**
+ * Sync fallback for ADMIN_BCC_EMAIL — reads from env only.
+ * Used by templates that need the value synchronously. For DB-backed
+ * resolution, use getAdminBccEmail() instead.
+ */
+export const ADMIN_BCC_EMAIL = process.env.ADMIN_BCC_EMAIL || null;
