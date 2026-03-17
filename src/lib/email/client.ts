@@ -38,7 +38,8 @@ async function sendEmailToRecipient(params: EmailParams, retries = 4): Promise<v
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
+        from: "Packet.ai <no-reply@dash.packet.ai>",
+        // from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
         to: params.to,
         subject: params.subject,
         html: params.html,
@@ -113,7 +114,9 @@ export async function sendEmailDirect(params: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
+        from: "Packet.ai <no-reply@dash.packet.ai>",
+        // TODO :: uncomment later
+        // from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
         ...params,
       }),
     });
