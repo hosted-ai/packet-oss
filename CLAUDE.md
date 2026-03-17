@@ -140,6 +140,7 @@ HTML email templates with inline styles in `src/lib/email/templates/`. Uses dire
 - Never deploy incomplete features. All linked pages must exist before pushing.
 - Always run `pnpm build` to verify before deploying.
 - Environment variables go in `.env.local` (never committed). Check `.env.example` or Prisma schema for required vars.
+- **Bug fix workflow**: When a bug is reported, don't start by trying to fix it. Instead, start by writing a test that reproduces the bug. Then, have subagents try to fix the bug and prove it with a passing test.
 
 ---
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStripe } from "@/lib/stripe";
+import { getStripeAsync, getStripeWebhookSecret } from "@/lib/stripe";
 import {
   createTeam,
   createOneTimeLogin,
@@ -153,14 +153,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No signature" }, { status: 400 });
   }
 
-  const stripe = getStripe();
+  const [stripe, webhookSecret] = await Promise.all([getStripeAsync(), getStripeWebhookSecret()]);
   let event: Stripe.Event;
 
   try {
     event = stripe.webhooks.constructEvent(
       body,
       signature,
-      process.env.STRIPE_WEBHOOK_SECRET!
+      webhookSecret
     );
   } catch (err) {
     console.error("Webhook signature verification failed:", err);

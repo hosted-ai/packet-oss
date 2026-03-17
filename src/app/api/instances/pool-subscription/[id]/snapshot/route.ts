@@ -10,6 +10,8 @@ import {
   subscribeToPool,
   getPoolEphemeralStorageBlocks,
   getSharedVolumes,
+  getApiUrl,
+  getApiKey,
 } from "@/lib/hostedai";
 import { prisma } from "@/lib/prisma";
 import Stripe from "stripe";
@@ -325,8 +327,7 @@ export async function POST(
       }
 
       // Get instance type
-      const apiUrl = process.env.HOSTEDAI_API_URL!;
-      const apiKey = process.env.HOSTEDAI_API_KEY!;
+      const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
 
       let instanceTypeId: string | undefined;
       try {

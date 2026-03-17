@@ -72,7 +72,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
   let blogPages: MetadataRoute.Sitemap = [];
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { getAllPosts } = require("./(marketing)/blog/posts");
+    const blogModule = "./(marketing)/blog/posts";
+    const { getAllPosts } = require(blogModule);
     const posts = getAllPosts();
     blogPages = [
       { url: `${baseUrl}/blog`, lastModified: now, changeFrequency: "weekly", priority: 0.8 },

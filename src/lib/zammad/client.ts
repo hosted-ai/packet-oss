@@ -17,17 +17,19 @@ import type {
   ZammadGroup,
   ZammadTicketState,
 } from "./types";
+import { getSettings } from "@/lib/settings";
 
-// Configuration from environment
-function getConfig() {
-  const apiUrl = process.env.ZAMMAD_API_URL;
-  const apiToken = process.env.ZAMMAD_API_TOKEN;
+// Configuration from DB-backed platform settings, env fallback
+async function getConfig() {
+  const settings = await getSettings(["ZAMMAD_API_URL", "ZAMMAD_API_TOKEN"]);
+  const apiUrl = settings.ZAMMAD_API_URL;
+  const apiToken = settings.ZAMMAD_API_TOKEN;
 
   if (!apiUrl) {
-    throw new Error("ZAMMAD_API_URL environment variable is required");
+    throw new Error("ZAMMAD_API_URL is not set — configure in Platform Settings or .env.local");
   }
   if (!apiToken) {
-    throw new Error("ZAMMAD_API_TOKEN environment variable is required");
+    throw new Error("ZAMMAD_API_TOKEN is not set — configure in Platform Settings or .env.local");
   }
 
   return { apiUrl: apiUrl.replace(/\/$/, ""), apiToken };
@@ -38,7 +40,7 @@ async function zammadFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const { apiUrl, apiToken } = getConfig();
+  const { apiUrl, apiToken } = await getConfig();
   const url = `${apiUrl}${endpoint}`;
 
   const response = await fetch(url, {

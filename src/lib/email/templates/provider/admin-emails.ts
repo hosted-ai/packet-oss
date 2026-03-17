@@ -4,7 +4,8 @@
  * Internal alerts sent to admins for new provider applications and node submissions.
  */
 
-import { sendEmailDirect, ADMIN_BCC_EMAIL } from "../../client";
+import { sendEmailDirect } from "../../client";
+import { getSetting } from "@/lib/settings";
 import { escapeHtml, emailLayout, emailButton, emailDetailBox, emailMuted, plainTextFooter } from "../../utils";
 import { generateAdminToken } from "@/lib/auth/admin";
 import { getAppUrl } from "@/lib/branding";
@@ -26,12 +27,12 @@ export async function sendAdminNewProviderAlert(params: {
   expectedCustomers?: string;
   additionalInfo?: string;
 }): Promise<void> {
-  if (!ADMIN_BCC_EMAIL) {
+  const adminEmail = await getSetting("ADMIN_BCC_EMAIL");
+  if (!adminEmail) {
     console.log("[Email] Skipping admin new provider alert - ADMIN_BCC_EMAIL not configured");
     return;
   }
 
-  const adminEmail = ADMIN_BCC_EMAIL;
   const isWhiteLabel = params.applicationType === "white_label";
 
   const safeCompanyName = escapeHtml(params.companyName);
@@ -126,12 +127,11 @@ export async function sendAdminNewNodeAlert(params: {
   gpuModel?: string;
   gpuCount?: number;
 }): Promise<void> {
-  if (!ADMIN_BCC_EMAIL) {
+  const adminEmail = await getSetting("ADMIN_BCC_EMAIL");
+  if (!adminEmail) {
     console.log("[Email] Skipping admin new node alert - ADMIN_BCC_EMAIL not configured");
     return;
   }
-
-  const adminEmail = ADMIN_BCC_EMAIL;
 
   const safeCompanyName = escapeHtml(params.companyName);
   const safeNodeName = escapeHtml(params.nodeName);

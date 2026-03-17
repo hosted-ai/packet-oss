@@ -14,8 +14,20 @@ import { getSecret } from "./auth/secrets";
 import { prisma } from "./prisma";
 
 // ── In-memory cache with TTL ────────────────────────────────────────────────
+// Stored on globalThis so the cache survives module hot-reloads in dev mode
+// (same pattern as prisma.ts — Turbopack re-evaluates modules on first request).
 
-const cache = new Map<string, { value: string | null; expiresAt: number }>();
+type CacheEntry = { value: string | null; expiresAt: number };
+
+const globalForSettings = globalThis as unknown as {
+  __settingsCache?: Map<string, CacheEntry>;
+};
+
+if (!globalForSettings.__settingsCache) {
+  globalForSettings.__settingsCache = new Map();
+}
+
+const cache = globalForSettings.__settingsCache;
 const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ── Encryption ──────────────────────────────────────────────────────────────
@@ -143,6 +155,16 @@ export async function deleteSetting(key: string): Promise<void> {
  */
 export function clearSettingsCache(): void {
   cache.clear();
+}
+
+/**
+ * Pre-load all platform settings into the in-memory cache.
+ * Call once at server startup (instrumentation.ts) so that
+ * getSettingSync() returns DB-backed values from the first request.
+ */
+export async function warmSettingsCache(): Promise<void> {
+  const allKeys = Object.values(SERVICE_GROUPS).flatMap((g) => g.keys as unknown as string[]);
+  await getSettings(allKeys);
 }
 
 // ── Service configuration groups ────────────────────────────────────────────

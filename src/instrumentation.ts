@@ -13,6 +13,12 @@ export async function register() {
     const { startCronScheduler } = await import("@/lib/cron-scheduler");
     startCronScheduler();
 
+    // Warm the platform settings cache so getSettingSync() works from first request
+    const { warmSettingsCache } = await import("@/lib/settings");
+    await warmSettingsCache().catch((error) => {
+      console.error("[Instrumentation] Failed to warm settings cache:", error);
+    });
+
     // Initialize default policies and roles from hosted.ai API
     // Awaited so the cache is warm before any request handler runs
     const { initializeDefaultPolicies, initializeRoles } = await import("@/lib/hostedai");

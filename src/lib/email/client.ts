@@ -155,9 +155,3 @@ export async function sendAdminCopy(params: {
   }
 }
 
-/**
- * Sync fallback for ADMIN_BCC_EMAIL — reads from env only.
- * Used by templates that need the value synchronously. For DB-backed
- * resolution, use getAdminBccEmail() instead.
- */
-export const ADMIN_BCC_EMAIL = process.env.ADMIN_BCC_EMAIL || null;

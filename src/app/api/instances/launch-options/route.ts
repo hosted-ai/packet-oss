@@ -7,6 +7,8 @@ import {
   getGPUaaSImages,
   getPoolSubscriptions,
   getSharedVolumes,
+  getApiUrl,
+  getApiKey,
 } from "@/lib/hostedai";
 import { readPoolOverviewCache, type PoolDetails } from "@/lib/pool-overview";
 import { prisma } from "@/lib/prisma";
@@ -129,8 +131,7 @@ export async function GET(request: NextRequest) {
     const selectedRegion = regions.length > 0 ? regions[0] : null;
 
     // === PARALLELIZED: Fetch all supplementary data concurrently ===
-    const apiUrl = process.env.HOSTEDAI_API_URL!;
-    const apiKey = process.env.HOSTEDAI_API_KEY!;
+    const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
 
     const [
       instanceTypesResult,

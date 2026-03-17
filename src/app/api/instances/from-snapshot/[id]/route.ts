@@ -8,6 +8,8 @@ import {
   getSharedVolumes,
   selectOptimalPool,
   subscribeWithFallback,
+  getApiUrl,
+  getApiKey,
 } from "@/lib/hostedai";
 import { logGPULaunched } from "@/lib/activity";
 import { getWalletBalance, deductUsage, refundDeployment } from "@/lib/wallet";
@@ -131,8 +133,7 @@ export async function POST(
 
     // Get instance type if not specified
     if (!instanceTypeId) {
-      const apiUrl = process.env.HOSTEDAI_API_URL!;
-      const apiKey = process.env.HOSTEDAI_API_KEY!;
+      const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
 
       const response = await fetch(`${apiUrl}/api/instance-type`, {
         method: "GET",

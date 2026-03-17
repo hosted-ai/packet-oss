@@ -17,6 +17,8 @@ import {
   getStorageBlocks,
   getCompatibleImages,
   getInstanceTypes,
+  getApiUrl,
+  getApiKey,
   Instance,
   PoolSubscription,
 } from "@/lib/hostedai";
@@ -465,8 +467,7 @@ export async function POST(request: NextRequest) {
       if (!selectedInstanceType) {
         try {
           console.log("Fetching GPU-compatible instance types from /api/instance-type");
-          const apiUrl = process.env.HOSTEDAI_API_URL!;
-          const apiKey = process.env.HOSTEDAI_API_KEY!;
+          const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
 
           const instanceTypeController = new AbortController();
           const instanceTypeTimeout = setTimeout(() => instanceTypeController.abort(), 10_000);

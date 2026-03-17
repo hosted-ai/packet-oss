@@ -9,8 +9,7 @@
  * @module hostedai/client
  */
 
-const HOSTEDAI_API_URL = process.env.HOSTEDAI_API_URL!;
-const HOSTEDAI_API_KEY = process.env.HOSTEDAI_API_KEY!;
+import { getSetting } from "@/lib/settings";
 
 // In-memory cache for API responses (10 second TTL)
 const apiCache = new Map<string, { data: unknown; timestamp: number }>();
@@ -64,7 +63,8 @@ export async function hostedaiRequest<T>(
   data?: Record<string, unknown>,
   timeoutMs?: number
 ): Promise<T> {
-  const url = `${HOSTEDAI_API_URL}/api${endpoint}`;
+  const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
+  const url = `${apiUrl}/api${endpoint}`;
 
   // Default timeout: 15s for GET, 30s for POST (prevents indefinite hangs)
   const effectiveTimeout = timeoutMs ?? (method === "GET" ? 15_000 : 30_000);
@@ -86,7 +86,7 @@ export async function hostedaiRequest<T>(
     const response = await fetch(url, {
       method,
       headers: {
-        "X-API-Key": HOSTEDAI_API_KEY,
+        "X-API-Key": apiKey,
         "Content-Type": "application/json",
       },
       body: data ? JSON.stringify(data) : undefined,
@@ -147,17 +147,21 @@ export async function hostedaiRequest<T>(
 }
 
 /**
- * Get the hosted.ai API base URL
+ * Get the hosted.ai API base URL (DB-backed platform settings, env fallback)
  * @internal
  */
-export function getApiUrl(): string {
-  return HOSTEDAI_API_URL;
+export async function getApiUrl(): Promise<string> {
+  const url = await getSetting("HOSTEDAI_API_URL");
+  if (!url) throw new Error("HOSTEDAI_API_URL is not set — configure in Platform Settings or .env.local");
+  return url;
 }
 
 /**
- * Get the hosted.ai API key
+ * Get the hosted.ai API key (DB-backed platform settings, env fallback)
  * @internal
  */
-export function getApiKey(): string {
-  return HOSTEDAI_API_KEY;
+export async function getApiKey(): Promise<string> {
+  const key = await getSetting("HOSTEDAI_API_KEY");
+  if (!key) throw new Error("HOSTEDAI_API_KEY is not set — configure in Platform Settings or .env.local");
+  return key;
 }

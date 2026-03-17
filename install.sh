@@ -28,7 +28,7 @@ APP_PORT=3000
 SSH_WS_PORT=3002
 DB_NAME="packetdb_oss"
 DB_USER="packetos_user"
-REPO_URL="https://github.com/t0uh33d/packet-oss"
+REPO_URL="https://github.com/hosted-ai/packet-oss"
 BRANCH="${BRANCH:-upgrade/hai-2.2}"
 DOMAIN="${DOMAIN:-}"
 
@@ -43,6 +43,52 @@ log()     { echo -e "${CYAN}[install]${NC} $1"; }
 success() { echo -e "${GREEN}✓${NC} $1"; }
 warn()    { echo -e "${YELLOW}⚠${NC} $1"; }
 fail()    { echo -e "${RED}✗ $1${NC}"; exit 1; }
+
+# Run a command with an elapsed-time spinner.  Usage: run_with_progress "message" command args...
+run_with_progress() {
+  local msg="$1"; shift
+  local start=$SECONDS
+  local pid
+
+  # Run command in background, redirect output to log file
+  local logfile="/tmp/packet-oss-install-$$.log"
+  "$@" > "$logfile" 2>&1 &
+  pid=$!
+
+  # Spinner loop — show elapsed time
+  local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+  local i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    local elapsed=$(( SECONDS - start ))
+    local mins=$(( elapsed / 60 ))
+    local secs=$(( elapsed % 60 ))
+    printf "\r  ${CYAN}%s${NC} %s ${YELLOW}[%d:%02d]${NC} " "${spin:i++%${#spin}:1}" "$msg" "$mins" "$secs"
+    sleep 0.2
+  done
+
+  # Get exit code
+  wait "$pid"
+  local exit_code=$?
+  local elapsed=$(( SECONDS - start ))
+  local mins=$(( elapsed / 60 ))
+  local secs=$(( elapsed % 60 ))
+
+  # Clear spinner line
+  printf "\r%-80s\r" ""
+
+  if [[ $exit_code -eq 0 ]]; then
+    success "$msg ${YELLOW}[${mins}m ${secs}s]${NC}"
+  else
+    echo ""
+    fail "$msg failed after ${mins}m ${secs}s. Log: $logfile"
+    echo -e "${RED}Last 20 lines:${NC}"
+    tail -20 "$logfile"
+    exit 1
+  fi
+
+  rm -f "$logfile"
+  return $exit_code
+}
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 
@@ -128,9 +174,7 @@ else
 fi
 
 if $NEED_NODE; then
-  log "Installing Node.js 20..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-  apt-get install -y -qq nodejs
+  run_with_progress "Installing Node.js 20" bash -c "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y -qq nodejs"
 fi
 success "Node.js $(node -v)"
 
@@ -282,16 +326,12 @@ success "Database '${DB_NAME}' ready (user: ${DB_USER})"
 log "Installing application to ${INSTALL_DIR}..."
 
 if [[ -d "$INSTALL_DIR/.git" ]]; then
-  log "Existing installation found, pulling latest..."
-  cd "$INSTALL_DIR"
-  sudo -u "$APP_USER" git pull origin "$BRANCH" 2>/dev/null || git pull origin "$BRANCH"
+  run_with_progress "Pulling latest code" bash -c "cd ${INSTALL_DIR} && (sudo -u ${APP_USER} git pull origin ${BRANCH} 2>/dev/null || git pull origin ${BRANCH})"
 else
-  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
-  chown -R "${APP_USER}:${APP_USER}" "$INSTALL_DIR"
+  run_with_progress "Cloning repository" bash -c "git clone --depth 1 --branch ${BRANCH} ${REPO_URL} ${INSTALL_DIR} && chown -R ${APP_USER}:${APP_USER} ${INSTALL_DIR}"
 fi
 
 cd "$INSTALL_DIR"
-success "Application installed"
 
 # ── Step 4: Create/update .env.local ─────────────────────────────────────────
 
@@ -395,22 +435,14 @@ success "Configuration written to .env.local"
 
 # ── Step 5: Install dependencies & build ─────────────────────────────────────
 
-log "Installing dependencies..."
 cd "$INSTALL_DIR"
-sudo -u "$APP_USER" pnpm install --frozen-lockfile 2>/dev/null || sudo -u "$APP_USER" pnpm install
-success "Dependencies installed"
+run_with_progress "Installing dependencies" sudo -u "$APP_USER" bash -c "cd ${INSTALL_DIR} && pnpm install --frozen-lockfile 2>/dev/null || pnpm install"
 
-log "Generating Prisma client..."
-sudo -u "$APP_USER" node node_modules/prisma/build/index.js generate
-success "Prisma client generated"
+run_with_progress "Generating Prisma client" sudo -u "$APP_USER" node node_modules/prisma/build/index.js generate
 
-log "Pushing database schema..."
-sudo -u "$APP_USER" env DATABASE_URL="${DB_URL_FINAL}" npx prisma db push
-success "Database schema applied"
+run_with_progress "Pushing database schema" sudo -u "$APP_USER" env DATABASE_URL="${DB_URL_FINAL}" npx prisma db push --accept-data-loss
 
-log "Building application (this may take a few minutes)..."
-sudo -u "$APP_USER" env $(grep -v '^#' "${INSTALL_DIR}/.env.local" | xargs) pnpm build
-success "Application built"
+run_with_progress "Building application" sudo -u "$APP_USER" bash -c "cd ${INSTALL_DIR} && env \$(grep -v '^#' .env.local | xargs) pnpm build"
 
 # ── Step 6: Create systemd service ──────────────────────────────────────────
 
@@ -500,7 +532,57 @@ APACHE
     apache2ctl configtest && systemctl reload apache2
     success "Apache HTTP vhost configured for ${DOMAIN}"
 
+    # ── Firewall check: certbot needs ports 80 and 443 open ──
+    FIREWALL_BLOCKING=false
+    FIREWALL_NAME=""
+
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+      FIREWALL_NAME="ufw"
+      # Check if 80 and 443 are allowed
+      if ! ufw status | grep -qE "80(/tcp)?\s+ALLOW" || ! ufw status | grep -qE "443(/tcp)?\s+ALLOW"; then
+        FIREWALL_BLOCKING=true
+      fi
+    elif command -v firewall-cmd &>/dev/null && firewall-cmd --state 2>/dev/null | grep -q "running"; then
+      FIREWALL_NAME="firewalld"
+      if ! firewall-cmd --list-ports 2>/dev/null | grep -qE "(80|http)" && \
+         ! firewall-cmd --list-services 2>/dev/null | grep -q "http"; then
+        FIREWALL_BLOCKING=true
+      fi
+    elif command -v iptables &>/dev/null; then
+      # Only flag if iptables has a DROP/REJECT policy or explicit drop rules for 80/443
+      if iptables -L INPUT -n 2>/dev/null | grep -qi "DROP\|REJECT"; then
+        # Check if 80/443 are explicitly allowed
+        if ! iptables -L INPUT -n 2>/dev/null | grep -qE "dpt:(80|443)\s.*ACCEPT"; then
+          FIREWALL_NAME="iptables"
+          FIREWALL_BLOCKING=true
+        fi
+      fi
+    fi
+
+    if $FIREWALL_BLOCKING; then
+      echo ""
+      warn "Firewall detected (${FIREWALL_NAME}) — ports 80 and 443 may be blocked."
+      warn "Certbot needs both ports open to verify your domain."
+      echo ""
+      if [[ "$FIREWALL_NAME" == "ufw" ]]; then
+        echo "  Fix with:  ufw allow 80/tcp && ufw allow 443/tcp"
+      elif [[ "$FIREWALL_NAME" == "firewalld" ]]; then
+        echo "  Fix with:  firewall-cmd --permanent --add-service=http --add-service=https && firewall-cmd --reload"
+      elif [[ "$FIREWALL_NAME" == "iptables" ]]; then
+        echo "  Fix with:  iptables -I INPUT -p tcp --dport 80 -j ACCEPT && iptables -I INPUT -p tcp --dport 443 -j ACCEPT"
+      fi
+      echo ""
+      read -rp "  Continue anyway? [y/N] " FW_CONTINUE
+      if [[ ! "$FW_CONTINUE" =~ ^[Yy]$ ]]; then
+        warn "Skipping SSL setup. Open the firewall ports and re-run, or run manually:"
+        warn "  certbot --apache -d ${DOMAIN}"
+        # Skip certbot but don't exit — the rest of the install is still valid
+        SKIP_CERTBOT=true
+      fi
+    fi
+
     # Install certbot and obtain SSL certificate
+    if [[ "${SKIP_CERTBOT:-false}" != "true" ]]; then
     log "Setting up SSL certificate with Let's Encrypt..."
 
     if ! command -v certbot &>/dev/null; then
@@ -547,6 +629,8 @@ APACHE
       warn "SSL certificate failed — site is accessible via HTTP only"
       warn "Retry manually: certbot --apache -d ${DOMAIN}"
     fi
+
+    fi  # end SKIP_CERTBOT check
 
   else
     # ── Localhost mode: simple reverse proxy, no SSL ──

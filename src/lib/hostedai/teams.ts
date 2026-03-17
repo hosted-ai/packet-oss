@@ -82,7 +82,7 @@ export async function onboardUser(params: {
   name: string;
   password: string;
 }): Promise<{ success: boolean }> {
-  const url = `${getApiUrl()}/api/onboard`;
+  const url = `${await getApiUrl()}/api/onboard`;
 
   console.log("Onboarding user:", params.email, "with name:", params.name);
   console.log("Password details - length:", params.password.length,

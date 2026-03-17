@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
-import { subscribeToPool, getAllPools, getPoolEphemeralStorageBlocks, selectOptimalPool, subscribeWithFallback } from "@/lib/hostedai";
+import { subscribeToPool, getAllPools, getPoolEphemeralStorageBlocks, selectOptimalPool, subscribeWithFallback, getApiUrl, getApiKey } from "@/lib/hostedai";
 import { getWalletBalance, deductUsage, refundDeployment } from "@/lib/wallet";
 import { getProductByPoolId } from "@/lib/products";
 import { prisma } from "@/lib/prisma";
@@ -122,8 +122,7 @@ export async function POST(request: NextRequest) {
     let selectedInstanceTypeId = instanceTypeId;
     if (!selectedInstanceTypeId) {
       try {
-        const apiUrl = process.env.HOSTEDAI_API_URL!;
-        const apiKey = process.env.HOSTEDAI_API_KEY!;
+        const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
 
         const response = await fetch(`${apiUrl}/api/instance-type`, {
           method: "GET",

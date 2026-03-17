@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStripe } from "@/lib/stripe";
+import { getStripeAsync } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { rateLimit, getClientIp } from "@/lib/ratelimit";
 import { generateCustomerToken } from "@/lib/customer-auth";
@@ -185,7 +185,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const stripe = getStripe();
+    const stripe = await getStripeAsync();
 
     // Check if customer already exists
     const existingCustomers = await stripe.customers.list({

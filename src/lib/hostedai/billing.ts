@@ -26,13 +26,14 @@ export async function getTeamBillingSummary(
   endDatetime: string, // YYYY-MM-DDTHH:mm
   interval: "daily" | "weekly" | "monthly" = "daily"
 ): Promise<TeamBillingData> {
-  const url = `${getApiUrl()}/api/team-billing/${teamId}/${startDatetime}/${endDatetime}/${interval}?timezone=UTC`;
+  const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
+  const url = `${apiUrl}/api/team-billing/${teamId}/${startDatetime}/${endDatetime}/${interval}?timezone=UTC`;
 
   try {
     const response = await fetch(url, {
       method: "GET",
       headers: {
-        "X-API-Key": getApiKey(),
+        "X-API-Key": apiKey,
         "Content-Type": "application/json",
       },
     });
@@ -96,7 +97,8 @@ export async function getTeamBillingSummaryV2(
   startDatetime: string, // YYYY-MM-DDTHH:mm
   endDatetime: string // YYYY-MM-DDTHH:mm
 ): Promise<BillingSummaryResponse> {
-  const url = `${getApiUrl()}/api/team-billing/summary/${teamId}/${startDatetime}/${endDatetime}`;
+  const [apiUrl2, apiKey2] = await Promise.all([getApiUrl(), getApiKey()]);
+  const url = `${apiUrl2}/api/team-billing/summary/${teamId}/${startDatetime}/${endDatetime}`;
 
   console.log("Fetching team billing summary from:", url);
 
@@ -104,7 +106,7 @@ export async function getTeamBillingSummaryV2(
     const response = await fetch(url, {
       method: "GET",
       headers: {
-        "X-API-Key": getApiKey(),
+        "X-API-Key": apiKey2,
         "Content-Type": "application/json",
       },
     });

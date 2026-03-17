@@ -9,6 +9,8 @@ import {
   createSharedVolume,
   subscribeToPool,
   unsubscribeFromPool,
+  getApiUrl,
+  getApiKey,
 } from "@/lib/hostedai";
 import Stripe from "stripe";
 
@@ -172,8 +174,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     // Get instance type
-    const apiUrl = process.env.HOSTEDAI_API_URL!;
-    const apiKey = process.env.HOSTEDAI_API_KEY!;
+    const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
 
     let instanceTypeId: string | undefined;
     try {

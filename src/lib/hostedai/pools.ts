@@ -97,7 +97,8 @@ export async function getAvailablePools(
   teamId: string,
   gpuaasId: string
 ): Promise<GPUPool[]> {
-  const url = `${getApiUrl()}/api/gpuaas/available-pools?team_id=${teamId}&gpuaas_id=${gpuaasId}`;
+  const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
+  const url = `${apiUrl}/api/gpuaas/available-pools?team_id=${teamId}&gpuaas_id=${gpuaasId}`;
 
   // 30 second timeout — B200 cluster API can take 15-20s to respond
   const controller = new AbortController();
@@ -106,7 +107,7 @@ export async function getAvailablePools(
   const response = await fetch(url, {
     method: "GET",
     headers: {
-      "X-API-Key": getApiKey(),
+      "X-API-Key": apiKey,
       "Content-Type": "application/json",
     },
     signal: controller.signal,
