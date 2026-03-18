@@ -267,7 +267,7 @@ export function generateSessionToken(email: string): string {
   return jwt.sign(
     { email: email.toLowerCase(), type: "admin-session" },
     getJwtSecret(),
-    { expiresIn: "1h" }
+    { expiresIn: "4h" }
   );
 }
 

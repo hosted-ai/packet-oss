@@ -5,6 +5,7 @@ import {
   emailLayout, emailButton, emailGreeting, emailText, emailMuted,
   emailInfoBox, emailSignoff, escapeHtml, plainTextFooter,
 } from "@/lib/email/utils";
+import { loadTemplate } from "@/lib/email/template-loader";
 import { rateLimit, getClientIp } from "@/lib/ratelimit";
 import { generateCustomerToken } from "@/lib/customer-auth";
 import { getTeamMemberships, acceptTeamInvite } from "@/lib/team-members";
@@ -48,40 +49,59 @@ async function sendTeamMemberAccessEmail(params: {
   const safeMemberName = escapeHtml(memberName);
   const safeTeamOwnerName = escapeHtml(teamOwnerName);
   const expiryText = formatExpiryText(params.sessionTimeoutHours || 1);
+  const brandName = getBrandName();
+  const dashboardUrl = getDashboardUrl();
+
+  const subject = `Your {{brandName}} login link`;
+  const html = emailLayout({
+    preheader: `Your login link for {{brandName}}`,
+    body: `
+      ${emailGreeting("{{memberName}}")}
+      ${emailText(`Here is your login link for {{brandName}}:`)}
+      ${emailButton("Open Team Dashboard", "{{accountUrl}}")}
+      ${emailInfoBox(`
+        <p style="margin: 0; font-size: 14px; color: #0b0f1c;">
+          <strong>Team:</strong> {{teamOwnerName}}'s workspace<br>
+          You have team member access to this {{brandName}} dashboard.
+        </p>
+      `)}
+      ${emailMuted(`This link expires in {{expiryText}}. Request a new one at <a href="{{dashboardUrl}}/account" style="color: #1a4fff;">{{dashboardUrl}}/account</a>`)}
+      ${emailMuted("Did not request this? You can safely ignore this email.")}
+      ${emailSignoff()}
+    `,
+  });
+  const text = `Hi {{memberName}},
+
+Here is your login link for {{brandName}}:
+
+Open Team Dashboard: {{accountUrl}}
+
+Team: {{teamOwnerName}}'s workspace
+You have team member access to this {{brandName}} dashboard.
+
+This link expires in {{expiryText}}. Request a new one at {{dashboardUrl}}/account
+
+Did not request this? You can ignore this email.
+${plainTextFooter()}`;
+
+  const template = await loadTemplate(
+    "team-member-login",
+    {
+      memberName: safeMemberName,
+      teamOwnerName: safeTeamOwnerName,
+      accountUrl,
+      expiryText,
+      brandName,
+      dashboardUrl,
+    },
+    { subject, html, text }
+  );
 
   await sendEmail({
     to,
-    subject: `Your ${getBrandName()} login link`,
-    html: emailLayout({
-      preheader: `Your login link for ${getBrandName()}`,
-      body: `
-        ${emailGreeting(memberName)}
-        ${emailText(`Here is your login link for ${getBrandName()}:`)}
-        ${emailButton("Open Team Dashboard", accountUrl)}
-        ${emailInfoBox(`
-          <p style="margin: 0; font-size: 14px; color: #0b0f1c;">
-            <strong>Team:</strong> ${safeTeamOwnerName}'s workspace<br>
-            You have team member access to this ${getBrandName()} dashboard.
-          </p>
-        `)}
-        ${emailMuted(`This link expires in ${expiryText}. Request a new one at <a href="${getDashboardUrl()}/account" style="color: #1a4fff;">${getDashboardUrl()}/account</a>`)}
-        ${emailMuted("Did not request this? You can safely ignore this email.")}
-        ${emailSignoff()}
-      `,
-    }),
-    text: `Hi ${memberName},
-
-Here is your login link for ${getBrandName()}:
-
-Open Team Dashboard: ${accountUrl}
-
-Team: ${teamOwnerName}'s workspace
-You have team member access to this ${getBrandName()} dashboard.
-
-This link expires in ${expiryText}. Request a new one at ${getDashboardUrl()}/account
-
-Did not request this? You can ignore this email.
-${plainTextFooter()}`,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -93,33 +113,33 @@ async function sendFreeTrialAccessEmail(params: {
 }) {
   const { to, customerName, accountUrl } = params;
   const safeCustomerName = escapeHtml(customerName);
+  const brandName = getBrandName();
+  const dashboardUrl = getDashboardUrl();
 
-  await sendEmail({
-    to,
-    subject: `Your ${getBrandName()} login link`,
-    html: emailLayout({
-      preheader: `Your login link for ${getBrandName()}`,
-      body: `
-        ${emailGreeting(customerName)}
-        ${emailText(`Here is your login link for ${getBrandName()}:`)}
-        ${emailButton("Open Dashboard", accountUrl)}
-        ${emailText("From your dashboard you can:")}
-        <ul style="font-size: 15px; line-height: 1.8; color: #0b0f1c; padding-left: 20px; margin: 0 0 16px 0;">
-          <li>Use Token Factory for LLM inference</li>
-          <li>Create and manage your API keys</li>
-          <li>Run batch processing jobs</li>
-        </ul>
-        ${emailMuted("Need dedicated GPU instances? Add funds from the Billing tab in your dashboard.")}
-        ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="${getDashboardUrl()}/account" style="color: #1a4fff;">${getDashboardUrl()}/account</a>`)}
-        ${emailMuted("Did not request this? You can safely ignore this email.")}
-        ${emailSignoff()}
-      `,
-    }),
-    text: `Hi ${customerName},
+  const subject = `Your {{brandName}} login link`;
+  const html = emailLayout({
+    preheader: `Your login link for {{brandName}}`,
+    body: `
+      ${emailGreeting("{{customerName}}")}
+      ${emailText(`Here is your login link for {{brandName}}:`)}
+      ${emailButton("Open Dashboard", "{{accountUrl}}")}
+      ${emailText("From your dashboard you can:")}
+      <ul style="font-size: 15px; line-height: 1.8; color: #0b0f1c; padding-left: 20px; margin: 0 0 16px 0;">
+        <li>Use Token Factory for LLM inference</li>
+        <li>Create and manage your API keys</li>
+        <li>Run batch processing jobs</li>
+      </ul>
+      ${emailMuted("Need dedicated GPU instances? Add funds from the Billing tab in your dashboard.")}
+      ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="{{dashboardUrl}}/account" style="color: #1a4fff;">{{dashboardUrl}}/account</a>`)}
+      ${emailMuted("Did not request this? You can safely ignore this email.")}
+      ${emailSignoff()}
+    `,
+  });
+  const text = `Hi {{customerName}},
 
-Here is your login link for ${getBrandName()}:
+Here is your login link for {{brandName}}:
 
-Open Dashboard: ${accountUrl}
+Open Dashboard: {{accountUrl}}
 
 From your dashboard you can:
 - Use Token Factory for LLM inference
@@ -128,8 +148,25 @@ From your dashboard you can:
 
 Need dedicated GPU instances? Add funds from the Billing tab in your dashboard.
 
-This link expires in 1 hour. Request a new one at ${getDashboardUrl()}/account
-${plainTextFooter()}`,
+This link expires in 1 hour. Request a new one at {{dashboardUrl}}/account
+${plainTextFooter()}`;
+
+  const template = await loadTemplate(
+    "free-trial-login",
+    {
+      customerName: safeCustomerName,
+      accountUrl,
+      brandName,
+      dashboardUrl,
+    },
+    { subject, html, text }
+  );
+
+  await sendEmail({
+    to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -141,48 +178,66 @@ async function sendAccessEmail(params: {
 }) {
   const { to, customerName, accountUrl, billingUrl } = params;
   const safeCustomerName = escapeHtml(customerName);
+  const brandName = getBrandName();
+  const dashboardUrl = getDashboardUrl();
 
-  await sendEmail({
-    to,
-    subject: `Your ${getBrandName()} login link`,
-    html: emailLayout({
-      preheader: `Your login link for ${getBrandName()}`,
-      body: `
-        ${emailGreeting(customerName)}
-        ${emailText(`Here is your login link for ${getBrandName()}:`)}
-        ${emailButton("Open Dashboard", accountUrl)}
-        ${emailText("From your dashboard you can:")}
-        <ul style="font-size: 15px; line-height: 1.8; color: #0b0f1c; padding-left: 20px; margin: 0 0 16px 0;">
-          <li>Access your GPU dashboard</li>
-          <li>Check wallet balance and usage</li>
-          <li>View payments and invoices</li>
-        </ul>
-        ${emailInfoBox(`
-          <p style="margin: 0; font-size: 14px; color: #0b0f1c;">
-            <strong>Manage billing:</strong>
-            <a href="${billingUrl}" style="color: #1a4fff; text-decoration: none;">Open billing portal</a> to update payment methods or view invoices.
-          </p>
-        `)}
-        ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="${getDashboardUrl()}/account" style="color: #1a4fff;">${getDashboardUrl()}/account</a>`)}
-        ${emailMuted("Did not request this? You can safely ignore this email.")}
-        ${emailSignoff()}
-      `,
-    }),
-    text: `Hi ${customerName},
+  const subject = `Your {{brandName}} login link`;
+  const html = emailLayout({
+    preheader: `Your login link for {{brandName}}`,
+    body: `
+      ${emailGreeting("{{customerName}}")}
+      ${emailText(`Here is your login link for {{brandName}}:`)}
+      ${emailButton("Open Dashboard", "{{accountUrl}}")}
+      ${emailText("From your dashboard you can:")}
+      <ul style="font-size: 15px; line-height: 1.8; color: #0b0f1c; padding-left: 20px; margin: 0 0 16px 0;">
+        <li>Access your GPU dashboard</li>
+        <li>Check wallet balance and usage</li>
+        <li>View payments and invoices</li>
+      </ul>
+      ${emailInfoBox(`
+        <p style="margin: 0; font-size: 14px; color: #0b0f1c;">
+          <strong>Manage billing:</strong>
+          <a href="{{billingUrl}}" style="color: #1a4fff; text-decoration: none;">Open billing portal</a> to update payment methods or view invoices.
+        </p>
+      `)}
+      ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="{{dashboardUrl}}/account" style="color: #1a4fff;">{{dashboardUrl}}/account</a>`)}
+      ${emailMuted("Did not request this? You can safely ignore this email.")}
+      ${emailSignoff()}
+    `,
+  });
+  const text = `Hi {{customerName}},
 
-Here is your login link for ${getBrandName()}:
+Here is your login link for {{brandName}}:
 
-Open Dashboard: ${accountUrl}
+Open Dashboard: {{accountUrl}}
 
 From your dashboard you can:
 - Access your GPU dashboard
 - Check wallet balance and usage
 - View payments and invoices
 
-Manage billing: ${billingUrl}
+Manage billing: {{billingUrl}}
 
-This link expires in 1 hour. Request a new one at ${getDashboardUrl()}/account
-${plainTextFooter()}`,
+This link expires in 1 hour. Request a new one at {{dashboardUrl}}/account
+${plainTextFooter()}`;
+
+  const template = await loadTemplate(
+    "customer-login",
+    {
+      customerName: safeCustomerName,
+      accountUrl,
+      billingUrl,
+      brandName,
+      dashboardUrl,
+    },
+    { subject, html, text }
+  );
+
+  await sendEmail({
+    to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 

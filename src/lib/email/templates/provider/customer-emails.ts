@@ -7,6 +7,7 @@
 import { sendEmail } from "../../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButton, emailDangerBox, emailDetailBox, emailInfoBox, emailMuted, emailSignoff, plainTextFooter } from "../../utils";
 import { getBrandName, getSupportEmail, getAppUrl } from "@/lib/branding";
+import { loadTemplate } from "../../template-loader";
 
 const APP_URL = getAppUrl();
 
@@ -88,10 +89,22 @@ If you have any questions or need assistance migrating, please contact us at ${g
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
-  await sendEmail({
-    to: params.to,
+  const template = await loadTemplate("customer-server-removal", {
+    customerName: params.customerName || "",
+    serverName: params.serverName,
+    gpuModel: params.gpuModel,
+    removalDate: params.removalDate,
+    daysRemaining: String(params.daysRemaining),
+  }, {
     subject: `Action Required: Your GPU Server Will Be Removed on ${params.removalDate}`,
     html,
     text,
+  });
+
+  await sendEmail({
+    to: params.to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }

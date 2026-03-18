@@ -12,6 +12,7 @@ import {
   type Investor,
 } from "@/lib/auth/investor";
 import { sendEmail } from "@/lib/email";
+import { loadTemplate } from "@/lib/email/template-loader";
 import { getBrandName } from "@/lib/branding";
 
 const addInvestorSchema = z.object({
@@ -27,9 +28,11 @@ const loginAsSchema = z.object({
 });
 
 async function sendInvestorInviteEmail(email: string, loginUrl: string, invitedBy: string) {
-  await sendEmail({
-    to: email,
-    subject: `You've been invited to the ${getBrandName()} Investor Dashboard`,
+  const brandName = getBrandName();
+  const variables = { email, loginUrl, invitedBy, brandName };
+
+  const fallback = {
+    subject: `You've been invited to the {{brandName}} Investor Dashboard`,
     html: `
       <!DOCTYPE html>
       <html>
@@ -39,15 +42,15 @@ async function sendInvestorInviteEmail(email: string, loginUrl: string, invitedB
         </head>
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #000; margin: 0;">${getBrandName()} Investor Dashboard</h1>
+            <h1 style="color: #000; margin: 0;">{{brandName}} Investor Dashboard</h1>
           </div>
 
-          <p>You've been invited by <strong>${invitedBy}</strong> to access the ${getBrandName()} Investor Dashboard.</p>
+          <p>You've been invited by <strong>{{invitedBy}}</strong> to access the {{brandName}} Investor Dashboard.</p>
 
           <p>Click the button below to log in and view real-time business metrics:</p>
 
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${loginUrl}" style="display: inline-block; background-color: #6366f1; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 500;">
+            <a href="{{loginUrl}}" style="display: inline-block; background-color: #6366f1; color: #fff; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 500;">
               Access Investor Dashboard
             </a>
           </div>
@@ -58,7 +61,16 @@ async function sendInvestorInviteEmail(email: string, loginUrl: string, invitedB
         </body>
       </html>
     `,
-    text: `You've been invited to the ${getBrandName()} Investor Dashboard by ${invitedBy}.\n\nAccess the dashboard: ${loginUrl}\n\nThis link expires in 24 hours.`,
+    text: `You've been invited to the {{brandName}} Investor Dashboard by {{invitedBy}}.\n\nAccess the dashboard: {{loginUrl}}\n\nThis link expires in 24 hours.`,
+  };
+
+  const template = await loadTemplate("investor-invite", variables, fallback);
+
+  await sendEmail({
+    to: email,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 

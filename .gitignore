@@ -107,3 +107,4 @@ pnpm-lock.yaml
 dist/deb/
 packetdb-production-*
 .cache/
+.gstack/

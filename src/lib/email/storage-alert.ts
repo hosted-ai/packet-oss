@@ -9,6 +9,7 @@ import { sendEmail } from "./client";
 import { emailLayout, emailGreeting, emailText, emailWarningBox, emailButton, emailMuted, emailSignoff, plainTextFooter } from "./utils";
 import { getStripe } from "@/lib/stripe";
 import { getBrandName, getDashboardUrl } from "@/lib/branding";
+import { loadTemplate } from "./template-loader";
 
 interface StorageAlertParams {
   subscriptionId: string;
@@ -81,6 +82,14 @@ This is a one-time alert for this instance.
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
-  await sendEmail({ to: email, subject, html, text });
+  const template = await loadTemplate("storage-alert", {
+    displayName,
+    usedGb,
+    totalGb,
+    percent: String(pct),
+    dashboardUrl: `${getDashboardUrl()}/dashboard`,
+  }, { subject, html, text });
+
+  await sendEmail({ to: email, subject: template.subject, html: template.html, text: template.text });
   console.log(`[Storage Alert] Email sent to ${email} for subscription ${subscriptionId}`);
 }

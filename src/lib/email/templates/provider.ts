@@ -7,6 +7,7 @@
 import { sendEmail } from "../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButton, emailInfoBox, emailSuccessBox, emailDetailBox, emailMuted, emailSignoff, plainTextFooter } from "../utils";
 import { getBrandName, getSupportEmail } from "@/lib/branding";
+import { loadTemplate } from "../template-loader";
 
 // Re-export functions from split files for backward compatibility
 export * from "./provider/node-emails";
@@ -46,11 +47,20 @@ This link will expire in 15 minutes. If you didn't request this login link, you 
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
-  await sendEmail({
-    to: params.to,
+  const template = await loadTemplate("provider-login", {
+    companyName: params.companyName,
+    loginUrl: params.loginUrl,
+  }, {
     subject: `Login to ${getBrandName()} Provider Portal`,
     html,
     text,
+  });
+
+  await sendEmail({
+    to: params.to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -120,11 +130,16 @@ If you have any questions, feel free to reply to this email or contact us at ${g
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
+  const template = await loadTemplate("provider-app-received", {
+    contactName: params.contactName,
+    companyName: params.companyName,
+  }, { subject, html, text });
+
   await sendEmail({
     to: params.to,
-    subject,
-    html,
-    text,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -209,11 +224,17 @@ If you have any questions, our team is here to help at ${getSupportEmail()}.
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
+  const template = await loadTemplate("provider-approved", {
+    contactName: params.contactName,
+    companyName: params.companyName,
+    loginUrl: params.loginUrl,
+  }, { subject, html, text });
+
   await sendEmail({
     to: params.to,
-    subject,
-    html,
-    text,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -256,10 +277,20 @@ If you believe this was in error or would like to discuss further, please reply 
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
-  await sendEmail({
-    to: params.to,
+  const template = await loadTemplate("provider-rejected", {
+    contactName: params.contactName,
+    companyName: params.companyName,
+    reason: params.reason || "",
+  }, {
     subject: `${getBrandName()} Provider Application Update`,
     html,
     text,
+  });
+
+  await sendEmail({
+    to: params.to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }

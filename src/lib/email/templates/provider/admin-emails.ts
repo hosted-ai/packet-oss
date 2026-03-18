@@ -9,6 +9,7 @@ import { getSetting } from "@/lib/settings";
 import { escapeHtml, emailLayout, emailButton, emailDetailBox, emailMuted, plainTextFooter } from "../../utils";
 import { generateAdminToken } from "@/lib/auth/admin";
 import { getAppUrl } from "@/lib/branding";
+import { loadTemplate } from "../../template-loader";
 
 const APP_URL = getAppUrl();
 
@@ -109,11 +110,22 @@ export async function sendAdminNewProviderAlert(params: {
   }
   textLines.push("", `Review in admin panel: ${adminLoginUrl}`, "", "This link will log you in automatically and expires in 15 minutes.", plainTextFooter(true));
 
-  await sendEmailDirect({
-    to: adminEmail,
+  const template = await loadTemplate("admin-new-provider", {
+    companyName: params.companyName,
+    contactName: params.contactName,
+    email: params.email,
+    applicationType: params.applicationType || "provider",
+  }, {
     subject: `New ${typeLabel} Application: ${params.companyName}`,
     html,
     text: textLines.join("\n"),
+  });
+
+  await sendEmailDirect({
+    to: adminEmail,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -181,10 +193,22 @@ Review in admin panel: ${adminLoginUrl}
 This link will log you in automatically and expires in 15 minutes.
 ${plainTextFooter(true)}`;
 
-  await sendEmailDirect({
-    to: adminEmail,
+  const template = await loadTemplate("admin-new-node", {
+    companyName: params.companyName,
+    nodeName: params.nodeName,
+    ipAddress: params.ipAddress,
+    gpuModel: params.gpuModel || "",
+    gpuCount: params.gpuCount ? String(params.gpuCount) : "",
+  }, {
     subject: `New Server Submission: ${params.nodeName} from ${params.companyName}`,
     html,
     text,
+  });
+
+  await sendEmailDirect({
+    to: adminEmail,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }

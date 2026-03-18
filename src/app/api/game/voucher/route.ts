@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
+import { loadTemplate } from "@/lib/email/template-loader";
 import { getBrandName, getDashboardUrl, getSupportEmail, getAppUrl } from "@/lib/branding";
 
 const MONTHLY_VOUCHER_LIMIT = 5; // Max 5 vouchers per email per month
@@ -16,18 +17,7 @@ function generateVoucherCode(): string {
   return code;
 }
 
-function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt: Date): string {
-  const brandName = getBrandName();
-  const dashUrl = getDashboardUrl();
-  const supportEmail = getSupportEmail();
-  const appUrl = getAppUrl();
-  const creditDollars = (creditCents / 100).toFixed(2);
-  const expiresDate = expiresAt.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
+function getVoucherEmailHtml(): string {
   return `
 <!DOCTYPE html>
 <html>
@@ -53,11 +43,11 @@ function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt
             <td style="padding: 32px;">
               <div style="background: rgba(34, 197, 94, 0.1); border: 2px solid #22c55e; border-radius: 12px; padding: 24px; text-align: center;">
                 <p style="margin: 0 0 12px; color: #22c55e; font-size: 12px; text-transform: uppercase; letter-spacing: 2px;">Your Voucher Code</p>
-                <p style="margin: 0; font-size: 32px; font-weight: 900; font-family: monospace; color: #feca57; letter-spacing: 2px;">${voucherCode}</p>
+                <p style="margin: 0; font-size: 32px; font-weight: 900; font-family: monospace; color: #feca57; letter-spacing: 2px;">{{voucherCode}}</p>
               </div>
 
               <div style="margin-top: 24px; text-align: center;">
-                <p style="margin: 0 0 8px; color: #64ffda; font-size: 24px; font-weight: 700;">$${creditDollars} GPU Credits</p>
+                <p style="margin: 0 0 8px; color: #64ffda; font-size: 24px; font-weight: 700;">\${{creditDollars}} GPU Credits</p>
                 <p style="margin: 0; color: #888; font-size: 14px;">≈ 1 hour of RTX PRO 6000 compute time</p>
               </div>
             </td>
@@ -69,7 +59,7 @@ function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt
               <div style="background: #0a0a0f; border-radius: 8px; padding: 20px;">
                 <p style="margin: 0 0 12px; color: #fff; font-weight: 600;">How to use your voucher:</p>
                 <ol style="margin: 0; padding-left: 20px; color: #aaa; font-size: 14px; line-height: 1.8;">
-                  <li>Sign up at <a href="${dashUrl}/checkout" style="color: #64ffda;">${brandName}</a></li>
+                  <li>Sign up at <a href="{{dashboardUrl}}/checkout" style="color: #64ffda;">{{brandName}}</a></li>
                   <li>Enter your voucher code at checkout</li>
                   <li>Or add it in Dashboard → Billing → Add Voucher</li>
                 </ol>
@@ -80,21 +70,21 @@ function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt
           <!-- CTA Button -->
           <tr>
             <td style="padding: 0 32px 32px; text-align: center;">
-              <a href="${dashUrl}/checkout" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #e94560, #ff6b6b); color: #fff; text-decoration: none; font-weight: 700; border-radius: 8px; font-size: 16px;">Start Using GPUs →</a>
+              <a href="{{dashboardUrl}}/checkout" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #e94560, #ff6b6b); color: #fff; text-decoration: none; font-weight: 700; border-radius: 8px; font-size: 16px;">Start Using GPUs →</a>
             </td>
           </tr>
 
           <!-- Footer -->
           <tr>
             <td style="padding: 24px 32px; border-top: 1px solid #2a2a4a; text-align: center;">
-              <p style="margin: 0 0 8px; color: #666; font-size: 12px;">Expires: ${expiresDate}</p>
-              <p style="margin: 0; color: #666; font-size: 12px;">Questions? Reply to this email or contact ${supportEmail}</p>
+              <p style="margin: 0 0 8px; color: #666; font-size: 12px;">Expires: {{expiresDate}}</p>
+              <p style="margin: 0; color: #666; font-size: 12px;">Questions? Reply to this email or contact {{supportEmail}}</p>
             </td>
           </tr>
         </table>
 
         <p style="margin: 24px 0 0; color: #444; font-size: 12px;">
-          <a href="${appUrl}" style="color: #666;">${brandName}</a> - GPU Infrastructure for AI
+          <a href="{{appUrl}}" style="color: #666;">{{brandName}}</a> - GPU Infrastructure for AI
         </p>
       </td>
     </tr>
@@ -104,39 +94,28 @@ function getVoucherEmailHtml(voucherCode: string, creditCents: number, expiresAt
 `;
 }
 
-function getVoucherEmailText(voucherCode: string, creditCents: number, expiresAt: Date): string {
-  const brandName = getBrandName();
-  const dashUrl = getDashboardUrl();
-  const supportEmail = getSupportEmail();
-  const appUrl = getAppUrl();
-  const creditDollars = (creditCents / 100).toFixed(2);
-  const expiresDate = expiresAt.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-
+function getVoucherEmailText(): string {
   return `
 🎮 GPU TETRIS WINNER!
 
 Congratulations on optimizing your GPUs!
 
-YOUR VOUCHER CODE: ${voucherCode}
+YOUR VOUCHER CODE: {{voucherCode}}
 
-Value: $${creditDollars} GPU Credits (≈ 1 hour of RTX PRO 6000 compute time)
+Value: \${{creditDollars}} GPU Credits (≈ 1 hour of RTX PRO 6000 compute time)
 
 HOW TO USE:
-1. Sign up at ${dashUrl}/checkout
+1. Sign up at {{dashboardUrl}}/checkout
 2. Enter your voucher code at checkout
 3. Or add it in Dashboard → Billing → Add Voucher
 
-Expires: ${expiresDate}
+Expires: {{expiresDate}}
 
-Questions? Contact ${supportEmail}
+Questions? Contact {{supportEmail}}
 
 ---
-${brandName} - GPU Infrastructure for AI
-${appUrl}
+{{brandName}} - GPU Infrastructure for AI
+{{appUrl}}
 `;
 }
 
@@ -231,11 +210,34 @@ export async function POST(request: NextRequest) {
 
     // Send voucher email
     try {
+      const creditDollars = (CREDIT_CENTS / 100).toFixed(2);
+      const expiresDate = expiresAt.toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+
+      const templateVars = {
+        voucherCode,
+        creditDollars,
+        expiresDate,
+        brandName: getBrandName(),
+        dashboardUrl: getDashboardUrl(),
+        supportEmail: getSupportEmail(),
+        appUrl: getAppUrl(),
+      };
+
+      const template = await loadTemplate("game-voucher", templateVars, {
+        subject: `🎮 Your GPU Tetris Voucher: {{voucherCode}}`,
+        html: getVoucherEmailHtml(),
+        text: getVoucherEmailText(),
+      });
+
       await sendEmail({
         to: normalizedEmail,
-        subject: `🎮 Your GPU Tetris Voucher: ${voucherCode}`,
-        html: getVoucherEmailHtml(voucherCode, CREDIT_CENTS, expiresAt),
-        text: getVoucherEmailText(voucherCode, CREDIT_CENTS, expiresAt),
+        subject: template.subject,
+        html: template.html,
+        text: template.text,
       });
       console.log(`[Game Voucher] Email sent to ${normalizedEmail}`);
     } catch (emailError) {

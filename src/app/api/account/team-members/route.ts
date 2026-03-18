@@ -11,6 +11,7 @@ import {
   ensureOwnerRecord,
 } from "@/lib/team-members";
 import { getBrandName } from "@/lib/branding";
+import { loadTemplate } from "@/lib/email/template-loader";
 
 // Send invite email to new team member
 async function sendTeamInviteEmail(params: {
@@ -22,12 +23,12 @@ async function sendTeamInviteEmail(params: {
 }) {
   const { to, inviterName, inviterEmail, teamOwnerName, dashboardUrl } = params;
   const safeInviterName = escapeHtml(inviterName);
+  const safeInviterEmail = escapeHtml(inviterEmail);
   const safeTeamOwnerName = escapeHtml(teamOwnerName);
+  const brandName = getBrandName();
 
-  await sendEmail({
-    to,
-    subject: `${safeInviterName} invited you to ${getBrandName()}`,
-    html: `
+  const subject = `{{inviterName}} invited you to {{brandName}}`;
+  const html = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -36,12 +37,12 @@ async function sendTeamInviteEmail(params: {
         </head>
         <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.7; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
           <div style="text-align: center; margin-bottom: 30px;">
-            <h1 style="color: #000; margin: 0; font-size: 28px;">${getBrandName()}</h1>
+            <h1 style="color: #000; margin: 0; font-size: 28px;">{{brandName}}</h1>
           </div>
 
           <h2 style="color: #000; font-size: 22px;">You're invited!</h2>
 
-          <p style="font-size: 16px;">${safeInviterName} (${escapeHtml(inviterEmail)}) has invited you to join their team on ${getBrandName()}.</p>
+          <p style="font-size: 16px;">{{inviterName}} ({{inviterEmail}}) has invited you to join their team on {{brandName}}.</p>
 
           <p style="font-size: 15px;">As a team member, you'll be able to:</p>
           <ul style="font-size: 15px; color: #555; padding-left: 20px;">
@@ -51,14 +52,14 @@ async function sendTeamInviteEmail(params: {
           </ul>
 
           <div style="text-align: center; margin: 30px 0;">
-            <a href="${dashboardUrl}" style="display: inline-block; background: linear-gradient(135deg, #9b51e0 0%, #7c3aed 100%); color: #fff; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+            <a href="{{dashboardUrl}}" style="display: inline-block; background: linear-gradient(135deg, #9b51e0 0%, #7c3aed 100%); color: #fff; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
               Accept Invitation
             </a>
           </div>
 
           <div style="background: #f8f8f8; border-radius: 8px; padding: 16px; margin: 25px 0;">
             <p style="margin: 0; font-size: 14px; color: #666;">
-              <strong>Team:</strong> ${safeTeamOwnerName}'s workspace<br>
+              <strong>Team:</strong> {{teamOwnerName}}'s workspace<br>
               <strong>Billing:</strong> All usage is billed to the team owner
             </p>
           </div>
@@ -74,30 +75,48 @@ async function sendTeamInviteEmail(params: {
           </p>
 
           <p style="color: #999; font-size: 13px; text-align: center; margin-top: 15px;">
-            <strong>The ${getBrandName()} Team</strong>
+            <strong>The {{brandName}} Team</strong>
           </p>
         </body>
       </html>
-    `,
-    text: `You're invited!
+    `;
+  const text = `You're invited!
 
-${inviterName} (${inviterEmail}) has invited you to join their team on ${getBrandName()}.
+{{inviterName}} ({{inviterEmail}}) has invited you to join their team on {{brandName}}.
 
 As a team member, you'll be able to:
 - View and manage GPU instances
 - Access the team dashboard
 - Monitor usage and activity
 
-Accept Invitation: ${dashboardUrl}
+Accept Invitation: {{dashboardUrl}}
 
-Team: ${teamOwnerName}'s workspace
+Team: {{teamOwnerName}}'s workspace
 Billing: All usage is billed to the team owner
 
 This invitation link is valid for 1 hour. After that, just ask your team admin to resend it.
 
 Didn't expect this email? Someone may have entered your email by mistake. You can safely ignore it.
 
-The ${getBrandName()} Team`,
+The {{brandName}} Team`;
+
+  const template = await loadTemplate(
+    "team-member-invite",
+    {
+      inviterName: safeInviterName,
+      inviterEmail: safeInviterEmail,
+      teamOwnerName: safeTeamOwnerName,
+      dashboardUrl,
+      brandName,
+    },
+    { subject, html, text }
+  );
+
+  await sendEmail({
+    to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 

@@ -11,6 +11,7 @@ import { generateAdminBypassToken, generateCustomerToken } from "@/lib/customer-
 import { logAdminActivity } from "@/lib/admin-activity";
 import { cacheCustomer, markCustomerCacheDeleted } from "@/lib/customer-cache";
 import { getBrandName, getDashboardUrl } from "@/lib/branding";
+import { loadTemplate } from "@/lib/email/template-loader";
 import Stripe from "stripe";
 
 async function sendCredentialsEmail(params: {
@@ -18,21 +19,39 @@ async function sendCredentialsEmail(params: {
   customerName: string;
   dashboardUrl: string;
 }) {
+  const brandName = getBrandName();
+  const dashboardBaseUrl = getDashboardUrl();
+
+  const subject = `Your {{brandName}} login link`;
+  const html = emailLayout({
+    preheader: `Your login link for {{brandName}}`,
+    body: `
+      ${emailGreeting("{{customerName}}")}
+      ${emailText(`Here is your login link for {{brandName}}:`)}
+      ${emailButton("Open Dashboard", "{{dashboardUrl}}")}
+      ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="{{dashboardBaseUrl}}/account" style="color: #1a4fff;">{{dashboardBaseUrl}}/account</a>`)}
+      ${emailMuted("Did not request this? You can safely ignore this email.")}
+      ${emailSignoff()}
+    `,
+  });
+  const text = `Hi {{customerName}},\n\nHere is your login link for {{brandName}}:\n\nOpen Dashboard: {{dashboardUrl}}\n\nThis link expires in 1 hour. Request a new one at {{dashboardBaseUrl}}/account\n\nDid not request this? You can ignore this email.\n${plainTextFooter()}`;
+
+  const template = await loadTemplate(
+    "customer-login",
+    {
+      customerName: escapeHtml(params.customerName),
+      dashboardUrl: params.dashboardUrl,
+      brandName,
+      dashboardBaseUrl,
+    },
+    { subject, html, text }
+  );
+
   await sendEmail({
     to: params.to,
-    subject: `Your ${getBrandName()} login link`,
-    html: emailLayout({
-      preheader: `Your login link for ${getBrandName()}`,
-      body: `
-        ${emailGreeting(params.customerName)}
-        ${emailText(`Here is your login link for ${getBrandName()}:`)}
-        ${emailButton("Open Dashboard", params.dashboardUrl)}
-        ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="${getDashboardUrl()}/account" style="color: #1a4fff;">${getDashboardUrl()}/account</a>`)}
-        ${emailMuted("Did not request this? You can safely ignore this email.")}
-        ${emailSignoff()}
-      `,
-    }),
-    text: `Hi ${params.customerName},\n\nHere is your login link for ${getBrandName()}:\n\nOpen Dashboard: ${params.dashboardUrl}\n\nThis link expires in 1 hour. Request a new one at ${getDashboardUrl()}/account\n\nDid not request this? You can ignore this email.\n${plainTextFooter()}`,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 

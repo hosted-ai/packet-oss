@@ -15,6 +15,7 @@ import {
   plainTextFooter,
 } from "../utils";
 import { getBrandName, getAppUrl } from "@/lib/branding";
+import { loadTemplate } from "../template-loader";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -222,11 +223,27 @@ export async function sendMidnightStatusEmail(params: MidnightStatusEmailParams)
 
   const text = buildPlainText(params);
 
+  const template = await loadTemplate("midnight-status", {
+    newSignups: fmtNum(today.newSignups),
+    totalCustomers: fmtNum(today.totalCustomers),
+    walletDeposits: fmtNum(today.walletDeposits),
+    walletRevenue: fmtCents(today.walletRevenueCents),
+    mrr: fmtCents(mrrCents),
+    walletBalance: fmtCents(today.walletBalanceCents),
+    activePods: fmtNum(today.activePods),
+    activeGPUs: fmtNum(today.activeGPUs),
+    activeNodes: fmtNum(today.activeNodes),
+    inferenceRequests: fmtNum(today.tokenInferenceRequests),
+    voucherRedemptions: fmtNum(today.voucherRedemptions),
+    referralClaims: fmtNum(today.referralClaims),
+    todayLabel,
+  }, { subject, html, text });
+
   await sendEmailDirect({
     to,
-    subject,
-    html,
-    text,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 

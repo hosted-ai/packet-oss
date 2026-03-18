@@ -23,13 +23,6 @@ const SERVICE_KEY_LABELS: Record<string, string> = {
   NEXT_PUBLIC_TEXT_COLOR: "Text Color",
   NEXT_PUBLIC_FAVICON_URL: "Favicon URL",
   SUPPORT_EMAIL: "Support Email",
-  // Branding — Company
-  COMPANY_NAME: "Company Name",
-  COMPANY_ADDRESS: "Company Address (CAN-SPAM)",
-  // Branding — Email
-  EMAIL_FROM_NAME: "Email From Name",
-  EMAIL_FROM_ADDRESS: "Email From Address",
-  EMAIL_FOOTER_TEXT: "Email Footer Text",
   // GPU Backend
   HOSTEDAI_API_URL: "API URL",
   HOSTEDAI_API_KEY: "API Key",
@@ -80,7 +73,7 @@ const THEME_PRESETS: ThemePreset[] = [
 ];
 
 const SERVICE_DESCRIPTIONS: Record<string, string> = {
-  branding: "Configure your platform's brand identity — name, colors, logo, and email sender settings.",
+  branding: "Configure your platform's brand identity — name, colors, logo, and support contact.",
   hostedai: "Connect to hosted.ai for GPU pod management. Required for GPU features.",
   stripe: "Enable Stripe for customer billing, wallets, and subscriptions. Optional - platform works without it.",
   emailit: "Configure email delivery for login links, notifications, and alerts. Optional - password login works without it.",
@@ -98,16 +91,8 @@ const BRANDING_SECTIONS: { label: string; keys: string[] }[] = [
       "NEXT_PUBLIC_BRAND_NAME", "NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_LOGO_URL",
       "NEXT_PUBLIC_PRIMARY_COLOR", "NEXT_PUBLIC_ACCENT_COLOR",
       "NEXT_PUBLIC_BACKGROUND_COLOR", "NEXT_PUBLIC_TEXT_COLOR",
-      "NEXT_PUBLIC_FAVICON_URL",
+      "NEXT_PUBLIC_FAVICON_URL", "SUPPORT_EMAIL",
     ],
-  },
-  {
-    label: "Company",
-    keys: ["COMPANY_NAME", "COMPANY_ADDRESS", "SUPPORT_EMAIL"],
-  },
-  {
-    label: "Email Sender",
-    keys: ["EMAIL_FROM_NAME", "EMAIL_FROM_ADDRESS", "EMAIL_FOOTER_TEXT"],
   },
 ];
 
@@ -444,6 +429,10 @@ export function PlatformSettingsTab() {
           );
         })}
         <BrandingPreview values={formValues} />
+        <p className="text-xs text-[#5b6476] flex items-center gap-1 pt-2">
+          <span className="inline-block w-3.5 h-3.5 text-[#5b6476]">&#9432;</span>
+          Email sender settings have moved to the Email Templates tab.
+        </p>
       </div>
     );
   }

@@ -1,6 +1,7 @@
 import { sendEmailDirect } from "../client";
 import { escapeHtml, emailLayout, emailText, emailDetailBox } from "../utils";
-import { getBrandName } from "@/lib/branding";
+import { getBrandName, getSupportEmail } from "@/lib/branding";
+import { loadTemplate } from "../template-loader";
 
 export async function sendContactEmail(params: {
   name: string;
@@ -28,12 +29,9 @@ export async function sendContactEmail(params: {
     ${emailText(`<span style="font-size: 13px; color: #5b6476;">This message was sent from the ${getBrandName()} contact form.</span>`)}
   `;
 
-  await sendEmailDirect({
-    to: "sales@hosted.ai",
-    reply_to: email,
-    subject: `[${getBrandName()}] New inquiry from ${safeName}${safeCompany ? ` (${safeCompany})` : ""}`,
-    html: emailLayout({ preheader: `New inquiry from ${name}`, body }),
-    text: `New Contact Form Submission from ${getBrandName()}
+  const fallbackSubject = `[${getBrandName()}] New inquiry from ${safeName}${safeCompany ? ` (${safeCompany})` : ""}`;
+  const fallbackHtml = emailLayout({ preheader: `New inquiry from ${name}`, body });
+  const fallbackText = `New Contact Form Submission from ${getBrandName()}
 
 Name: ${name}
 Email: ${email}
@@ -42,6 +40,24 @@ Message:
 ${message}
 
 ---
-Sent from ${getBrandName()} contact form`,
+Sent from ${getBrandName()} contact form`;
+
+  const template = await loadTemplate("contact-form", {
+    name: safeName,
+    email: safeEmail,
+    company: safeCompany,
+    message: safeMessage,
+  }, {
+    subject: fallbackSubject,
+    html: fallbackHtml,
+    text: fallbackText,
+  });
+
+  await sendEmailDirect({
+    to: getSupportEmail(),
+    reply_to: email,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }

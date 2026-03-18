@@ -14,6 +14,8 @@ import {
   emailText,
   emailDivider,
 } from "../utils";
+import { getSupportEmail } from "@/lib/branding";
+import { loadTemplate } from "../template-loader";
 
 interface PodFailureAlertParams {
   podName: string;
@@ -30,7 +32,7 @@ interface PodFailureAlertParams {
 export async function sendPodFailureAlertEmail(
   params: PodFailureAlertParams
 ): Promise<void> {
-  const to = "support@hosted.ai";
+  const to = getSupportEmail();
 
   const detailRows = [
     ["Pod Name", params.podName],
@@ -90,10 +92,26 @@ ${detailText}
 Admin Panel: ${adminUrl}
 `;
 
-  await sendEmailDirect({
-    to,
+  const template = await loadTemplate("pod-failure", {
+    podName: params.podName,
+    podStatus: params.podStatus,
+    subscriptionId: params.subscriptionId,
+    teamId: params.teamId,
+    customerEmail: params.customerEmail || "unknown",
+    poolName: params.poolName || "unknown",
+    gpuCount: String(params.gpuCount),
+    region: params.region || "unknown",
+    adminUrl,
+  }, {
     subject: `[URGENT] Pod Failed: ${params.podName} (${params.customerEmail || params.teamId})`,
     html,
     text,
+  });
+
+  await sendEmailDirect({
+    to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }

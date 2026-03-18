@@ -7,6 +7,7 @@ import { getTwoFactorStatus, verifyTwoFactorCode } from "@/lib/two-factor";
 import { getAdminPinStatus, setAdminPin, verifyAdminPin } from "@/lib/admin-pin";
 import { logAdminLogin, logAdminActivity } from "@/lib/admin-activity";
 import { getBrandName } from "@/lib/branding";
+import { loadTemplate } from "@/lib/email/template-loader";
 import { isOSS } from "@/lib/edition";
 import {
   verifyAdminPassword,
@@ -17,20 +18,32 @@ import {
 } from "@/lib/auth/admin";
 
 async function sendAdminLoginEmail(email: string, loginUrl: string) {
+  const brandName = getBrandName();
+
+  const subject = `Admin Login - {{brandName}}`;
+  const html = emailLayout({
+    preheader: "Your admin login link",
+    portalLabel: "Admin Portal",
+    body: `
+      ${emailText("Click the button below to log in to the admin dashboard:")}
+      ${emailButton("Log In to Admin", "{{loginUrl}}")}
+      ${emailMuted("This link expires in 15 minutes. If you didn't request this, ignore this email.")}
+      ${emailSignoff()}
+    `,
+  });
+  const text = `Log in to {{brandName}} Admin:\n\n{{loginUrl}}\n\nThis link expires in 15 minutes.${plainTextFooter()}`;
+
+  const template = await loadTemplate(
+    "admin-login",
+    { email, loginUrl, brandName },
+    { subject, html, text }
+  );
+
   await sendEmail({
     to: email,
-    subject: `Admin Login - ${getBrandName()}`,
-    html: emailLayout({
-      preheader: "Your admin login link",
-      portalLabel: "Admin Portal",
-      body: `
-        ${emailText("Click the button below to log in to the admin dashboard:")}
-        ${emailButton("Log In to Admin", loginUrl)}
-        ${emailMuted("This link expires in 15 minutes. If you didn't request this, ignore this email.")}
-        ${emailSignoff()}
-      `,
-    }),
-    text: `Log in to ${getBrandName()} Admin:\n\n${loginUrl}\n\nThis link expires in 15 minutes.${plainTextFooter()}`,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -318,7 +331,13 @@ export async function GET(request: NextRequest) {
   const session = verifySessionToken(sessionToken);
 
   if (!session) {
-    return NextResponse.json({ authenticated: false }, { status: 401 });
+    // Clear the invalid cookie and include loginMode for OSS
+    const response = NextResponse.json({
+      authenticated: false,
+      ...(isOSS() ? { loginMode: "password", isFirstRun: isFirstRun() } : {}),
+    }, { status: 401 });
+    response.cookies.delete("admin_session");
+    return response;
   }
 
   return NextResponse.json({ authenticated: true, email: session.email });

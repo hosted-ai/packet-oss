@@ -7,6 +7,7 @@
 
 import { sendEmailDirect } from "../client";
 import { escapeHtml, emailLayout, emailDangerBox, emailDetailBox } from "../utils";
+import { loadTemplate } from "../template-loader";
 
 const CRITICAL_ALERT_EMAIL = process.env.CRITICAL_ALERT_EMAIL;
 
@@ -67,11 +68,23 @@ Environment: ${process.env.NODE_ENV || "development"}
 `;
 
   try {
-    await sendEmailDirect({
-      to: CRITICAL_ALERT_EMAIL,
+    const template = await loadTemplate("system-alert", {
+      alertSubject: params.subject,
+      errorType: params.errorType,
+      errorMessage: params.errorMessage,
+      timestamp: timestamp.toISOString(),
+      environment: process.env.NODE_ENV || "development",
+    }, {
       subject: `[CRITICAL] ${params.subject}`,
       html,
       text,
+    });
+
+    await sendEmailDirect({
+      to: CRITICAL_ALERT_EMAIL,
+      subject: template.subject,
+      html: template.html,
+      text: template.text,
     });
     console.log(`[Critical Alert] Email sent to ${CRITICAL_ALERT_EMAIL}: ${params.subject}`);
   } catch (error) {

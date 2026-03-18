@@ -7,6 +7,7 @@
 import { sendEmail } from "../../client";
 import { escapeHtml, emailLayout, emailGreeting, emailText, emailButton, emailSuccessBox, emailWarningBox, emailDetailBox, emailMuted, emailSignoff, plainTextFooter } from "../../utils";
 import { getBrandName, getAppUrl } from "@/lib/branding";
+import { loadTemplate } from "../../template-loader";
 
 const APP_URL = getAppUrl();
 
@@ -68,11 +69,23 @@ View your dashboard: ${APP_URL}/providers/dashboard
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
-  await sendEmail({
-    to: params.to,
+  const template = await loadTemplate("node-approved", {
+    nodeName: params.nodeName,
+    gpuModel: params.gpuModel,
+    gpuCount: String(params.gpuCount),
+    hourlyRate: params.hourlyRate,
+    companyName: params.companyName,
+  }, {
     subject: `Server Approved: ${params.nodeName}`,
     html,
     text,
+  });
+
+  await sendEmail({
+    to: params.to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -114,11 +127,21 @@ View your dashboard: ${APP_URL}/providers/dashboard
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
-  await sendEmail({
-    to: params.to,
+  const template = await loadTemplate("node-live", {
+    nodeName: params.nodeName,
+    gpuModel: params.gpuModel,
+    gpuCount: String(params.gpuCount),
+  }, {
     subject: `Your Server is Live: ${params.nodeName}`,
     html,
     text,
+  });
+
+  await sendEmail({
+    to: params.to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -162,11 +185,20 @@ View your dashboard: ${APP_URL}/providers/dashboard
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
-  await sendEmail({
-    to: params.to,
+  const template = await loadTemplate("node-removal-scheduled", {
+    nodeName: params.nodeName,
+    removalDate: params.removalDate,
+  }, {
     subject: `Server Removal Scheduled: ${params.nodeName}`,
     html,
     text,
+  });
+
+  await sendEmail({
+    to: params.to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
 
@@ -207,10 +239,19 @@ Simply visit your provider dashboard and complete the removal process. Once remo
 The ${getBrandName()} Team
 ${plainTextFooter()}`;
 
-  await sendEmail({
-    to: params.to,
+  const template = await loadTemplate("provider-server-vacated", {
+    nodeName: params.nodeName,
+    companyName: params.companyName,
+  }, {
     subject: `Server Ready for Removal: ${params.nodeName}`,
     html,
     text,
+  });
+
+  await sendEmail({
+    to: params.to,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
   });
 }
