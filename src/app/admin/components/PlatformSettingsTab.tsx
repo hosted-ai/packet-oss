@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 interface ServiceConfig {
   label: string;
@@ -13,13 +13,23 @@ interface PlatformSettingsData {
 }
 
 const SERVICE_KEY_LABELS: Record<string, string> = {
-  // Branding
+  // Branding — Appearance
   NEXT_PUBLIC_BRAND_NAME: "Brand Name",
   NEXT_PUBLIC_APP_URL: "Application URL",
   NEXT_PUBLIC_LOGO_URL: "Logo URL",
   NEXT_PUBLIC_PRIMARY_COLOR: "Primary Color",
   NEXT_PUBLIC_ACCENT_COLOR: "Accent Color",
+  NEXT_PUBLIC_BACKGROUND_COLOR: "Background Color",
+  NEXT_PUBLIC_TEXT_COLOR: "Text Color",
+  NEXT_PUBLIC_FAVICON_URL: "Favicon URL",
   SUPPORT_EMAIL: "Support Email",
+  // Branding — Company
+  COMPANY_NAME: "Company Name",
+  COMPANY_ADDRESS: "Company Address (CAN-SPAM)",
+  // Branding — Email
+  EMAIL_FROM_NAME: "Email From Name",
+  EMAIL_FROM_ADDRESS: "Email From Address",
+  EMAIL_FOOTER_TEXT: "Email Footer Text",
   // GPU Backend
   HOSTEDAI_API_URL: "API URL",
   HOSTEDAI_API_KEY: "API Key",
@@ -42,8 +52,35 @@ const SENSITIVE_KEYS = new Set([
   "EMAILIT_API_KEY", "ZAMMAD_API_TOKEN", "PIPEDRIVE_API_TOKEN",
 ]);
 
+const COLOR_KEYS = new Set([
+  "NEXT_PUBLIC_PRIMARY_COLOR", "NEXT_PUBLIC_ACCENT_COLOR",
+  "NEXT_PUBLIC_BACKGROUND_COLOR", "NEXT_PUBLIC_TEXT_COLOR",
+]);
+
+// ── Pre-defined color themes ───────────────────────────────────────────────
+interface ThemePreset {
+  name: string;
+  primary: string;
+  accent: string;
+  background: string;
+  text: string;
+}
+
+const THEME_PRESETS: ThemePreset[] = [
+  { name: "Default",     primary: "#1a4fff", accent: "#18b6a8", background: "#f7f8fb", text: "#0b0f1c" },
+  { name: "Ocean",       primary: "#0077b6", accent: "#00b4d8", background: "#f0f7fa", text: "#03045e" },
+  { name: "Emerald",     primary: "#059669", accent: "#34d399", background: "#f0fdf4", text: "#052e16" },
+  { name: "Sunset",      primary: "#e04e18", accent: "#f59e0b", background: "#fef7f0", text: "#1c1109" },
+  { name: "Purple",      primary: "#7c3aed", accent: "#a78bfa", background: "#f5f3ff", text: "#1e1048" },
+  { name: "Rose",        primary: "#e11d48", accent: "#fb7185", background: "#fff1f2", text: "#1a0610" },
+  { name: "Slate",       primary: "#475569", accent: "#64748b", background: "#f8fafc", text: "#0f172a" },
+  { name: "Midnight",    primary: "#3b82f6", accent: "#06b6d4", background: "#0f172a", text: "#e2e8f0" },
+  { name: "Forest",      primary: "#16a34a", accent: "#84cc16", background: "#0a1f0d", text: "#dcfce7" },
+  { name: "Amber",       primary: "#d97706", accent: "#fbbf24", background: "#fffbeb", text: "#1c1309" },
+];
+
 const SERVICE_DESCRIPTIONS: Record<string, string> = {
-  branding: "Configure your platform's brand identity - name, colors, and contact information.",
+  branding: "Configure your platform's brand identity — name, colors, logo, and email sender settings.",
   hostedai: "Connect to hosted.ai for GPU pod management. Required for GPU features.",
   stripe: "Enable Stripe for customer billing, wallets, and subscriptions. Optional - platform works without it.",
   emailit: "Configure email delivery for login links, notifications, and alerts. Optional - password login works without it.",
@@ -52,6 +89,220 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
 };
 
 const SERVICE_ORDER = ["branding", "hostedai", "stripe", "emailit", "zammad", "pipedrive"];
+
+// ── Sub-sections for branding ─────────────────────────────────────────────
+const BRANDING_SECTIONS: { label: string; keys: string[] }[] = [
+  {
+    label: "Appearance",
+    keys: [
+      "NEXT_PUBLIC_BRAND_NAME", "NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_LOGO_URL",
+      "NEXT_PUBLIC_PRIMARY_COLOR", "NEXT_PUBLIC_ACCENT_COLOR",
+      "NEXT_PUBLIC_BACKGROUND_COLOR", "NEXT_PUBLIC_TEXT_COLOR",
+      "NEXT_PUBLIC_FAVICON_URL",
+    ],
+  },
+  {
+    label: "Company",
+    keys: ["COMPANY_NAME", "COMPANY_ADDRESS", "SUPPORT_EMAIL"],
+  },
+  {
+    label: "Email Sender",
+    keys: ["EMAIL_FROM_NAME", "EMAIL_FROM_ADDRESS", "EMAIL_FOOTER_TEXT"],
+  },
+];
+
+function LogoUploadField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (url: string) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleUpload(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("logo", file);
+      const res = await fetch("/api/admin/branding/upload-logo", {
+        method: "POST",
+        body: formData,
+      });
+      if (res.ok) {
+        const { logoUrl } = await res.json();
+        onChange(logoUrl);
+      } else {
+        const err = await res.json();
+        setError(err.error || "Upload failed");
+      }
+    } catch {
+      setError("Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-[#0b0f1c] mb-1">
+        Logo
+      </label>
+      {/* Preview */}
+      {value && (
+        <div className="mb-2 p-3 bg-white border border-[#e4e7ef] rounded-lg inline-block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={value}
+            alt="Logo preview"
+            className="h-10 w-auto max-w-50 object-contain"
+          />
+        </div>
+      )}
+      <div className="flex gap-2 items-center">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="/logo.png or https://..."
+          className="flex-1 px-3 py-2 bg-white border border-[#e4e7ef] rounded-lg text-sm text-[#0b0f1c] placeholder-[#5b6476]/50 focus:outline-none focus:ring-2 focus:ring-[#1a4fff]"
+        />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/svg+xml"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleUpload(file);
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="px-3 py-2 bg-white border border-[#e4e7ef] hover:bg-zinc-50 text-[#0b0f1c] rounded-lg text-sm whitespace-nowrap disabled:opacity-50"
+        >
+          {uploading ? "Uploading..." : "Upload"}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  );
+}
+
+function ColorField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-[#0b0f1c] mb-1">
+        {label}
+      </label>
+      <div className="flex gap-2 items-center">
+        <input
+          type="color"
+          value={value || "#000000"}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-10 h-10 p-0.5 bg-white border border-[#e4e7ef] rounded-lg cursor-pointer"
+        />
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="#000000"
+          className="flex-1 px-3 py-2 bg-white border border-[#e4e7ef] rounded-lg text-sm text-[#0b0f1c] placeholder-[#5b6476]/50 focus:outline-none focus:ring-2 focus:ring-[#1a4fff] font-mono"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ThemePresetPicker({
+  onSelect,
+}: {
+  onSelect: (preset: ThemePreset) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-[#0b0f1c] mb-2">
+        Theme Presets
+      </label>
+      <p className="text-xs text-[#5b6476] mb-3">
+        Pick a preset to auto-fill colors, then customise individual values below.
+      </p>
+      <div className="grid grid-cols-5 gap-2">
+        {THEME_PRESETS.map((preset) => (
+          <button
+            key={preset.name}
+            type="button"
+            onClick={() => onSelect(preset)}
+            className="group flex flex-col items-center gap-1.5 p-2 rounded-lg border border-[#e4e7ef] hover:border-[#1a4fff] hover:bg-white transition-colors"
+            title={preset.name}
+          >
+            <div className="flex gap-0.5">
+              <div
+                className="w-4 h-4 rounded-full border border-black/10"
+                style={{ backgroundColor: preset.primary }}
+              />
+              <div
+                className="w-4 h-4 rounded-full border border-black/10"
+                style={{ backgroundColor: preset.accent }}
+              />
+            </div>
+            <div
+              className="w-full h-3 rounded-sm border border-black/5"
+              style={{ backgroundColor: preset.background }}
+            />
+            <span className="text-[10px] font-medium text-[#5b6476] group-hover:text-[#0b0f1c] leading-none">
+              {preset.name}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BrandingPreview({ values }: { values: Record<string, string> }) {
+  const primary = values.NEXT_PUBLIC_PRIMARY_COLOR || "#1a4fff";
+  const accent = values.NEXT_PUBLIC_ACCENT_COLOR || "#18b6a8";
+  const bg = values.NEXT_PUBLIC_BACKGROUND_COLOR || "#f7f8fb";
+  const text = values.NEXT_PUBLIC_TEXT_COLOR || "#0b0f1c";
+  const brand = values.NEXT_PUBLIC_BRAND_NAME || "Your Brand";
+
+  return (
+    <div className="mt-4 p-4 border border-[#e4e7ef] rounded-lg" style={{ backgroundColor: bg }}>
+      <p className="text-xs text-[#5b6476] mb-2 font-medium">Preview</p>
+      <div className="flex items-center gap-3">
+        <span className="text-lg font-bold" style={{ color: text }}>{brand}</span>
+        <button
+          type="button"
+          className="px-3 py-1.5 rounded-md text-xs font-medium text-white"
+          style={{ backgroundColor: primary }}
+        >
+          Primary
+        </button>
+        <button
+          type="button"
+          className="px-3 py-1.5 rounded-md text-xs font-medium text-white"
+          style={{ backgroundColor: accent }}
+        >
+          Accent
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function PlatformSettingsTab() {
   const [data, setData] = useState<PlatformSettingsData | null>(null);
@@ -118,6 +369,93 @@ export function PlatformSettingsTab() {
     }
   }
 
+  function updateFormValue(key: string, value: string) {
+    setFormValues((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function renderField(key: string) {
+    if (key === "NEXT_PUBLIC_LOGO_URL") {
+      return (
+        <LogoUploadField
+          key={key}
+          value={formValues[key] || ""}
+          onChange={(url) => updateFormValue(key, url)}
+        />
+      );
+    }
+
+    if (COLOR_KEYS.has(key)) {
+      return (
+        <ColorField
+          key={key}
+          label={SERVICE_KEY_LABELS[key] || key}
+          value={formValues[key] || ""}
+          onChange={(val) => updateFormValue(key, val)}
+        />
+      );
+    }
+
+    return (
+      <div key={key}>
+        <label className="block text-sm font-medium text-[#0b0f1c] mb-1">
+          {SERVICE_KEY_LABELS[key] || key}
+        </label>
+        <input
+          type={SENSITIVE_KEYS.has(key) ? "password" : "text"}
+          value={formValues[key] || ""}
+          onChange={(e) => updateFormValue(key, e.target.value)}
+          placeholder={key}
+          className="w-full px-3 py-2 bg-white border border-[#e4e7ef] rounded-lg text-sm text-[#0b0f1c] placeholder-[#5b6476]/50 focus:outline-none focus:ring-2 focus:ring-[#1a4fff]"
+        />
+      </div>
+    );
+  }
+
+  function applyThemePreset(preset: ThemePreset) {
+    setFormValues((prev) => ({
+      ...prev,
+      NEXT_PUBLIC_PRIMARY_COLOR: preset.primary,
+      NEXT_PUBLIC_ACCENT_COLOR: preset.accent,
+      NEXT_PUBLIC_BACKGROUND_COLOR: preset.background,
+      NEXT_PUBLIC_TEXT_COLOR: preset.text,
+    }));
+  }
+
+  function renderBrandingForm() {
+    return (
+      <div className="space-y-6">
+        {BRANDING_SECTIONS.map((section) => {
+          const sectionKeys = section.keys.filter((k) => k in formValues);
+          if (sectionKeys.length === 0) return null;
+          return (
+            <div key={section.label}>
+              <h4 className="text-sm font-semibold text-[#0b0f1c] mb-3 border-b border-[#e4e7ef] pb-1">
+                {section.label}
+              </h4>
+              {section.label === "Appearance" && (
+                <div className="mb-4">
+                  <ThemePresetPicker onSelect={applyThemePreset} />
+                </div>
+              )}
+              <div className="space-y-4">
+                {sectionKeys.map((key) => renderField(key))}
+              </div>
+            </div>
+          );
+        })}
+        <BrandingPreview values={formValues} />
+      </div>
+    );
+  }
+
+  function renderDefaultForm() {
+    return (
+      <div className="space-y-4">
+        {Object.keys(formValues).map((key) => renderField(key))}
+      </div>
+    );
+  }
+
   if (loading) {
     return <div className="text-[#5b6476]">Loading settings...</div>;
   }
@@ -181,23 +519,10 @@ export function PlatformSettingsTab() {
             </div>
 
             {isEditing && (
-              <div className="border-t border-[#e4e7ef] p-5 space-y-4 bg-zinc-50/50">
-                {Object.keys(formValues).map((key) => (
-                  <div key={key}>
-                    <label className="block text-sm font-medium text-[#0b0f1c] mb-1">
-                      {SERVICE_KEY_LABELS[key] || key}
-                    </label>
-                    <input
-                      type={SENSITIVE_KEYS.has(key) ? "password" : "text"}
-                      value={formValues[key]}
-                      onChange={(e) => setFormValues({ ...formValues, [key]: e.target.value })}
-                      placeholder={key}
-                      className="w-full px-3 py-2 bg-white border border-[#e4e7ef] rounded-lg text-sm text-[#0b0f1c] placeholder-[#5b6476]/50 focus:outline-none focus:ring-2 focus:ring-[#1a4fff]"
-                    />
-                  </div>
-                ))}
+              <div className="border-t border-[#e4e7ef] p-5 bg-zinc-50/50">
+                {serviceName === "branding" ? renderBrandingForm() : renderDefaultForm()}
 
-                <div className="flex gap-2 pt-2">
+                <div className="flex gap-2 pt-4 mt-4 border-t border-[#e4e7ef]">
                   <button
                     onClick={handleSave}
                     disabled={saving}

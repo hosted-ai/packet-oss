@@ -1,5 +1,5 @@
 import { delay } from "./utils";
-import { getBrandName, getDashboardUrl } from "@/lib/branding";
+import { getEmailFromName, getEmailFromAddress } from "@/lib/branding";
 import { getSetting } from "@/lib/settings";
 
 export interface EmailParams {
@@ -24,11 +24,22 @@ async function getAdminBccEmail(): Promise<string | null> {
   return getSetting("ADMIN_BCC_EMAIL");
 }
 
+/**
+ * Resolve the email From header dynamically from platform settings / branding.
+ */
+async function getEmailFrom(): Promise<string> {
+  const name = await getSetting("EMAIL_FROM_NAME") || getEmailFromName();
+  const addr = await getSetting("EMAIL_FROM_ADDRESS") || getEmailFromAddress();
+  return `${name} <${addr}>`;
+}
+
 async function sendEmailToRecipient(params: EmailParams, retries = 4): Promise<void> {
   const apiKey = await getEmailitApiKey();
   if (!apiKey) {
     throw new Error("EMAILIT_API_KEY is not set — configure in Platform Settings or .env.local");
   }
+
+  const from = await getEmailFrom();
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     const response = await fetch("https://api.emailit.com/v1/emails", {
@@ -38,8 +49,7 @@ async function sendEmailToRecipient(params: EmailParams, retries = 4): Promise<v
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        from: "Packet.ai <no-reply@dash.packet.ai>",
-        // from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
+        from,
         to: params.to,
         subject: params.subject,
         html: params.html,
@@ -105,6 +115,7 @@ export async function sendEmailDirect(params: {
     throw new Error("EMAILIT_API_KEY is not set — configure in Platform Settings or .env.local");
   }
 
+  const from = await getEmailFrom();
   const retries = 4;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const response = await fetch("https://api.emailit.com/v1/emails", {
@@ -114,9 +125,7 @@ export async function sendEmailDirect(params: {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        from: "Packet.ai <no-reply@dash.packet.ai>",
-        // TODO :: uncomment later
-        // from: `${getBrandName()} <no-reply@${new URL(getDashboardUrl()).hostname}>`,
+        from,
         ...params,
       }),
     });

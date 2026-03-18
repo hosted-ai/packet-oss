@@ -8,7 +8,11 @@
 
 import type { TenantConfig } from '@/lib/tenant/types';
 import { isPro } from '@/lib/edition';
-import { getAppUrl, getApiBaseUrl, getBrandName } from "@/lib/branding";
+import {
+  getAppUrl, getApiBaseUrl, getBrandName, getPrimaryColor, getAccentColor,
+  getSupportEmail, getLogoUrl, getCompanyName, getCompanyAddress,
+  getEmailFromName, getEmailFromAddress, getEmailFooterText,
+} from "@/lib/branding";
 
 export interface EmailBranding {
   brandName: string;
@@ -19,20 +23,34 @@ export interface EmailBranding {
   dashboardUrl: string;
   /** Base URL for the inference API */
   apiBaseUrl: string;
+  /** Company name for email footer */
+  companyName: string;
+  /** Physical mailing address (CAN-SPAM) */
+  companyAddress: string;
+  /** Custom footer text / tagline */
+  footerText: string;
+  /** Display name in email From header */
+  fromName: string;
+  /** Email address in email From header */
+  fromAddress: string;
 }
 
-/** OSS fallback — derives branding from env vars when tenant system is unavailable. */
+/** OSS / platform-level fallback — derives branding from DB-backed settings + env vars. */
 function getOssBranding(): EmailBranding {
   const appUrl = getAppUrl();
-  const domain = new URL(appUrl).hostname;
   return {
     brandName: getBrandName(),
-    primaryColor: "#1a4fff",
-    accentColor: "#00c389",
-    supportEmail: `support@${domain}`,
-    logoUrl: `${appUrl}/packet-logo.png`,
+    primaryColor: getPrimaryColor(),
+    accentColor: getAccentColor(),
+    supportEmail: getSupportEmail(),
+    logoUrl: getLogoUrl(),
     dashboardUrl: appUrl,
     apiBaseUrl: getApiBaseUrl(),
+    companyName: getCompanyName(),
+    companyAddress: getCompanyAddress(),
+    footerText: getEmailFooterText(),
+    fromName: getEmailFromName(),
+    fromAddress: getEmailFromAddress(),
   };
 }
 
@@ -56,5 +74,10 @@ export function getEmailBranding(tenant?: TenantConfig): EmailBranding {
     apiBaseUrl: t.isDefault
       ? getApiBaseUrl()
       : `https://${domain.replace(/^dash\./, 'api.')}`,
+    companyName: getCompanyName(),
+    companyAddress: getCompanyAddress(),
+    footerText: getEmailFooterText(),
+    fromName: getEmailFromName(),
+    fromAddress: getEmailFromAddress(),
   };
 }

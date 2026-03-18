@@ -172,7 +172,14 @@ export async function warmSettingsCache(): Promise<void> {
 export const SERVICE_GROUPS = {
   branding: {
     label: "Branding",
-    keys: ["NEXT_PUBLIC_BRAND_NAME", "NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_LOGO_URL", "NEXT_PUBLIC_PRIMARY_COLOR", "NEXT_PUBLIC_ACCENT_COLOR", "SUPPORT_EMAIL"],
+    keys: [
+      "NEXT_PUBLIC_BRAND_NAME", "NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_LOGO_URL",
+      "NEXT_PUBLIC_PRIMARY_COLOR", "NEXT_PUBLIC_ACCENT_COLOR",
+      "NEXT_PUBLIC_BACKGROUND_COLOR", "NEXT_PUBLIC_TEXT_COLOR",
+      "NEXT_PUBLIC_FAVICON_URL", "SUPPORT_EMAIL", "COMPANY_NAME",
+      "EMAIL_FROM_NAME", "EMAIL_FROM_ADDRESS", "COMPANY_ADDRESS",
+      "EMAIL_FOOTER_TEXT",
+    ],
     required: [],
     sensitive: [],
   },

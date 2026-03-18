@@ -29,7 +29,13 @@ const PRO_DEFAULTS = {
   faviconUrl: "/favicon.ico",
   primaryColor: "#1a4fff",
   accentColor: "#18b6a8",
+  backgroundColor: "#f7f8fb",
+  textColor: "#0b0f1c",
   companyName: "Hosted AI Inc.",
+  companyAddress: "622 North 9th Street, San Jose, CA 95112, USA",
+  emailFromName: "",
+  emailFromAddress: "",
+  emailFooterText: "",
 } as const;
 
 // ── OSS defaults ────────────────────────────────────────────────────────────
@@ -44,7 +50,13 @@ const OSS_DEFAULTS = {
   faviconUrl: "/favicon.ico",
   primaryColor: "#1a4fff",
   accentColor: "#18b6a8",
+  backgroundColor: "#f7f8fb",
+  textColor: "#0b0f1c",
   companyName: "",
+  companyAddress: "",
+  emailFromName: "",
+  emailFromAddress: "",
+  emailFooterText: "",
 } as const;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -54,6 +66,19 @@ function defaults() {
 }
 
 function env(key: string): string | undefined {
+  // On the server, check DB-backed platform settings first.
+  // Dynamic require avoids bundling server-only deps (prisma, fs, crypto)
+  // into client component bundles where branding.ts is also imported.
+  if (typeof window === "undefined") {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { getSettingSync } = require("./settings") as typeof import("./settings");
+      const dbVal = getSettingSync(key);
+      if (dbVal) return dbVal;
+    } catch {
+      // Settings module not available or DB not ready — fall through to env
+    }
+  }
   return process.env[key] || undefined;
 }
 
@@ -109,6 +134,42 @@ export function getCompanyName(): string {
   return env("COMPANY_NAME") || defaults().companyName;
 }
 
+/** Background color (hex). */
+export function getBackgroundColor(): string {
+  return env("NEXT_PUBLIC_BACKGROUND_COLOR") || defaults().backgroundColor;
+}
+
+/** Primary text color (hex). */
+export function getTextColor(): string {
+  return env("NEXT_PUBLIC_TEXT_COLOR") || defaults().textColor;
+}
+
+/** Display name for the From header in outgoing emails. Falls back to brand name. */
+export function getEmailFromName(): string {
+  return env("EMAIL_FROM_NAME") || getBrandName();
+}
+
+/** Email address for the From header. Falls back to no-reply@{dashboard hostname}. */
+export function getEmailFromAddress(): string {
+  const configured = env("EMAIL_FROM_ADDRESS");
+  if (configured) return configured;
+  try {
+    return `no-reply@${new URL(getDashboardUrl()).hostname}`;
+  } catch {
+    return defaults().supportEmail;
+  }
+}
+
+/** Physical mailing address for CAN-SPAM compliance footer. */
+export function getCompanyAddress(): string {
+  return env("COMPANY_ADDRESS") || defaults().companyAddress;
+}
+
+/** Custom email footer text (e.g. tagline). Empty = uses company name default. */
+export function getEmailFooterText(): string {
+  return env("EMAIL_FOOTER_TEXT") || defaults().emailFooterText;
+}
+
 /**
  * Full branding object — convenient for passing to email templates,
  * metadata generators, or components that need multiple values at once.
@@ -123,7 +184,13 @@ export interface BrandConfig {
   faviconUrl: string;
   primaryColor: string;
   accentColor: string;
+  backgroundColor: string;
+  textColor: string;
   companyName: string;
+  companyAddress: string;
+  emailFromName: string;
+  emailFromAddress: string;
+  emailFooterText: string;
 }
 
 export function getBrandConfig(): BrandConfig {
@@ -137,6 +204,12 @@ export function getBrandConfig(): BrandConfig {
     faviconUrl: getFaviconUrl(),
     primaryColor: getPrimaryColor(),
     accentColor: getAccentColor(),
+    backgroundColor: getBackgroundColor(),
+    textColor: getTextColor(),
     companyName: getCompanyName(),
+    companyAddress: getCompanyAddress(),
+    emailFromName: getEmailFromName(),
+    emailFromAddress: getEmailFromAddress(),
+    emailFooterText: getEmailFooterText(),
   };
 }

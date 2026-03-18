@@ -4,16 +4,19 @@
  */
 
 import type { EmailBranding } from './tenant-branding';
-import { getBrandName, getAppUrl, getPrimaryColor, getAccentColor } from '../branding';
+import {
+  getBrandName, getAppUrl, getPrimaryColor, getAccentColor,
+  getCompanyName, getCompanyAddress, getEmailFooterText,
+} from '../branding';
 
 // ── Default branding values ─────────────────────────────────────────────────
-// Used when no branding object is passed — keeps every existing call-site
-// producing byte-identical output.
+// Lazy-evaluated so DB-backed platform settings are picked up at call time
+// rather than at module load time (when the settings cache may not be warm).
 
-const DEFAULT_BRAND_NAME = getBrandName();
-const DEFAULT_PRIMARY_COLOR = '#1a4fff';
-const DEFAULT_ACCENT_COLOR = '#18b6a8';
-const DEFAULT_DASHBOARD_URL = getAppUrl();
+function getDefaultBrandName() { return getBrandName(); }
+function getDefaultPrimaryColor() { return getPrimaryColor(); }
+function getDefaultAccentColor() { return getAccentColor(); }
+function getDefaultDashboardUrl() { return getAppUrl(); }
 
 /**
  * Escape HTML special characters to prevent injection
@@ -46,7 +49,7 @@ export function delay(ms: number): Promise<void> {
  * @returns HTML string for the text link
  */
 export function textLinkHtml(url: string, branding?: EmailBranding): string {
-  const primary = branding?.primaryColor || DEFAULT_PRIMARY_COLOR;
+  const primary = branding?.primaryColor || getDefaultPrimaryColor();
   return `<p style="text-align: center; margin: 10px 0 0 0; font-size: 12px; color: #5b6476;">Or copy this link: <a href="${url}" style="color: ${primary}; word-break: break-all;">${url}</a></p>`;
 }
 
@@ -57,18 +60,32 @@ export function textLinkHtml(url: string, branding?: EmailBranding): string {
  * @returns HTML and text versions of the footer
  */
 export function getEmailFooter(isTransactional = true, branding?: EmailBranding): { html: string; text: string } {
-  const brand = branding?.brandName || DEFAULT_BRAND_NAME;
-  const primary = branding?.primaryColor || DEFAULT_PRIMARY_COLOR;
-  const dashboard = branding?.dashboardUrl || DEFAULT_DASHBOARD_URL;
+  const brand = branding?.brandName || getDefaultBrandName();
+  const primary = branding?.primaryColor || getDefaultPrimaryColor();
+  const dashboard = branding?.dashboardUrl || getDefaultDashboardUrl();
+  const company = branding?.companyName || getCompanyName();
+  const address = branding?.companyAddress || getCompanyAddress();
+  const footerText = branding?.footerText || getEmailFooterText();
+
+  // Build the company line: "Brand by Company" or just "Brand"
+  const companyLine = footerText
+    ? `<strong>${escapeHtml(brand)}</strong> — ${escapeHtml(footerText)}`
+    : company
+      ? `<strong>${escapeHtml(brand)}</strong> by ${escapeHtml(company)}`
+      : `<strong>${escapeHtml(brand)}</strong>`;
+
+  const companyLineText = footerText
+    ? `${brand} — ${footerText}`
+    : company
+      ? `${brand} by ${company}`
+      : brand;
 
   const html = `
     <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e4e7ef; text-align: center; color: #5b6476; font-size: 12px;">
       <p style="margin: 0 0 8px 0;">
-        <strong>${escapeHtml(brand)}</strong> by Hosted AI Inc.
+        ${companyLine}
       </p>
-      <p style="margin: 0 0 8px 0;">
-        622 North 9th Street, San Jose, CA 95112, USA
-      </p>
+      ${address ? `<p style="margin: 0 0 8px 0;">${escapeHtml(address)}</p>` : ""}
       ${isTransactional
         ? `<p style="margin: 0; font-size: 11px; color: #5b6476;">This is a transactional email related to your ${escapeHtml(brand)} account.</p>`
         : `<p style="margin: 0;"><a href="${dashboard}/account/settings" style="color: ${primary};">Manage email preferences</a></p>`
@@ -78,9 +95,8 @@ export function getEmailFooter(isTransactional = true, branding?: EmailBranding)
 
   const text = `
 ---
-${brand} by Hosted AI Inc.
-622 North 9th Street, San Jose, CA 95112, USA
-${isTransactional ? `This is a transactional email related to your ${brand} account.` : `Manage email preferences: ${dashboard}/account/settings`}`;
+${companyLineText}
+${address ? address + "\n" : ""}${isTransactional ? `This is a transactional email related to your ${brand} account.` : `Manage email preferences: ${dashboard}/account/settings`}`;
 
   return { html, text };
 }
@@ -89,16 +105,29 @@ ${isTransactional ? `This is a transactional email related to your ${brand} acco
  * Email footer with a one-click unsubscribe link for marketing emails.
  */
 export function getEmailFooterWithUnsubscribe(unsubscribeUrl: string, branding?: EmailBranding): { html: string; text: string } {
-  const brand = branding?.brandName || DEFAULT_BRAND_NAME;
+  const brand = branding?.brandName || getDefaultBrandName();
+  const company = branding?.companyName || getCompanyName();
+  const address = branding?.companyAddress || getCompanyAddress();
+  const footerText = branding?.footerText || getEmailFooterText();
+
+  const companyLine = footerText
+    ? `<strong>${escapeHtml(brand)}</strong> — ${escapeHtml(footerText)}`
+    : company
+      ? `<strong>${escapeHtml(brand)}</strong> by ${escapeHtml(company)}`
+      : `<strong>${escapeHtml(brand)}</strong>`;
+
+  const companyLineText = footerText
+    ? `${brand} — ${footerText}`
+    : company
+      ? `${brand} by ${company}`
+      : brand;
 
   const html = `
     <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #e4e7ef; text-align: center; color: #5b6476; font-size: 12px;">
       <p style="margin: 0 0 8px 0;">
-        <strong>${escapeHtml(brand)}</strong> by Hosted AI Inc.
+        ${companyLine}
       </p>
-      <p style="margin: 0 0 8px 0;">
-        622 North 9th Street, San Jose, CA 95112, USA
-      </p>
+      ${address ? `<p style="margin: 0 0 8px 0;">${escapeHtml(address)}</p>` : ""}
       <p style="margin: 0;">
         <a href="${unsubscribeUrl}" style="color: #5b6476; text-decoration: underline;">Unsubscribe from onboarding emails</a>
       </p>
@@ -107,9 +136,8 @@ export function getEmailFooterWithUnsubscribe(unsubscribeUrl: string, branding?:
 
   const text = `
 ---
-${brand} by Hosted AI Inc.
-622 North 9th Street, San Jose, CA 95112, USA
-Unsubscribe: ${unsubscribeUrl}`;
+${companyLineText}
+${address ? address + "\n" : ""}Unsubscribe: ${unsubscribeUrl}`;
 
   return { html, text };
 }
@@ -119,7 +147,6 @@ Unsubscribe: ${unsubscribeUrl}`;
 // maximum deliverability (spam-filter safe: no <style> blocks, no CSS classes,
 // balanced text-to-image ratio, proper List-Unsubscribe hints, physical address).
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || getAppUrl();
 
 /**
  * Full HTML email wrapper.
@@ -142,8 +169,8 @@ export function emailLayout(opts: {
     ? getEmailFooterWithUnsubscribe(unsubscribeUrl, branding)
     : getEmailFooter(isTransactional, branding);
 
-  const brand = branding?.brandName || DEFAULT_BRAND_NAME;
-  const primary = branding?.primaryColor || DEFAULT_PRIMARY_COLOR;
+  const brand = branding?.brandName || getDefaultBrandName();
+  const primary = branding?.primaryColor || getDefaultPrimaryColor();
 
   // For the default brand we render the stylized "Packet<span>.ai" header.
   // For tenant brands we render the plain brand name in their primary color.
@@ -201,7 +228,7 @@ export function emailLayout(opts: {
  * Uses brand primary color (default: #1a4fff) — solid color for Outlook compatibility
  */
 export function emailButton(label: string, url: string, branding?: EmailBranding): string {
-  const primary = branding?.primaryColor || DEFAULT_PRIMARY_COLOR;
+  const primary = branding?.primaryColor || getDefaultPrimaryColor();
   // Darken primary slightly for Outlook stroke color — keep the hex fallback for default
   const strokeColor = branding ? primary : '#1238c9';
 
@@ -223,8 +250,8 @@ export function emailButton(label: string, url: string, branding?: EmailBranding
  * Secondary/alternate button (default: teal for positive actions like "Launch GPU")
  */
 export function emailButtonTeal(label: string, url: string, branding?: EmailBranding): string {
-  const accent = branding?.accentColor || DEFAULT_ACCENT_COLOR;
-  const primary = branding?.primaryColor || DEFAULT_PRIMARY_COLOR;
+  const accent = branding?.accentColor || getDefaultAccentColor();
+  const primary = branding?.primaryColor || getDefaultPrimaryColor();
 
   return `<div style="text-align: center; margin: 28px 0;">
   <a href="${url}" style="display: inline-block; background-color: ${accent}; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 15px; line-height: 1;" target="_blank">${escapeHtml(label)}</a>
@@ -309,7 +336,7 @@ export function emailDivider(): string {
  * Sign-off
  */
 export function emailSignoff(branding?: EmailBranding): string {
-  const brand = branding?.brandName || DEFAULT_BRAND_NAME;
+  const brand = branding?.brandName || getDefaultBrandName();
   return `${emailDivider()}
 <p style="margin: 0; font-size: 14px; color: #5b6476; text-align: center;"><strong>The ${escapeHtml(brand)} Team</strong></p>`;
 }
@@ -323,19 +350,26 @@ export function plainTextFooter(opts?: boolean | { isTransactional?: boolean; un
     opts = { isTransactional: opts };
   }
   const { isTransactional = true, unsubscribeUrl, branding } = opts || {};
-  const brand = branding?.brandName || DEFAULT_BRAND_NAME;
-  const dashboard = branding?.dashboardUrl || DEFAULT_DASHBOARD_URL;
+  const brand = branding?.brandName || getDefaultBrandName();
+  const dashboard = branding?.dashboardUrl || getDefaultDashboardUrl();
+  const company = branding?.companyName || getCompanyName();
+  const address = branding?.companyAddress || getCompanyAddress();
+  const footerText = branding?.footerText || getEmailFooterText();
+
+  const companyLine = footerText
+    ? `${brand} — ${footerText}`
+    : company
+      ? `${brand} by ${company}`
+      : brand;
 
   if (unsubscribeUrl) {
     return `
 ---
-${brand} by Hosted AI Inc.
-622 North 9th Street, San Jose, CA 95112, USA
-Unsubscribe from onboarding emails: ${unsubscribeUrl}`;
+${companyLine}
+${address ? address + "\n" : ""}Unsubscribe from onboarding emails: ${unsubscribeUrl}`;
   }
   return `
 ---
-${brand} by Hosted AI Inc.
-622 North 9th Street, San Jose, CA 95112, USA
-${isTransactional ? `This is a transactional email related to your ${brand} account.` : `Manage email preferences: ${dashboard}/account/settings`}`;
+${companyLine}
+${address ? address + "\n" : ""}${isTransactional ? `This is a transactional email related to your ${brand} account.` : `Manage email preferences: ${dashboard}/account/settings`}`;
 }

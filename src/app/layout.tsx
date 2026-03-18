@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { isPro } from "@/lib/edition";
 import { getBrandName, getAppUrl } from "@/lib/branding";
+import { BrandStyles } from "@/components/BrandStyles";
 import "./globals.css";
 
 const brandName = getBrandName();
@@ -110,6 +111,7 @@ export default async function RootLayout({
   return (
     <html lang="en">
       <head>
+        <BrandStyles />
         {TenantStyles && <TenantStyles />}
         {proMode && tenant.isDefault && (
           <>
