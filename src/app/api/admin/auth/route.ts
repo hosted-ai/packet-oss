@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAdmin, generateAdminToken, verifyAdminToken, generateSessionToken, bootstrapFirstAdmin } from "@/lib/admin";
+import { isAdmin, generateAdminToken, verifyAdminToken, generatePreAuthToken, verifyPreAuthToken, generateSessionToken } from "@/lib/admin";
 import { sendEmail } from "@/lib/email";
 import { emailLayout, emailButton, emailText, emailMuted, emailSignoff, plainTextFooter } from "@/lib/email/utils";
 import { rateLimit, getClientIp } from "@/lib/ratelimit";
-import { getTwoFactorStatus, verifyTwoFactorCode } from "@/lib/two-factor";
+import { getTwoFactorStatus, verifyTwoFactorCode, isTwoFactorEnabled } from "@/lib/two-factor";
 import { getAdminPinStatus, setAdminPin, verifyAdminPin } from "@/lib/admin-pin";
 import { logAdminLogin, logAdminActivity } from "@/lib/admin-activity";
 import { getBrandName } from "@/lib/branding";
@@ -11,11 +11,11 @@ import { loadTemplate } from "@/lib/email/template-loader";
 import { isOSS } from "@/lib/edition";
 import {
   verifyAdminPassword,
-  setAdminPassword,
   adminHasPassword,
   isFirstRun,
   bootstrapFirstAdminWithPassword,
 } from "@/lib/auth/admin";
+import { logLoginAttempt } from "@/lib/auth/login-log";
 
 async function sendAdminLoginEmail(email: string, loginUrl: string) {
   const brandName = getBrandName();
@@ -70,7 +70,8 @@ function createSessionResponse(email: string): NextResponse {
 async function handleOSSPasswordLogin(
   email: string,
   password: string | undefined,
-  ip: string
+  ip: string,
+  userAgent: string | null
 ): Promise<NextResponse> {
   // First run — bootstrap admin with password
   if (isFirstRun()) {
@@ -94,12 +95,12 @@ async function handleOSSPasswordLogin(
       );
     }
     await logAdminLogin(email);
+    logLoginAttempt({ email, success: true, ip, method: "password", userAgent });
     return createSessionResponse(email);
   }
 
   // Not first run — need password
   if (!password) {
-    // Don't reveal whether email is valid
     return NextResponse.json(
       { error: "Email and password are required" },
       { status: 400 }
@@ -108,39 +109,48 @@ async function handleOSSPasswordLogin(
 
   // Check if admin exists
   if (!isAdmin(email)) {
-    // Constant-time-ish: still hash to prevent timing attacks
     console.log(`[OSS Auth] Login attempt for non-admin: ${email}, IP: ${ip}`);
+    logLoginAttempt({ email, success: false, ip, method: "password", reason: "account-not-found", userAgent });
     return NextResponse.json(
       { error: "Invalid email or password" },
       { status: 401 }
     );
   }
 
-  // Admin exists but no password yet (added via admin panel, never set password)
+  // Admin exists but no password yet — must use invite token to set password
   if (!adminHasPassword(email)) {
-    if (password.length < 8) {
-      return NextResponse.json(
-        { error: "Password must be at least 8 characters" },
-        { status: 400 }
-      );
-    }
-    await setAdminPassword(email, password);
-    console.log(`[OSS Auth] Password set for admin: ${email}`);
-    await logAdminLogin(email);
-    return createSessionResponse(email);
+    console.log(`[OSS Auth] Login attempt for admin without password: ${email}, IP: ${ip}`);
+    logLoginAttempt({ email, success: false, ip, method: "password", reason: "no-password-set", userAgent });
+    return NextResponse.json(
+      { error: "Invalid email or password" },
+      { status: 401 }
+    );
   }
 
   // Verify password
   const valid = await verifyAdminPassword(email, password);
   if (!valid) {
     console.log(`[OSS Auth] Failed login for: ${email}, IP: ${ip}`);
+    logLoginAttempt({ email, success: false, ip, method: "password", reason: "invalid-password", userAgent });
     return NextResponse.json(
       { error: "Invalid email or password" },
       { status: 401 }
     );
   }
 
+  // Password valid — check if 2FA is enabled
+  const has2FA = await isTwoFactorEnabled(email);
+  if (has2FA) {
+    // Return pre-auth token for 2FA verification via /admin/verify
+    const preAuthToken = generatePreAuthToken(email);
+    return NextResponse.json({
+      requiresTwoFactor: true,
+      token: preAuthToken,
+    });
+  }
+
   await logAdminLogin(email);
+  logLoginAttempt({ email, success: true, ip, method: "password", userAgent });
   return createSessionResponse(email);
 }
 
@@ -163,6 +173,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { email, password, token, twoFactorCode, pinCode, newPin } = body;
+    const userAgent = request.headers.get("user-agent");
     console.log(`Admin auth request for email: ${email || "(token verification)"}, IP: ${ip}`);
 
     // ── OSS password-based login ──────────────────────────────────────
@@ -170,13 +181,43 @@ export async function POST(request: NextRequest) {
       if (!email) {
         return NextResponse.json({ error: "Email is required" }, { status: 400 });
       }
-      return handleOSSPasswordLogin(email, password, ip);
+      return handleOSSPasswordLogin(email, password, ip, userAgent);
     }
 
     // ── Pro magic-link flow (unchanged) ───────────────────────────────
 
     // If token is provided, verify it and return session token
     if (token) {
+      // Try pre-auth token first (OSS password + 2FA flow)
+      const preAuth = verifyPreAuthToken(token);
+      if (preAuth) {
+        // Pre-auth token from OSS password login — only TOTP verification
+        if (!isAdmin(preAuth.email)) {
+          return NextResponse.json({ error: "Not authorized" }, { status: 403 });
+        }
+
+        if (!twoFactorCode) {
+          return NextResponse.json({
+            requiresTwoFactor: true,
+            email: preAuth.email,
+          });
+        }
+
+        const verifyResult = await verifyTwoFactorCode(preAuth.email, twoFactorCode);
+        if (!verifyResult.success) {
+          logLoginAttempt({ email: preAuth.email, success: false, ip, method: "2fa", reason: "invalid-2fa", userAgent });
+          return NextResponse.json(
+            { error: verifyResult.error || "Invalid verification code" },
+            { status: 400 }
+          );
+        }
+
+        await logAdminLogin(preAuth.email);
+        logLoginAttempt({ email: preAuth.email, success: true, ip, method: "2fa", userAgent });
+        return createSessionResponse(preAuth.email);
+      }
+
+      // Try magic-link token (Pro flow)
       const decoded = verifyAdminToken(token);
       if (!decoded) {
         return NextResponse.json({ error: "Invalid or expired link" }, { status: 401 });
@@ -207,7 +248,7 @@ export async function POST(request: NextRequest) {
           );
         }
       } else {
-        // No TOTP — require PIN as second factor
+        // No TOTP — require PIN as second factor (Pro only)
         const pinStatus = await getAdminPinStatus(decoded.email);
 
         if (!pinStatus.hasPin || pinStatus.expired) {
@@ -262,16 +303,14 @@ export async function POST(request: NextRequest) {
       }
 
       await logAdminLogin(decoded.email);
+      logLoginAttempt({ email: decoded.email, success: true, ip, method: "magic-link", userAgent });
       return createSessionResponse(decoded.email);
     }
 
-    // Otherwise, send magic link
+    // Otherwise, send magic link (Pro flow)
     if (!email) {
       return NextResponse.json({ error: "Email is required" }, { status: 400 });
     }
-
-    // In OSS mode, auto-bootstrap the first admin
-    bootstrapFirstAdmin(email);
 
     // Check admin status
     const adminCheck = isAdmin(email);
@@ -325,8 +364,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ authenticated: false }, { status: 401 });
   }
 
-  const decoded = verifyAdminToken(sessionToken);
-  // Also try session token verification
+  // Verify session token
   const { verifySessionToken } = await import("@/lib/admin");
   const session = verifySessionToken(sessionToken);
 

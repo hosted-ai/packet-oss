@@ -81,6 +81,12 @@ export default function AdminLoginPage() {
         return;
       }
 
+      // Password login with 2FA — redirect to verify page
+      if (data.requiresTwoFactor && data.token) {
+        window.location.href = `/admin/verify?token=${data.token}`;
+        return;
+      }
+
       // Password login returns session directly — redirect
       if (data.success && (loginMode === "password" || loginMode === "setup")) {
         window.location.href = "/admin";

@@ -184,27 +184,6 @@ export function isAllowedAdminDomainForTenant(email: string, tenantConfig?: Tena
   return allowed.includes(domain);
 }
 
-/**
- * Bootstrap the first admin in OSS mode. If no admins exist, the first
- * person to request a login link is automatically added as admin.
- * Returns true if bootstrapped, false if admins already exist or not OSS.
- */
-export function bootstrapFirstAdmin(email: string): boolean {
-  if (!isOSS()) return false;
-  const data = readAdmins();
-  if (data.admins.length > 0) return false;
-  if (!isAllowedAdminDomain(email)) return false;
-
-  data.admins.push({
-    email: email.toLowerCase(),
-    addedAt: new Date().toISOString(),
-    addedBy: "system-bootstrap",
-  });
-  writeAdmins(data);
-  console.log(`[OSS Bootstrap] First admin created: ${email}`);
-  return true;
-}
-
 export function addAdmin(email: string, addedBy: string): boolean {
   const data = readAdmins();
 
@@ -255,6 +234,31 @@ export function verifyAdminToken(token: string): { email: string } | null {
   try {
     const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as { email: string; type: string };
     if (decoded.type !== "admin-login") {
+      return null;
+    }
+    return { email: decoded.email };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Generate a short-lived pre-auth token for OSS password + 2FA flow.
+ * After password is verified, this token is used to redirect to /admin/verify
+ * where the TOTP code is entered.
+ */
+export function generatePreAuthToken(email: string): string {
+  return jwt.sign(
+    { email: email.toLowerCase(), type: "admin-2fa-pending" },
+    getJwtSecret(),
+    { expiresIn: "5m" }
+  );
+}
+
+export function verifyPreAuthToken(token: string): { email: string } | null {
+  try {
+    const decoded = jwt.verify(token, getJwtSecret(), { algorithms: ['HS256'] }) as { email: string; type: string };
+    if (decoded.type !== "admin-2fa-pending") {
       return null;
     }
     return { email: decoded.email };

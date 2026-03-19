@@ -5,6 +5,10 @@ import { logAdminAdded, logAdminRemoved, logAdminInviteResent, logAdminActivity 
 import { resetAdminPin } from "@/lib/admin-pin";
 import { getBrandName } from "@/lib/branding";
 import { loadTemplate } from "@/lib/email/template-loader";
+import { createInviteToken } from "@/lib/auth/invite-tokens";
+import { isEmailConfigured } from "@/lib/settings";
+import { isOSS } from "@/lib/edition";
+import { disableTwoFactor } from "@/lib/two-factor";
 
 const PIN_RESET_ALLOWED_EMAILS = (process.env.PIN_RESET_ALLOWED_EMAILS || "")
   .split(",")
@@ -100,17 +104,39 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Admin already exists" }, { status: 400 });
   }
 
-  // Send invite email to the new admin
-  try {
-    const loginToken = generateAdminToken(email);
-    const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL}/admin/verify?token=${loginToken}`;
+  if (isOSS()) {
+    // OSS flow: use invite tokens instead of magic-link login tokens
+    const inviteToken = createInviteToken(email, session.email);
+    const setupUrl = `/admin/setup?invite=${inviteToken.token}`;
+    const emailConfigured = await isEmailConfigured();
 
-    await sendAdminInviteEmail(email, loginUrl, session.email);
+    if (emailConfigured) {
+      try {
+        const fullSetupUrl = `${process.env.NEXT_PUBLIC_APP_URL}${setupUrl}`;
+        await sendAdminInviteEmail(email, fullSetupUrl, session.email);
+        console.log(`Admin invite sent by ${session.email} to ${email}`);
+      } catch (error) {
+        console.error("Failed to send admin invite email:", error);
+        // Don't fail the request if email fails - admin is still added
+      }
+    } else {
+      // No email configured - return the setup URL for manual sharing
+      await logAdminAdded(session.email, email);
+      return NextResponse.json({ success: true, method: "url", setupUrl });
+    }
+  } else {
+    // Pro flow: magic-link email
+    try {
+      const loginToken = generateAdminToken(email);
+      const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL}/admin/verify?token=${loginToken}`;
 
-    console.log(`Admin invite sent by ${session.email} to ${email}`);
-  } catch (error) {
-    console.error("Failed to send admin invite email:", error);
-    // Don't fail the request if email fails - admin is still added
+      await sendAdminInviteEmail(email, loginUrl, session.email);
+
+      console.log(`Admin invite sent by ${session.email} to ${email}`);
+    } catch (error) {
+      console.error("Failed to send admin invite email:", error);
+      // Don't fail the request if email fails - admin is still added
+    }
   }
 
   // Log admin added
@@ -179,26 +205,50 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Admin not found" }, { status: 404 });
   }
 
-  try {
-    // Generate login token and send email
-    const loginToken = generateAdminToken(email);
-    const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL}/admin/verify?token=${loginToken}`;
+  if (isOSS()) {
+    // OSS flow: use invite tokens
+    const inviteToken = createInviteToken(email, session.email);
+    const setupUrl = `/admin/setup?invite=${inviteToken.token}`;
+    const emailConfigured = await isEmailConfigured();
 
-    await sendAdminInviteEmail(email, loginUrl, session.email);
+    if (emailConfigured) {
+      try {
+        const fullSetupUrl = `${process.env.NEXT_PUBLIC_APP_URL}${setupUrl}`;
+        await sendAdminInviteEmail(email, fullSetupUrl, session.email);
+        console.log(`Admin invite resent by ${session.email} to ${email}`);
+        await logAdminInviteResent(session.email, email);
+        return NextResponse.json({ success: true, message: `Invite sent to ${email}` });
+      } catch (error) {
+        console.error("Failed to resend admin invite:", error);
+        return NextResponse.json({ error: "Failed to send invite email" }, { status: 500 });
+      }
+    } else {
+      // No email configured - return the setup URL for manual sharing
+      await logAdminInviteResent(session.email, email);
+      return NextResponse.json({ success: true, method: "url", setupUrl, message: `Invite URL generated for ${email}` });
+    }
+  } else {
+    // Pro flow: magic-link email
+    try {
+      const loginToken = generateAdminToken(email);
+      const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL}/admin/verify?token=${loginToken}`;
 
-    console.log(`Admin invite resent by ${session.email} to ${email}`);
+      await sendAdminInviteEmail(email, loginUrl, session.email);
 
-    // Log invite resent
-    await logAdminInviteResent(session.email, email);
+      console.log(`Admin invite resent by ${session.email} to ${email}`);
 
-    return NextResponse.json({ success: true, message: `Invite sent to ${email}` });
-  } catch (error) {
-    console.error("Failed to resend admin invite:", error);
-    return NextResponse.json({ error: "Failed to send invite email" }, { status: 500 });
+      // Log invite resent
+      await logAdminInviteResent(session.email, email);
+
+      return NextResponse.json({ success: true, message: `Invite sent to ${email}` });
+    } catch (error) {
+      console.error("Failed to resend admin invite:", error);
+      return NextResponse.json({ error: "Failed to send invite email" }, { status: 500 });
+    }
   }
 }
 
-// PUT - Reset an admin's PIN (restricted to PIN_RESET_ALLOWED_EMAILS env var)
+// PUT - Reset an admin's PIN or 2FA (restricted to PIN_RESET_ALLOWED_EMAILS env var)
 export async function PUT(request: NextRequest) {
   const sessionToken = request.cookies.get("admin_session")?.value;
   if (!sessionToken) {
@@ -214,7 +264,7 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Not authorized to reset PINs" }, { status: 403 });
   }
 
-  const { email } = await request.json();
+  const { email, action } = await request.json();
 
   if (!email || !email.includes("@")) {
     return NextResponse.json({ error: "Valid email required" }, { status: 400 });
@@ -224,6 +274,13 @@ export async function PUT(request: NextRequest) {
     return NextResponse.json({ error: "Admin not found" }, { status: 404 });
   }
 
+  if (action === "reset-2fa") {
+    await disableTwoFactor(email);
+    await logAdminActivity(session.email, "settings_updated", `Reset 2FA for ${email}`, { targetEmail: email });
+    return NextResponse.json({ success: true, message: `2FA reset for ${email}. They'll need to set it up again on next login.` });
+  }
+
+  // Default action: reset PIN
   await resetAdminPin(email);
   await logAdminActivity(session.email, "admin_pin_set", `Reset PIN for ${email}`, { targetEmail: email });
 
