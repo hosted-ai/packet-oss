@@ -6,6 +6,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { getBrandName } from "@/lib/branding";
 
+const IS_OSS = process.env.NEXT_PUBLIC_EDITION === "oss";
+const LOGO_URL = process.env.NEXT_PUBLIC_LOGO_URL || (IS_OSS ? "/logo.png" : "/packet-logo.png");
+
 interface GpuProduct {
   id: string;
   name: string;
@@ -187,7 +190,7 @@ function CheckoutContent() {
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-lg p-8 text-center">
         <Link href="/" className="inline-flex items-center justify-center gap-2 mb-6">
           <Image
-            src="/packet-logo.png"
+            src={LOGO_URL}
             alt={getBrandName()}
             width={180}
             height={64}
@@ -204,9 +207,11 @@ function CheckoutContent() {
             ? "Start your monthly GPU subscription — cancel anytime."
             : "Select your GPU and make an initial deposit to start using cloud GPUs."}
         </p>
-        <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 mb-6 text-sm text-zinc-600">
-          New here? <Link href={`/account${initialEmail ? `?email=${encodeURIComponent(initialEmail)}` : ""}${initialProductId ? `${initialEmail ? "&" : "?"}gpu=${encodeURIComponent(initialProductId)}` : ""}`} className="text-[#1a4fff] font-medium hover:underline">Create a free account</Link> — no credit card required.
-        </div>
+        {!IS_OSS && (
+          <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 mb-6 text-sm text-zinc-600">
+            New here? <Link href={`/account${initialEmail ? `?email=${encodeURIComponent(initialEmail)}` : ""}${initialProductId ? `${initialEmail ? "&" : "?"}gpu=${encodeURIComponent(initialProductId)}` : ""}`} className="text-[#1a4fff] font-medium hover:underline">Create a free account</Link> — no credit card required.
+          </div>
+        )}
 
         {/* Product Selection */}
         {productsLoading ? (

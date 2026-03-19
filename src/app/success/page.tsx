@@ -6,6 +6,8 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { getBrandName, getAppUrl } from "@/lib/branding";
 
+const LOGO_URL = process.env.NEXT_PUBLIC_LOGO_URL || (process.env.NEXT_PUBLIC_EDITION === "oss" ? "/logo.png" : "/packet-logo.png");
+
 function SuccessContent() {
   const searchParams = useSearchParams();
   const [mounted, setMounted] = useState(false);
@@ -119,7 +121,7 @@ function SuccessContent() {
         <div className="mx-auto max-w-6xl px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center">
             <Image
-              src="/packet-logo.png"
+              src={LOGO_URL}
               alt={getBrandName()}
               width={120}
               height={32}

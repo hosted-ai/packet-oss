@@ -11,6 +11,9 @@ import { getBrandName } from "@/lib/branding";
 // MAINTENANCE MODE — set to false when hosted.ai team creation is fixed
 const SIGNUP_MAINTENANCE = false;
 
+const IS_OSS = process.env.NEXT_PUBLIC_EDITION === "oss";
+const LOGO_URL = process.env.NEXT_PUBLIC_LOGO_URL || (IS_OSS ? "/logo.png" : "/packet-logo.png");
+
 type Mode = "signin" | "signup";
 
 const GPU_NAMES: Record<string, string> = {
@@ -84,19 +87,23 @@ function AccountContent() {
       // Signup success — redirect to success page
       if (mode === "signup" && data.redirect) {
         clearUtmData();
-        import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.SIGNUP)).catch(() => {});
-        if (typeof window !== "undefined" && typeof (window as any).my_analytics !== "undefined") {
-          (window as any).my_analytics.goal("keo2bt1sqibntima");
-        }
-        if (typeof window !== "undefined" && typeof (window as any).lintrk === "function") {
-          (window as any).lintrk("track", { conversion_id: 24436340 });
+        if (!IS_OSS) {
+          import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.SIGNUP)).catch(() => {});
+          if (typeof window !== "undefined" && typeof (window as any).my_analytics !== "undefined") {
+            (window as any).my_analytics.goal("keo2bt1sqibntima");
+          }
+          if (typeof window !== "undefined" && typeof (window as any).lintrk === "function") {
+            (window as any).lintrk("track", { conversion_id: 24436340 });
+          }
         }
         router.push(data.redirect);
         return;
       }
 
       // Sign-in success — show "check your email"
-      import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.LOGIN)).catch(() => {});
+      if (!IS_OSS) {
+        import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.LOGIN)).catch(() => {});
+      }
       setSubmitted(true);
     } catch {
       setError("Failed to process request");
@@ -112,7 +119,7 @@ function AccountContent() {
         <div className="account-header-inner">
           <Link href="/">
             <Image
-              src="/packet-logo.png"
+              src={LOGO_URL}
               alt={getBrandName()}
               width={120}
               height={40}
@@ -149,6 +156,8 @@ function AccountContent() {
             <h1 className="account-headline">
               {hasGpuContext ? (
                 <>Deploy {gpuName}<br />in minutes.</>
+              ) : IS_OSS ? (
+                <>{getBrandName()}</>
               ) : (
                 <>GPU cloud.<br />No credit card required.</>
               )}
@@ -157,17 +166,23 @@ function AccountContent() {
             <p className="account-subheadline">
               {hasGpuContext
                 ? "Create your free account to browse live inventory, compare pricing, and deploy when you\u2019re ready."
-                : "Browse GPU inventory, run AI inference with 10K free tokens, and deploy in under 5 minutes."}
+                : IS_OSS
+                  ? "Your GPU cloud platform. Deploy, manage, and scale."
+                  : "Browse GPU inventory, run AI inference with 10K free tokens, and deploy in under 5 minutes."}
             </p>
 
             {/* What you get — immediate value, no payment */}
             <div className="account-benefits">
-              {[
+              {(IS_OSS ? [
+                "Browse GPU inventory with live pricing",
+                "Deploy and manage GPU pods",
+                "SSH access in minutes",
+              ] : [
                 "Full GPU inventory with live pricing",
                 "10,000 free Token Factory tokens",
                 hasGpuContext ? "Fund your wallet and deploy when ready" : "SSH access in under 5 minutes",
                 "No credit card required",
-              ].map((text) => (
+              ]).map((text) => (
                 <div key={text} className="account-benefit">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#14b8a6" strokeWidth="2.5">
                     <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
@@ -177,20 +192,22 @@ function AccountContent() {
               ))}
             </div>
 
-            {/* Trust stats — real numbers, no fluff */}
-            <div className="account-trust-bar">
-              {[
-                { value: "500+", label: "GPUs" },
-                { value: "99.9%", label: "Uptime" },
-                { value: "<5 min", label: "Setup" },
-                { value: "24/7", label: "Support" },
-              ].map((stat) => (
-                <div key={stat.label} className="account-trust-stat">
-                  <div className="account-trust-value">{stat.value}</div>
-                  <div className="account-trust-label">{stat.label}</div>
-                </div>
-              ))}
-            </div>
+            {/* Trust stats — real numbers, no fluff (Pro only) */}
+            {!IS_OSS && (
+              <div className="account-trust-bar">
+                {[
+                  { value: "500+", label: "GPUs" },
+                  { value: "99.9%", label: "Uptime" },
+                  { value: "<5 min", label: "Setup" },
+                  { value: "24/7", label: "Support" },
+                ].map((stat) => (
+                  <div key={stat.label} className="account-trust-stat">
+                    <div className="account-trust-value">{stat.value}</div>
+                    <div className="account-trust-label">{stat.label}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -205,7 +222,9 @@ function AccountContent() {
                   </h2>
                   <p className="account-form-subtitle">
                     {mode === "signup"
-                      ? "Get started in 30 seconds. No credit card needed."
+                      ? IS_OSS
+                        ? "Enter your email to get started."
+                        : "Get started in 30 seconds. No credit card needed."
                       : "Enter your email to receive a sign-in link."}
                   </p>
                 </div>
@@ -233,7 +252,7 @@ function AccountContent() {
                 <form onSubmit={handleSubmit}>
                   <div className="account-field">
                     <label htmlFor="account-email" className="account-label">
-                      Work email
+                      {IS_OSS ? "Email" : "Work email"}
                     </label>
                     <input
                       type="email"

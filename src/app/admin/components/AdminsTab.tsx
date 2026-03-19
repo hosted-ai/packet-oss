@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { Admin } from "../types";
 
 interface AdminsTabProps {
@@ -8,11 +9,13 @@ interface AdminsTabProps {
   newAdminEmail: string;
   actionLoading: string | null;
   canResetPin: boolean;
+  setupUrl?: string | null;
   onNewAdminEmailChange: (email: string) => void;
   onAddAdmin: (e: React.FormEvent) => void;
   onRemoveAdmin: (email: string) => void;
   onResendInvite: (email: string) => void;
   onResetPin: (email: string) => void;
+  onReset2FA?: (email: string) => void;
 }
 
 export function AdminsTab({
@@ -21,12 +24,25 @@ export function AdminsTab({
   newAdminEmail,
   actionLoading,
   canResetPin,
+  setupUrl,
   onNewAdminEmailChange,
   onAddAdmin,
   onRemoveAdmin,
   onResendInvite,
   onResetPin,
+  onReset2FA,
 }: AdminsTabProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopySetupUrl = () => {
+    if (!setupUrl) return;
+    const fullUrl = `${window.location.origin}${setupUrl}`;
+    navigator.clipboard.writeText(fullUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
   return (
     <div>
       <form onSubmit={onAddAdmin} className="flex gap-2 mb-4">
@@ -44,6 +60,27 @@ export function AdminsTab({
           Add Admin
         </button>
       </form>
+
+      {setupUrl && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <p className="text-sm text-blue-800 font-medium mb-2">
+            Email is not configured. Share this setup URL with the new admin:
+          </p>
+          <div className="flex gap-2 items-center">
+            <code className="flex-1 px-3 py-2 bg-white border border-blue-200 rounded text-sm text-[#0b0f1c] truncate">
+              {window.location.origin}{setupUrl}
+            </code>
+            <button
+              type="button"
+              onClick={handleCopySetupUrl}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded font-medium whitespace-nowrap"
+            >
+              {copied ? "Copied!" : "Copy"}
+            </button>
+          </div>
+          <p className="text-xs text-blue-600 mt-1">This link expires in 24 hours.</p>
+        </div>
+      )}
 
       <div className="bg-white border border-[#e4e7ef] rounded-lg overflow-hidden">
         <table className="w-full">
@@ -78,6 +115,15 @@ export function AdminsTab({
                       className="text-xs px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded disabled:opacity-50"
                     >
                       Reset PIN
+                    </button>
+                  )}
+                  {canResetPin && onReset2FA && (
+                    <button
+                      onClick={() => onReset2FA(admin.email)}
+                      disabled={actionLoading === admin.email}
+                      className="text-xs px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded disabled:opacity-50"
+                    >
+                      Reset 2FA
                     </button>
                   )}
                   {admin.email !== adminEmail && (

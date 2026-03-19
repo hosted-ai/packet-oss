@@ -138,7 +138,7 @@ export interface AdminActivity {
   created: number;
 }
 
-export type AdminTab = "customers" | "admins" | "investors" | "clusters" | "quotes" | "referrals" | "vouchers" | "activity" | "settings" | "calculator" | "qa" | "providers" | "landing" | "game" | "products" | "pods" | "emails" | "drip" | "nodes" | "pools" | "business" | "demand" | "batches" | "token-providers" | "skypilot" | "support" | "spheron" | "node-revenue" | "banners" | "marketing" | "tenants" | "pixel-factory" | "uptime" | "payouts" | "platform-settings";
+export type AdminTab = "customers" | "admins" | "investors" | "clusters" | "quotes" | "referrals" | "vouchers" | "activity" | "settings" | "calculator" | "qa" | "providers" | "landing" | "game" | "products" | "pods" | "emails" | "email-log" | "drip" | "nodes" | "pools" | "business" | "demand" | "batches" | "token-providers" | "skypilot" | "support" | "spheron" | "node-revenue" | "banners" | "marketing" | "tenants" | "pixel-factory" | "uptime" | "payouts" | "platform-settings";
 
 /**
  * Admin tabs that are only available in the Pro edition.

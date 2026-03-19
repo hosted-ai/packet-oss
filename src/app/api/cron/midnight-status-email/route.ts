@@ -160,6 +160,17 @@ export async function POST(request: NextRequest) {
     const authError = verifyCronAuth(request);
     if (authError) return authError;
 
+    // Housekeeping: purge email logs older than 90 days
+    try {
+      const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+      const { count } = await prisma.emailLog.deleteMany({
+        where: { createdAt: { lt: ninetyDaysAgo } },
+      });
+      if (count > 0) console.log(`[Midnight Status] Purged ${count} email log entries older than 90 days`);
+    } catch {
+      // EmailLog table may not exist yet — ignore
+    }
+
     console.log("[Midnight Status] Starting daily status email generation...");
 
     const stripe = getStripe();

@@ -3,6 +3,7 @@
 import type { AdminTab } from "../types";
 import { PREMIUM_ADMIN_TABS, OSS_ONLY_ADMIN_TABS } from "../types";
 import { isPro, isOSS } from "@/lib/edition";
+import { useSecurityHealth } from "@/hooks/useSecurityHealth";
 import {
   Users,
   Shield,
@@ -115,6 +116,7 @@ const navGroups: NavGroup[] = [
       { id: "support", label: "Support", icon: Headphones },
       { id: "batches", label: "Batch Jobs", icon: Database },
       { id: "emails", label: "Email Templates", icon: Mail },
+      { id: "email-log", label: "Email Log", icon: Mail },
       { id: "drip", label: "Drip Campaigns", icon: Mail },
       { id: "game", label: "Game Stats", icon: Gamepad2 },
       { id: "activity", label: "Activity", icon: Activity },
@@ -134,6 +136,7 @@ export function AdminSidebar({
   isCollapsed,
   onToggleCollapse,
 }: AdminSidebarProps) {
+  const { data: securityHealth, loading: securityLoading } = useSecurityHealth();
   return (
     <aside
       className={`fixed left-0 top-0 h-full bg-[#0b0f1c] text-white flex flex-col transition-all duration-300 ${
@@ -149,7 +152,21 @@ export function AdminSidebar({
         ) : (
           <>
             <h1 className="text-xl font-bold">Admin Panel</h1>
-            <p className="text-sm text-gray-400 truncate mt-1">{adminEmail}</p>
+            <p className="text-sm text-gray-400 truncate mt-1 flex items-center gap-1.5">
+              <span className="truncate">{adminEmail}</span>
+              {!securityLoading && securityHealth && (
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    securityHealth.score >= 3
+                      ? "bg-green-500"
+                      : securityHealth.score === 2
+                        ? "bg-yellow-500"
+                        : "bg-red-500"
+                  }`}
+                  title={`Security: ${securityHealth.score}/${securityHealth.maxScore}`}
+                />
+              )}
+            </p>
           </>
         )}
       </div>

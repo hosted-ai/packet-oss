@@ -13,6 +13,7 @@ function getPackageVersion(): string {
 }
 
 const nextConfig: NextConfig = {
+  serverExternalPackages: ["nodemailer"],
   env: {
     NEXT_PUBLIC_APP_VERSION: getPackageVersion(),
   },

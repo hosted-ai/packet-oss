@@ -326,6 +326,21 @@ model SupportNotification {
   @@map("support_notification")
 }
 
+model ContactSubmission {
+  id               String   @id @default(cuid())
+  name             String
+  email            String
+  subject          String
+  message          String   @db.Text
+  priority         String   @default("normal")
+  stripeCustomerId String?  @map("stripe_customer_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@index([createdAt])
+  @@map("contact_submissions")
+}
+
 model ApiKey {
   id               String    @id @default(cuid())
   name             String
@@ -839,6 +854,20 @@ model EmailTemplate {
   @@index([slug])
   @@index([active])
   @@map("email_template")
+}
+
+model EmailLog {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  status    String   // "sent", "failed"
+  provider  String   // "smtp", "emailit"
+  error     String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([to])
+  @@map("email_log")
 }
 
 // ── Drip Campaign System ──
@@ -1680,4 +1709,20 @@ model CustomerCache {
   @@index([teamId])
   @@index([stripeCreatedAt])
   @@map("customer_cache")
+}
+
+model AdminLoginLog {
+  id        String   @id @default(cuid())
+  email     String
+  success   Boolean
+  ip        String?
+  method    String   // "password" | "magic-link" | "invite-setup" | "2fa"
+  reason    String?  // null=success, "invalid-password" | "invalid-2fa" | "rate-limited"
+  userAgent String?  @map("user_agent") @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([email])
+  @@index([createdAt])
+  @@index([success])
+  @@map("admin_login_log")
 }

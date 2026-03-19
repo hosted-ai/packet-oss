@@ -18,9 +18,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getPoolSubscriptions } from "@/lib/hostedai";
 import { verifyCronAuth } from "@/lib/cron-auth";
-import { createTicket } from "@/lib/zammad/client";
+import { isPro } from "@/lib/edition";
 import { sendPodFailureAlertEmail } from "@/lib/email/templates/pod-failure";
 import { readPoolOverviewCache } from "@/lib/pool-overview";
+
+// Zammad is Pro-only — dynamically import to avoid build errors in OSS
+type CreateTicketFn = typeof import("@/lib/zammad/client").createTicket;
+let createTicket: CreateTicketFn | null = null;
+if (isPro()) {
+  import("@/lib/zammad/client")
+    .then((mod) => { createTicket = mod.createTicket; })
+    .catch(() => { /* Zammad not available */ });
+}
 
 // Pod statuses that indicate failure
 const FAILED_STATUSES = new Set([
@@ -150,45 +159,47 @@ export async function GET(request: NextRequest) {
 
             console.log(`[Pod Failures] New failure: pod=${pod.pod_name} status=${podStatus} team=${teamId} customer=${customerEmail}`);
 
-            // Create Zammad ticket
+            // Create Zammad ticket (Pro only — skipped in OSS)
             let zammadTicketId: number | null = null;
-            try {
-              const ticketBody = [
-                `A customer pod has entered **${podStatus}** status and requires immediate attention.`,
-                "",
-                "**Pod Details:**",
-                `- Pod Name: ${pod.pod_name}`,
-                `- Pod Status: ${podStatus}`,
-                `- Subscription ID: ${subId}`,
-                `- Team ID: ${teamId}`,
-                `- Customer Email: ${customerEmail || "unknown"}`,
-                `- Pool: ${poolName || "unknown"}`,
-                `- GPU Count: ${gpuCount}`,
-                `- Region: ${region || "unknown"}`,
-                "",
-                `Admin Panel: ${process.env.NEXT_PUBLIC_APP_URL || "https://localhost:3000"}/admin?tab=pods`,
-              ].join("\n");
+            if (createTicket) {
+              try {
+                const ticketBody = [
+                  `A customer pod has entered **${podStatus}** status and requires immediate attention.`,
+                  "",
+                  "**Pod Details:**",
+                  `- Pod Name: ${pod.pod_name}`,
+                  `- Pod Status: ${podStatus}`,
+                  `- Subscription ID: ${subId}`,
+                  `- Team ID: ${teamId}`,
+                  `- Customer Email: ${customerEmail || "unknown"}`,
+                  `- Pool: ${poolName || "unknown"}`,
+                  `- GPU Count: ${gpuCount}`,
+                  `- Region: ${region || "unknown"}`,
+                  "",
+                  `Admin Panel: ${process.env.NEXT_PUBLIC_APP_URL || "https://localhost:3000"}/admin?tab=pods`,
+                ].join("\n");
 
-              const ticket = await createTicket({
-                title: `[URGENT] Pod Failed: ${pod.pod_name} (${customerEmail || teamId})`,
-                group: PACKET_SUPPORT_GROUP,
-                customer_id: 1, // System/admin user in Zammad
-                priority_id: 3, // High/urgent
-                article: {
-                  subject: `Pod Failed: ${pod.pod_name}`,
-                  body: ticketBody,
-                  type: "note",
-                  sender: "Agent",
-                  internal: false,
-                },
-              });
-              zammadTicketId = ticket.id;
-              results.ticketsCreated++;
-              console.log(`[Pod Failures] Created Zammad ticket #${ticket.id} for pod ${pod.pod_name}`);
-            } catch (ticketErr) {
-              const msg = `Failed to create Zammad ticket for pod ${pod.pod_name}: ${ticketErr}`;
-              console.error(`[Pod Failures] ${msg}`);
-              results.errors.push(msg);
+                const ticket = await createTicket({
+                  title: `[URGENT] Pod Failed: ${pod.pod_name} (${customerEmail || teamId})`,
+                  group: PACKET_SUPPORT_GROUP,
+                  customer_id: 1, // System/admin user in Zammad
+                  priority_id: 3, // High/urgent
+                  article: {
+                    subject: `Pod Failed: ${pod.pod_name}`,
+                    body: ticketBody,
+                    type: "note",
+                    sender: "Agent",
+                    internal: false,
+                  },
+                });
+                zammadTicketId = ticket.id;
+                results.ticketsCreated++;
+                console.log(`[Pod Failures] Created Zammad ticket #${ticket.id} for pod ${pod.pod_name}`);
+              } catch (ticketErr) {
+                const msg = `Failed to create Zammad ticket for pod ${pod.pod_name}: ${ticketErr}`;
+                console.error(`[Pod Failures] ${msg}`);
+                results.errors.push(msg);
+              }
             }
 
             // Send email to support@hosted.ai

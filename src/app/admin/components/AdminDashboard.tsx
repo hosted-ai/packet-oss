@@ -21,21 +21,29 @@ import {
   ProductsTab,
   PodsTab,
   EmailTemplatesTab,
+  EmailLogTab,
   DripTab,
   NodeMonitoringTab,
   PoolOverviewTab,
   BusinessTab,
   CreditModal,
   CustomerDetailPanel,
-  SupportTab,
   NodeRevenueTab,
   BannersTab,
   UptimeTab,
   PayoutsTab,
   PlatformSettingsTab,
 } from "./index";
+import { OssAdminSupportTab } from "./OssAdminSupportTab";
 import { AdminSidebar } from "./AdminSidebar";
+
+// Support tab — edition-gated: Pro uses Zammad, OSS uses contact submissions
+const SupportTab = isPro()
+  ? dynamic(() => import("./SupportTab").then(m => ({ default: m.SupportTab })))
+  : null;
 import { LogoutConfirmModal } from "@/components/logout-confirm-modal";
+import { useServiceStatus } from "@/hooks/useServiceStatus";
+import { ServiceRequiredBanner } from "@/components/ServiceRequiredBanner";
 
 // Premium tab components — dynamically imported, files excluded in OSS build
 const NullTab = () => null;
@@ -73,6 +81,9 @@ export function AdminDashboard() {
 
   // Infrastructure requests state
   const [infrastructureRequests, setInfrastructureRequests] = useState<InfrastructureRequest[]>([]);
+
+  // Service capability gating
+  const { isConfigured } = useServiceStatus();
 
   // Data hook
   const {
@@ -387,6 +398,7 @@ export function AdminDashboard() {
       products: "GPU Products",
       pods: "GPU Pods",
       emails: "Email Templates",
+      "email-log": "Email Delivery Log",
       drip: "Drip Campaigns",
       nodes: "Node Monitoring",
       pools: "Pool Overview",
@@ -608,11 +620,28 @@ export function AdminDashboard() {
 
         {activeTab === "products" && <ProductsTab />}
 
-        {activeTab === "pods" && <PodsTab />}
+        {activeTab === "pods" && (
+          <>
+            <ServiceRequiredBanner serviceName="hostedai" serviceLabel="GPU Backend (hosted.ai)" configured={isConfigured("hostedai")} />
+            <PodsTab />
+          </>
+        )}
 
-        {activeTab === "emails" && <EmailTemplatesTab />}
+        {activeTab === "emails" && (
+          <>
+            <ServiceRequiredBanner serviceName="smtp" serviceLabel="Email Delivery" configured={isConfigured("smtp")} />
+            <EmailTemplatesTab />
+          </>
+        )}
 
-        {activeTab === "drip" && <DripTab />}
+        {activeTab === "email-log" && <EmailLogTab />}
+
+        {activeTab === "drip" && (
+          <>
+            <ServiceRequiredBanner serviceName="smtp" serviceLabel="Email Delivery" configured={isConfigured("smtp")} />
+            <DripTab />
+          </>
+        )}
 
         {activeTab === "nodes" && <NodeMonitoringTab />}
 
@@ -634,7 +663,16 @@ export function AdminDashboard() {
 
         {activeTab === "skypilot" && <SkyPilotTab />}
 
-        {activeTab === "support" && <SupportTab onOpenCustomer={setSelectedCustomerId} />}
+        {activeTab === "support" && (
+          isPro() && SupportTab ? (
+            <>
+              <ServiceRequiredBanner serviceName="zammad" serviceLabel="Support (Zammad)" configured={isConfigured("zammad")} />
+              <SupportTab onOpenCustomer={setSelectedCustomerId} />
+            </>
+          ) : (
+            <OssAdminSupportTab />
+          )
+        )}
 
         {activeTab === "spheron" && <SpheronInventoryTab />}
 
