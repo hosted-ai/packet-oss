@@ -85,7 +85,7 @@ The app boots and runs with just `DATABASE_URL` configured. All other settings c
 | `STRIPE_SECRET_KEY` | No | Enables billing features |
 | `HOSTEDAI_API_URL` | **Yes*** | hosted.ai API URL (required for GPU features) |
 | `HOSTEDAI_API_KEY` | **Yes*** | hosted.ai API key (required for GPU features) |
-| `EMAILIT_API_KEY` | No | Enables email notifications |
+| `SMTP_HOST` | No | Enables email notifications (SMTP server) |
 
 *hosted.ai credentials are required for GPU functionality but the app will boot without them. Configure via admin UI or .env file.
 

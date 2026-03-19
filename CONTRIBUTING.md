@@ -49,7 +49,7 @@ See `.env.example` for all available environment variables. Key variables:
 - `DATABASE_URL` - MariaDB connection string (required)
 - `HOSTEDAI_API_URL` / `HOSTEDAI_API_KEY` - GPU infrastructure API
 - `STRIPE_SECRET_KEY` - Stripe API key for payments
-- `EMAILIT_API_KEY` - Transactional email service
+- `SMTP_HOST` - SMTP server for transactional email
 - `ADMIN_JWT_SECRET` - JWT signing secret
 
 All optional settings can also be configured in **Admin > Platform Settings** instead of environment variables.
@@ -99,7 +99,7 @@ src/lib/
     index.ts      # Barrel exports
 
   email/          # Email services
-    client.ts     # Emailit API client
+    client.ts     # SMTP transport client
     templates/    # Email templates (welcome, login, etc.)
     index.ts      # Barrel exports
 

@@ -486,7 +486,7 @@ Production Environment
 │                External Services                                │
 │                                                                 │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  Stripe API  │  │ hosted.ai    │  │  Emailit     │         │
+│  │  Stripe API  │  │ hosted.ai    │  │  SMTP Server │         │
 │  │  (Billing)   │  │ (GPUaaS)     │  │  (Email)     │         │
 │  └──────────────┘  └──────────────┘  └──────────────┘         │
 └────────────────────────────────────────────────────────────────┘

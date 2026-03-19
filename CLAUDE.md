@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Packet.ai (`dash.packet.ai`) is a GPU cloud platform dashboard built with Next.js 16. It manages customer GPU pod rentals via hosted.ai, Stripe billing with prepaid wallets, an OpenAI-compatible inference API ("Token Factory"), and an admin panel. The database is MariaDB/MySQL via Prisma.
+GPU Cloud Dashboard is an open-source GPU cloud platform dashboard built with Next.js 16. It manages GPU pod rentals via a hosted.ai backend, optional Stripe billing, and an admin panel for platform management. The database is MariaDB/MySQL via Prisma.
 
 ## Development Commands
 
@@ -30,69 +30,132 @@ Always run `pnpm build` or `npx tsc --noEmit` to verify changes. The project use
 - **E2E tests**: Playwright, configured in `playwright.config.ts`.
 - Coverage thresholds: 70% across lines, functions, branches, statements.
 
-## Production Deployment
-
-See `.claude/DEPLOY.md` (gitignored) for server details and deploy commands.
-
-- **Process manager**: PM2 with `ecosystem.config.cjs` (max 10 restarts, 2s delay)
-- **Zero-downtime**: The build preserves `.next/server` and `.next/static` so the live app keeps serving while the new build compiles. Only `.next/cache` is cleared.
-
 ## Architecture
 
 ### Stack
 
 - **Framework**: Next.js 16 (App Router, React 19, Tailwind CSS 4)
 - **Database**: MariaDB/MySQL with Prisma ORM (`prisma/schema.prisma`)
-- **Payments**: Stripe (subscriptions, charges, prepaid wallets)
+- **Payments**: Stripe (optional — platform works without it)
 - **GPU Infrastructure**: hosted.ai API for pod management
 - **Validation**: Zod
-- **Auth**: JWT tokens (jsonwebtoken) -- no NextAuth
+- **Auth**: JWT tokens (jsonwebtoken) — no NextAuth
 
 ### Source Layout
 
 ```
 src/
   app/                  # Next.js App Router
-    (marketing)/        # Public marketing pages (grouped route)
     account/            # Customer account page
     admin/              # Admin panel (SPA with tab routing via ?tab=)
+      login/            # Admin login page (password-based)
+      setup/            # Admin invite setup page (set password via invite token)
+      verify/           # Token verification + 2FA input
     api/                # API routes
       admin/            # Admin API endpoints
-      cron/             # Cron job endpoints (midnight-status-email, process-batches, etc.)
-      v1/               # Token Factory OpenAI-compatible API
+        auth/           # Login + invite setup endpoints
+        security-health/# Security health check
+        login-log/      # Login audit log
+        platform-settings/ # DB-backed platform configuration
+      cron/             # Cron job endpoints
       webhooks/         # Stripe webhook handlers
     dashboard/          # Customer dashboard
     terminal/           # Web SSH terminal
   components/           # Shared React components
   hooks/                # Shared React hooks
   lib/                  # Server-side business logic
-    auth/               # Admin + customer JWT auth modules
+    auth/               # Admin auth, 2FA, invite tokens, login audit
     email/              # Email templates (HTML inline-styled)
-    token-factory/      # LLM inference orchestration
-    voucher/            # Voucher system
-    referral/           # Referral system
+    settings.ts         # DB-backed platform settings (SystemSetting table)
     hostedai/           # hosted.ai API client
-    zammad/             # Support ticket integration
-  middleware.ts         # Blocks bogus POST to non-API routes (no server actions exist)
-  server/               # SSH WebSocket server (tsx src/server/ssh-websocket.ts)
+  middleware.ts         # Blocks bogus POST to non-API routes
 tests/                  # Vitest unit/integration + Playwright E2E
 prisma/schema.prisma    # Database schema
+data/                   # File-based state (admins, secrets, invite tokens)
 ```
 
-### Authentication Pattern
+### Authentication
 
-Two separate auth systems, both using JWT:
+Password-based admin login with optional TOTP 2FA. All state managed via JWT tokens stored in `admin_session` cookie.
 
-1. **Admin auth** (`src/lib/auth/admin.ts`): Email-based with 2FA (TOTP). Session tokens stored in `admin_session` cookie. API routes verify via `verifySessionToken()`.
-2. **Customer auth** (`src/lib/auth/customer.ts`): Stripe customer-based. Generates tokens with `generateCustomerToken()`, verified via `verifyCustomerToken()`.
-3. **Cron auth** (`src/lib/cron-auth.ts`): `CRON_SECRET` header for scheduled jobs.
+#### Login Flow
+
+```
+First Run (no admins exist):
+  /admin/login → "setup" mode → email + password + confirm → bootstrap first admin → session
+
+Normal Login:
+  /admin/login → email + password
+    → if 2FA enabled: pre-auth token → /admin/verify → TOTP code → session
+    → if no 2FA: session directly
+
+Invited Admin (new admin added via panel):
+  /admin/setup?invite=<token> → set password → session
+```
+
+#### Key Auth Files
+
+| File | Purpose |
+|------|---------|
+| `src/lib/auth/admin.ts` | Admin list (JSON file `data/admins.json`), password hashing (scrypt), JWT tokens |
+| `src/lib/auth/two-factor.ts` | TOTP 2FA setup, verification, backup codes (DB-backed) |
+| `src/lib/auth/invite-tokens.ts` | One-time invite tokens for admin setup (file-based, 24h expiry) |
+| `src/lib/auth/login-log.ts` | Audit log for login attempts (DB-backed `AdminLoginLog` table) |
+| `src/lib/auth/secrets.ts` | Auto-generates JWT secrets on first run (`data/secrets.json`) |
+| `src/app/api/admin/auth/route.ts` | Main login endpoint (GET: mode detection, POST: password verify + 2FA) |
+| `src/app/api/admin/auth/setup/route.ts` | Invite token claim + password setup |
+
+#### Admin Invite Flow
+
+When adding a new admin via the admin panel:
+- **If email (SMTP) is configured**: invite email sent with setup link
+- **If no email configured**: admin panel shows a copyable setup URL to share manually
+
+The setup URL points to `/admin/setup?invite=<token>`. The token is single-use, expires in 24 hours, and is stored in `data/invite-tokens.json`.
+
+#### 2FA Recovery
+
+- Admin uses backup codes (8 codes generated during TOTP setup)
+- Another admin resets their 2FA from the Admins tab (requires `PIN_RESET_ALLOWED_EMAILS` env var)
+- Last resort (sole admin, no backup codes): delete row from `two_factor_auth` DB table directly
+
+#### Security Features
+
+- **Login audit log**: Every login attempt recorded in `AdminLoginLog` table (email, success/fail, IP, user-agent). Viewable in admin Activity tab.
+- **Security health badge**: Colored dot in admin sidebar — green (3-4/4), yellow (2/4), red (0-1/4). Score based on: password set, 2FA enabled, email configured, zero recent failed logins.
+- **Rate limiting**: 5 login attempts per 5 minutes per IP.
+- **Invite token security**: Constant-time comparison, single-use, 24h expiry.
+
+### Platform Settings
+
+Self-hosted configuration is managed through the admin Platform Settings tab (`/admin?tab=platform-settings`), which stores values in the `SystemSetting` DB table with AES-256-GCM encryption for sensitive keys.
+
+Services that can be configured:
+- **GPU Backend** (hosted.ai): API URL + key
+- **Stripe Billing**: Secret key, publishable key, webhook secret
+- **Email (SMTP)**: Host, port, username, password, admin BCC
+- **Support (Zammad)**: API URL + token
+
+Settings are resolved with fallback: DB → `process.env`. Use `getSetting(key)` from `src/lib/settings.ts`.
+
+#### Capability Gating
+
+Admin tabs show informational banners when their required service is not configured. Tabs are never disabled — banners link to Platform Settings. Uses `isServiceConfigured()` from `src/lib/settings.ts`.
+
+### Branding
+
+All user-visible brand strings come from `src/lib/branding.ts` and are overridable via env vars or Platform Settings:
+
+- `NEXT_PUBLIC_BRAND_NAME` (default: "GPU Cloud")
+- `NEXT_PUBLIC_APP_URL` (default: "http://localhost:3000")
+- `SUPPORT_EMAIL`, `NEXT_PUBLIC_LOGO_URL`, color theme vars
 
 ### Admin Panel Tab System
 
 The admin panel is a single-page app at `/admin` with tab-based routing via `?tab=` query param. When adding a new tab:
 
 1. Add to `AdminTab` type in `src/app/admin/types.ts`
-2. Add to `VALID_ADMIN_TABS` array in `src/app/admin/hooks/useAdminData.ts` (required for URL routing)
+2. Add to `VALID_ADMIN_TABS` array in `src/app/admin/hooks/useAdminData.ts`
 3. Create tab component in `src/app/admin/components/`
 4. Export from `src/app/admin/components/index.ts`
 5. Add to sidebar in `AdminSidebar.tsx`
@@ -100,248 +163,70 @@ The admin panel is a single-page app at `/admin` with tab-based routing via `?ta
 7. Add render case in `AdminDashboard.tsx`
 8. Create API route at `src/app/api/admin/[tabname]/route.ts` if needed
 
-### Stripe Integration
-
-- `getStripe()` in `src/lib/stripe.ts` is a lazy singleton.
-- Customers have Stripe-managed wallets (negative balance = credit). Wallet operations in `src/lib/wallet.ts`.
-- GPU pods link to Stripe via `PodMetadata.stripeCustomerId` and optional `stripeSubscriptionId`.
-- Webhook handling in `src/app/api/webhooks/`.
-
-### Token Factory (LLM Inference API)
-
-OpenAI-compatible endpoints at `/api/v1/` (chat/completions, completions, embeddings, batches, models). Routes through multiple vLLM servers with intelligent load-based routing. Key files:
-
-- `src/lib/token-factory/index.ts` -- Core orchestration, server selection, cost calculation
-- `src/lib/token-factory/lora.ts` -- LoRA adapter training via SSH
-- Pricing: pay-per-token from wallet, tracked in `InferenceUsage` table
-
-### hosted.ai Integration
-
-GPU pod lifecycle management through hosted.ai API. Client in `src/lib/hostedai.ts` and `src/lib/hostedai/`. Pod metadata (display names, billing info, startup scripts) stored locally in Prisma `PodMetadata` table. Metrics collected by `src/lib/metrics-collector.ts` into `PodMetricsHistory`.
-
 ### Email System
 
-HTML email templates with inline styles in `src/lib/email/templates/`. Uses direct SMTP/API sending (not a templating service). The midnight status email (`midnight-status-email/route.ts`) is a daily cron that collects KPIs from Stripe and Prisma.
+HTML email templates with inline styles in `src/lib/email/templates/`. Uses SMTP via nodemailer for sending (configurable via Platform Settings). Email is **optional** — the platform works without it, using invite URLs instead of invite emails for admin setup.
+
+Email templates are admin-customizable via the Email Templates tab. Code-defined defaults live in `src/lib/email/template-defaults.ts`. The `loadTemplate()` function checks for admin overrides in DB first, falling back to code defaults.
 
 ### Middleware
 
-`src/middleware.ts` blocks all POST requests to non-API routes (returns 405). This exists because no server actions are used -- bots sending POST to page routes would trigger Next.js server action errors.
+`src/middleware.ts` blocks all POST requests to non-API routes (returns 405). This exists because no server actions are used.
 
 ## Key Conventions
 
-- Amounts are stored in **cents** (integer) throughout the codebase (`walletRevenueCents`, `mrrCents`, `pricePerHourCents`).
+- Amounts are stored in **cents** (integer) throughout the codebase.
 - Stripe customer `balance` is negative for credits (use `Math.abs(Math.min(0, balance))`).
 - The hosted.ai team ID is stored in Stripe customer `metadata.team_id`.
 - Pod status values from hosted.ai: `"running"`, `"active"`, `"subscribed"`, `"stopped"`, etc.
 - Cron routes support both POST and GET (GET calls POST for manual testing).
+- Admin data is file-based (`data/` directory) to work without DB during first-run bootstrap.
+- Platform settings resolve: DB → env var fallback.
 
 ## Important Rules
 
 - Never deploy incomplete features. All linked pages must exist before pushing.
 - Always run `pnpm build` to verify before deploying.
-- Environment variables go in `.env.local` (never committed). Check `.env.example` or Prisma schema for required vars.
-- **Bug fix workflow**: When a bug is reported, don't start by trying to fix it. Instead, start by writing a test that reproduces the bug. Then, have subagents try to fix the bug and prove it with a passing test.
+- Environment variables go in `.env.local` (never committed). Check `.env.example` for required vars.
+- **Bug fix workflow**: When a bug is reported, start by writing a test that reproduces the bug, then fix it.
 
----
+## File-Based State (`data/` directory)
 
-## OSS Export Pipeline
+The `data/` directory stores state that needs to work before the database is initialized:
 
-This repo (Packet.ai / Pro) is the single source of truth. The open-source edition ("GPU Cloud Dashboard") is a **derived build artifact** generated by an export script. Code flows one way: Pro → OSS. Never edit the OSS output directly.
+| File | Purpose |
+|------|---------|
+| `data/admins.json` | Admin list with password hashes |
+| `data/secrets.json` | Auto-generated JWT secrets (created on first run) |
+| `data/invite-tokens.json` | Pending admin invite tokens (24h expiry, single-use) |
 
-### How It Works
+This directory is created automatically. Back it up alongside your database.
 
-```
-packet/ (Pro repo, private)
-  ├── src/                    ← All application code lives here
-  ├── oss/                    ← OSS-only overlay files (README, install scripts, CLI, etc.)
-  ├── .oss-manifest.yaml      ← Controls what gets excluded, overlaid, and overridden
-  └── scripts/export-oss.ts   ← The export pipeline script
-          │
-          │  npx tsx scripts/export-oss.ts --output ../packet-oss
-          ▼
-packet-oss/ (OSS repo, public)  ← Read-only output, wiped on each export
-```
+## Installation
 
-The pipeline:
-1. `git archive HEAD` → clean copy of committed code (respects .gitignore)
-2. Delete files matching `exclude:` patterns from `.oss-manifest.yaml`
-3. Copy `overlay:` files from `oss/` into the output (replaces README, .env.example, adds install scripts, CLI, etc.)
-4. Patch `package.json` with `overrides:` (name → `gpu-cloud-dashboard`, license → MIT)
-5. Set `NEXT_PUBLIC_EDITION=oss` in `.env.example`
-6. Remove `.oss-manifest.yaml` and `oss/` directory from output
-7. Verify: grep for "packet.ai" leaks, optionally run `pnpm build`
+Three installation methods are supported:
 
-### Export Commands
+1. **Manual**: `git clone` → `pnpm install` → configure `.env.local` → `npx prisma db push` → `pnpm dev`
+2. **Bare metal**: `curl -fsSL <url>/install.sh | bash` (creates systemd service at `/opt/gpu-cloud-dashboard/`)
+3. **Docker**: `cp .env.example .env.local && docker-compose up -d`
+
+See README.md for detailed instructions.
+
+## Post-Install Reconfiguration
+
+`reconfigure.sh` handles all day-2 configuration changes:
 
 ```bash
-# Dry run — export to a directory for review (fast, skips build)
-npx tsx scripts/export-oss.ts --output ../packet-oss --skip-build
-
-# Full verification — export + install + build (slow, catches import breaks)
-npx tsx scripts/export-oss.ts --output ../packet-oss
-
-# Strict mode — fails on any "packet.ai" references
-npx tsx scripts/export-oss.ts --output ../packet-oss --strict
-
-# Push to public repo — full verify + git push (implies --strict)
-npx tsx scripts/export-oss.ts --push
+sudo bash reconfigure.sh                        # Interactive menu
+sudo bash reconfigure.sh --show                 # Show current config
+sudo bash reconfigure.sh --check                # Health diagnostics
+sudo bash reconfigure.sh --domain new.example.com  # Change domain
+sudo bash reconfigure.sh --port 3001            # Change app port
+sudo bash reconfigure.sh --hai-url http://x:8055   # Change HAI URL
+sudo bash reconfigure.sh --ssl-on               # Enable SSL
+sudo bash reconfigure.sh --ssl-off              # Disable SSL
+sudo bash reconfigure.sh --ssl-renew            # Force cert renewal
+sudo bash reconfigure.sh --dry-run --domain x   # Preview changes
 ```
 
-**Important**: `git archive HEAD` only exports **committed** code. Uncommitted changes won't appear in the export. Always commit first.
-
-### Directory Structure
-
-```
-oss/                          # OSS overlay directory (never exported itself)
-  README.md                   # OSS-specific README (replaces Pro README)
-  CONTRIBUTING.md             # Contributor guide
-  LICENSE                     # MIT license
-  SECURITY.md                 # Security policy
-  .env.example                # OSS environment template
-  docker-compose.yml          # Docker deployment config
-  install.sh                  # One-line bare metal installer
-  upgrade.sh                  # Upgrade script (git pull + migrate + rebuild)
-  uninstall.sh                # Clean removal script
-  cli/                        # OSS CLI tool (gpu-cloud command)
-    src/
-      commands/               # login, gpus, launch, ps, ssh, terminate, logs, setup
-    package.json
-    tsconfig.json
-
-.oss-manifest.yaml            # Export configuration
-  exclude:                    # ~190 glob patterns for premium files to remove
-  overlay:                    # 10 mappings from oss/ → output
-  overrides:                  # package.json and env var patches
-```
-
-### Edition System
-
-Two env vars control edition detection at build time:
-
-- `NEXT_PUBLIC_EDITION=oss` (client-side, set in OSS `.env.example`)
-- `EDITION=oss` (server-side fallback)
-
-Code uses guards from `src/lib/edition.ts`:
-
-```typescript
-import { isOSS, isPro, hasPremiumFeature } from "@/lib/edition";
-
-if (isPro()) { /* show Token Factory tab */ }
-if (hasPremiumFeature("tenant")) { /* show multi-tenancy */ }
-```
-
-In the OSS build, premium source files are **physically removed** by the export pipeline. The edition guards are a runtime safety net for shared code that conditionally references premium features.
-
-### Branding System
-
-All user-visible brand strings come from `src/lib/branding.ts`:
-
-```typescript
-import { getBrandName, getAppUrl, getDashboardUrl, getSupportEmail } from "@/lib/branding";
-```
-
-- Pro defaults: "Packet.ai", "https://packet.ai", etc.
-- OSS defaults: "GPU Cloud", "http://localhost:3000", etc.
-- All values are overridable via env vars (`NEXT_PUBLIC_BRAND_NAME`, `NEXT_PUBLIC_APP_URL`, etc.)
-
-**Rule**: Never hardcode "Packet.ai" or "packet.ai" in shared code. Use branding functions instead. The export script verifies this and will block `--push` if leaks are found.
-
-### Where to Make Changes
-
-| Scenario | Where to Edit |
-|---|---|
-| Bug in shared code (components, lib, API routes) | `src/` in this (Pro) repo |
-| Branding leak ("Packet.ai" visible in OSS) | `src/` — replace with `getBrandName()` / `getAppUrl()` etc. |
-| OSS-only content (README, install scripts, CLI) | `oss/` overlay directory |
-| File incorrectly included/excluded in OSS | `.oss-manifest.yaml` — add/remove exclusion pattern |
-| Import error in OSS build (excluded file still imported) | Fix in `src/` — use dynamic import with edition guard, or create a stub in `oss/` as an overlay |
-| New premium feature | Add exclusion patterns to `.oss-manifest.yaml`, gate shared references with `hasPremiumFeature()` |
-
-**Never edit the exported OSS output directly.** It gets wiped and regenerated. Treat it like `.next/` — a build artifact.
-
-### Debugging the OSS Edition Locally
-
-**Option A — Quick edition toggle** (fast, good for testing feature flags and branding):
-
-```bash
-NEXT_PUBLIC_EDITION=oss pnpm dev
-```
-
-This flips `isOSS()` → true so all edition guards activate. All files are still physically present though, so it **won't catch missing imports** from excluded files.
-
-**Option B — Full export test** (slow, catches everything an OSS user would hit):
-
-```bash
-npx tsx scripts/export-oss.ts --output ../packet-dev/packet-oss --skip-build
-cd ../packet-dev/packet-oss
-pnpm install
-pnpm dev
-```
-
-Use Option A for day-to-day development. Use Option B before any OSS release to surface broken imports.
-
-### End-User Installation Methods
-
-The OSS repo ships three installation paths:
-
-**1. Manual (developers)**:
-```bash
-git clone <repo-url> && cd gpu-cloud-dashboard
-pnpm install
-cp .env.example .env.local    # Edit DATABASE_URL at minimum
-npx prisma db push
-pnpm dev                      # or: pnpm build && pnpm start
-```
-
-**2. Bare metal installer** (`install.sh`):
-```bash
-curl -fsSL <url>/install.sh | bash
-# or: bash install.sh --docker
-```
-Creates a system user, MariaDB database, installs deps, builds, creates a systemd service, and optionally configures nginx reverse proxy. Installs to `/opt/gpu-cloud-dashboard/`.
-
-**3. Docker** (`docker-compose.yml`):
-```bash
-cp .env.example .env.local && docker-compose up -d
-```
-Runs the app + MariaDB. **Note**: Dockerfile is still needed (TODO).
-
-### Upgrade & Uninstall (End Users)
-
-**Upgrade** (`upgrade.sh`): Backs up the database, stops the service, git pulls, installs deps, runs Prisma migrations, rebuilds, and restarts.
-```bash
-sudo bash upgrade.sh                    # Upgrade to latest main
-sudo bash upgrade.sh --branch v1.2.0    # Upgrade to specific tag
-```
-
-**Uninstall** (`uninstall.sh`): Interactive removal of service, database, nginx config, install directory, and system user.
-```bash
-sudo bash uninstall.sh           # Interactive prompts
-sudo bash uninstall.sh --yes     # Remove everything
-sudo bash uninstall.sh --keep-db # Keep database intact
-```
-
-### Maintaining the Manifest
-
-When adding new premium features:
-
-1. Create your feature files in `src/` as normal
-2. Add glob exclusion patterns to `.oss-manifest.yaml` under the appropriate section
-3. If shared code references the feature, gate it: `if (hasPremiumFeature("my-feature")) { ... }`
-4. Run `npx tsx scripts/export-oss.ts --output /tmp/oss-test --strict` to verify
-5. Check for import breaks: `cd /tmp/oss-test && pnpm install && pnpm build`
-
-The export script has an **allowlist** of files that may legitimately contain "packet.ai" (Pro-edition defaults with env var fallbacks): `branding.ts`, `auth/admin.ts`, `zammad/client.ts`, `email/utils.ts`.
-
-### OSS Release Workflow
-
-1. Ensure all changes are committed on the Pro repo
-2. Run full export with build verification: `npx tsx scripts/export-oss.ts --output ../packet-oss`
-3. Review diff in the OSS output: `cd ../packet-oss && git diff`
-4. Push: `npx tsx scripts/export-oss.ts --push` (pushes to `git@github.com:discod/packet-oss.git`)
-
-### Known Gaps / TODOs
-
-- **Dockerfile**: `docker-compose.yml` references `build: .` but no Dockerfile exists yet. Need a multi-stage Node build in `oss/Dockerfile`.
-- **Tenant import breaks**: Some files import from `src/lib/tenant/` which is excluded. Needs stubs or dynamic imports guarded by `isPro()`.
-- **OSS build verification**: A full `pnpm build` of the exported output has not been tested end-to-end yet. Must be done before first public release.
+The script updates `.env.local`, Apache vhost, systemd service, and SSL certificates as needed. Backups are created before any change. Domain changes require a rebuild (`NEXT_PUBLIC_APP_URL` is a build-time variable).

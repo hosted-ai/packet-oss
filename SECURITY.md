@@ -46,7 +46,7 @@ The following environment variables are critical for security. See `.env.example
 | `STRIPE_SECRET_KEY` | Stripe API key - never expose to client |
 | `STRIPE_WEBHOOK_SECRET` | Validates incoming Stripe webhooks |
 | `HOSTEDAI_API_KEY` | hosted.ai API authentication |
-| `EMAILIT_API_KEY` | Email service authentication |
+| `SMTP_PASSWORD` | SMTP server authentication |
 
 ### Best Practices
 

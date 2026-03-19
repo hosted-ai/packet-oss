@@ -164,4 +164,5 @@ fi
 echo ""
 success "Upgrade complete! ${CURRENT_VERSION} → ${NEW_VERSION}"
 echo "  Logs: journalctl -u ${SERVICE_NAME} -f"
+echo "  Reconfigure: sudo bash reconfigure.sh (change domain, ports, SSL, etc.)"
 echo ""
