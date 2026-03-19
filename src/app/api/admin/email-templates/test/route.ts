@@ -52,9 +52,9 @@ export async function POST(request: NextRequest) {
       error instanceof Error ? error.message : "Failed to send test email";
 
     // Surface actionable errors
-    if (message.includes("EMAILIT_API_KEY")) {
+    if (message.includes("not configured") || message.includes("SMTP")) {
       return NextResponse.json(
-        { error: "Email provider not configured. Set up Emailit in Platform Settings first." },
+        { error: "Email not configured. Set up SMTP in Platform Settings first." },
         { status: 400 }
       );
     }

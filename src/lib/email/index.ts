@@ -1,7 +1,8 @@
 /**
  * Email Module
  *
- * Transactional email system using Emailit as the delivery provider.
+ * Transactional email system using SMTP via nodemailer.
+ * Transport configured via Platform Settings (SMTP_HOST, etc.).
  * Provides both low-level email sending and pre-built templates for
  * common application events.
  *
@@ -34,7 +35,11 @@
  */
 
 // Core client functions
-export { sendEmail, sendEmailDirect, sendAdminCopy, type EmailParams } from "./client";
+export {
+  sendEmail, sendEmailDirect, sendAdminCopy,
+  verifySmtpConnection, getActiveTransport, clearSmtpPool, autoDetectTls,
+  type EmailParams, type EmailDirectParams,
+} from "./client";
 
 // Utilities
 export { escapeHtml, delay } from "./utils";
@@ -62,7 +67,8 @@ export function generateQuoteEmailHtml(..._args: unknown[]) { return undefined a
 export type QuoteEmailParams = Record<string, never>;
 
 // Template functions - Support
-export { sendSupportReplyNotification } from "./templates/support";
+// OSS stub — original: export { sendSupportReplyNotification } from "./templates/support";
+export function sendSupportReplyNotification(..._args: unknown[]) { return undefined as any; }
 
 // Template functions - Budget Alerts
 export {

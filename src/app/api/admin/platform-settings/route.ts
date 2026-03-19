@@ -6,9 +6,12 @@ import {
   setSetting,
   isSensitiveKey,
   isServiceConfigured,
+  isEmailConfigured,
   maskValue,
+  clearSettingsCache,
   type ServiceName,
 } from "@/lib/settings";
+import { clearSmtpPool } from "@/lib/email/client";
 
 function verifyAdmin(request: NextRequest) {
   const sessionToken = request.cookies.get("admin_session")?.value;
@@ -38,7 +41,10 @@ export async function GET(request: NextRequest) {
   }> = {};
 
   for (const [name, group] of Object.entries(SERVICE_GROUPS)) {
-    const configured = await isServiceConfigured(name as ServiceName);
+    // smtp group uses custom check (SMTP configured)
+    const configured = name === "smtp"
+      ? await isEmailConfigured()
+      : await isServiceConfigured(name as ServiceName);
     const settings: Record<string, string | null> = {};
 
     for (const key of group.keys) {
@@ -100,6 +106,10 @@ export async function PUT(request: NextRequest) {
     const encrypted = isSensitiveKey(key);
     await setSetting(key, value, encrypted);
   }
+
+  // Invalidate caches so new settings take effect immediately
+  clearSettingsCache();
+  clearSmtpPool();
 
   return NextResponse.json({ success: true });
 }

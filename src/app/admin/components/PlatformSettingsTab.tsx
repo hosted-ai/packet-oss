@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { isOSS } from "@/lib/edition";
 
 interface ServiceConfig {
   label: string;
@@ -30,8 +31,11 @@ const SERVICE_KEY_LABELS: Record<string, string> = {
   STRIPE_SECRET_KEY: "Secret Key",
   NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: "Publishable Key",
   STRIPE_WEBHOOK_SECRET: "Webhook Secret",
-  // Email
-  EMAILIT_API_KEY: "API Key",
+  // Email Delivery — SMTP
+  SMTP_HOST: "SMTP Host",
+  SMTP_PORT: "SMTP Port",
+  SMTP_USER: "SMTP Username",
+  SMTP_PASSWORD: "SMTP Password",
   ADMIN_BCC_EMAIL: "Admin BCC Email",
   // Zammad
   ZAMMAD_API_URL: "API URL",
@@ -42,7 +46,7 @@ const SERVICE_KEY_LABELS: Record<string, string> = {
 
 const SENSITIVE_KEYS = new Set([
   "STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "HOSTEDAI_API_KEY",
-  "EMAILIT_API_KEY", "ZAMMAD_API_TOKEN", "PIPEDRIVE_API_TOKEN",
+  "SMTP_PASSWORD", "ZAMMAD_API_TOKEN", "PIPEDRIVE_API_TOKEN",
 ]);
 
 const COLOR_KEYS = new Set([
@@ -76,12 +80,15 @@ const SERVICE_DESCRIPTIONS: Record<string, string> = {
   branding: "Configure your platform's brand identity — name, colors, logo, and support contact.",
   hostedai: "Connect to hosted.ai for GPU pod management. Required for GPU features.",
   stripe: "Enable Stripe for customer billing, wallets, and subscriptions. Optional - platform works without it.",
-  emailit: "Configure email delivery for login links, notifications, and alerts. Optional - password login works without it.",
+  smtp: "Configure email delivery via SMTP. Works with any mail server (Gmail, AWS SES, Postfix, Mailgun, etc.). Optional — password login works without it.",
   zammad: "Connect to Zammad for customer support ticket management. Optional.",
   pipedrive: "Connect to Pipedrive CRM for sales pipeline tracking. Optional.",
 };
 
-const SERVICE_ORDER = ["branding", "hostedai", "stripe", "emailit", "zammad", "pipedrive"];
+// Pro-only services are hidden from the OSS Platform Settings UI
+const PRO_ONLY_SERVICES = new Set(["zammad", "pipedrive"]);
+const SERVICE_ORDER = ["branding", "hostedai", "stripe", "smtp", "zammad", "pipedrive"]
+  .filter((s) => !(isOSS() && PRO_ONLY_SERVICES.has(s)));
 
 // ── Sub-sections for branding ─────────────────────────────────────────────
 const BRANDING_SECTIONS: { label: string; keys: string[] }[] = [
@@ -289,6 +296,23 @@ function BrandingPreview({ values }: { values: Record<string, string> }) {
   );
 }
 
+// ── SMTP TLS indicator ──────────────────────────────────────────────────────
+function SmtpTlsIndicator({ port }: { port: string }) {
+  const portNum = parseInt(port, 10);
+  if (!port || isNaN(portNum)) return null;
+
+  if (portNum === 465) {
+    return <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">🔒 TLS (implicit)</span>;
+  }
+  if (portNum === 587) {
+    return <span className="inline-flex items-center gap-1 text-xs text-green-700 bg-green-50 px-2 py-0.5 rounded-full">🔒 STARTTLS</span>;
+  }
+  if (portNum === 25) {
+    return <span className="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">⚠️ Unencrypted — use 587 or 465 for TLS</span>;
+  }
+  return <span className="inline-flex items-center gap-1 text-xs text-zinc-500 bg-zinc-50 px-2 py-0.5 rounded-full">Port {portNum}</span>;
+}
+
 export function PlatformSettingsTab() {
   const [data, setData] = useState<PlatformSettingsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -296,6 +320,8 @@ export function PlatformSettingsTab() {
   const [formValues, setFormValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [smtpTestResult, setSmtpTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [smtpTesting, setSmtpTesting] = useState(false);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -437,6 +463,87 @@ export function PlatformSettingsTab() {
     );
   }
 
+  async function handleSmtpTest() {
+    setSmtpTesting(true);
+    setSmtpTestResult(null);
+    try {
+      const res = await fetch("/api/admin/smtp/test-connection", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: formValues["SMTP_HOST"],
+          port: formValues["SMTP_PORT"],
+          user: formValues["SMTP_USER"],
+          password: formValues["SMTP_PASSWORD"],
+        }),
+      });
+      const json = await res.json();
+      setSmtpTestResult({ ok: json.ok, error: json.error });
+    } catch {
+      setSmtpTestResult({ ok: false, error: "Failed to reach server" });
+    } finally {
+      setSmtpTesting(false);
+    }
+  }
+
+  function renderSmtpForm() {
+    const smtpKeys = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD"];
+    const otherKeys = ["ADMIN_BCC_EMAIL"];
+
+    return (
+      <div className="space-y-6">
+        {/* SMTP Settings */}
+        <div>
+          <h4 className="text-sm font-semibold text-[#0b0f1c] mb-1 border-b border-[#e4e7ef] pb-1">
+            SMTP Settings
+          </h4>
+          <p className="text-xs text-[#5b6476] mb-3">
+            Connect to any SMTP server — Gmail, AWS SES, Postfix, Mailgun, etc.
+          </p>
+          <div className="space-y-4">
+            {smtpKeys.filter((k) => k in formValues).map((key) => (
+              <div key={key}>
+                {renderField(key)}
+                {key === "SMTP_PORT" && formValues["SMTP_PORT"] && (
+                  <div className="mt-1">
+                    <SmtpTlsIndicator port={formValues["SMTP_PORT"]} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Test Connection button */}
+          <div className="flex items-center gap-3 mt-4">
+            <button
+              type="button"
+              onClick={handleSmtpTest}
+              disabled={smtpTesting || !formValues["SMTP_HOST"]}
+              className="px-3 py-1.5 text-sm border border-[#e4e7ef] rounded-lg hover:bg-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {smtpTesting ? "Testing..." : "Test Connection"}
+            </button>
+            {smtpTestResult && (
+              <span className={`text-sm ${smtpTestResult.ok ? "text-green-600" : "text-red-600"}`}>
+                {smtpTestResult.ok ? "✅ Connected" : `❌ ${smtpTestResult.error}`}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* General */}
+        <div>
+          <h4 className="text-sm font-semibold text-[#0b0f1c] mb-1 border-b border-[#e4e7ef] pb-1">
+            General
+          </h4>
+          <div className="space-y-4">
+            {otherKeys.filter((k) => k in formValues).map((key) => renderField(key))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   function renderDefaultForm() {
     return (
       <div className="space-y-4">
@@ -509,7 +616,7 @@ export function PlatformSettingsTab() {
 
             {isEditing && (
               <div className="border-t border-[#e4e7ef] p-5 bg-zinc-50/50">
-                {serviceName === "branding" ? renderBrandingForm() : renderDefaultForm()}
+                {serviceName === "branding" ? renderBrandingForm() : serviceName === "smtp" ? renderSmtpForm() : renderDefaultForm()}
 
                 <div className="flex gap-2 pt-4 mt-4 border-t border-[#e4e7ef]">
                   <button

@@ -202,11 +202,14 @@ export const SERVICE_GROUPS = {
     required: ["STRIPE_SECRET_KEY"],
     sensitive: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
   },
-  emailit: {
-    label: "Email (Emailit)",
-    keys: ["EMAILIT_API_KEY", "ADMIN_BCC_EMAIL"],
-    required: ["EMAILIT_API_KEY"],
-    sensitive: ["EMAILIT_API_KEY"],
+  smtp: {
+    label: "Email Delivery",
+    keys: [
+      "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD",
+      "ADMIN_BCC_EMAIL",
+    ],
+    required: [],
+    sensitive: ["SMTP_PASSWORD"],
   },
   zammad: {
     label: "Support (Zammad)",
@@ -234,6 +237,15 @@ export async function isServiceConfigured(service: ServiceName): Promise<boolean
     const val = settings[key];
     return val !== null && val !== undefined && val.trim() !== "";
   });
+}
+
+/**
+ * Check if email transport (SMTP) is configured.
+ */
+export async function isEmailConfigured(): Promise<boolean> {
+  const settings = await getSettings(["SMTP_HOST"]);
+  const smtpHost = settings["SMTP_HOST"];
+  return !!smtpHost && smtpHost.trim() !== "";
 }
 
 /**

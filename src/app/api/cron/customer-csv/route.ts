@@ -301,7 +301,7 @@ export async function POST(request: NextRequest) {
       csvContent,
     ].join("\n");
 
-    // Send email with inline data (no attachments — Emailit doesn't support them)
+    // Send email with inline CSV data
     await sendEmailDirect({
       to: ONBOARDING_EMAIL,
       subject: `[Customer CSV] ${dateStr} — ${totalCustomers} customers`,
