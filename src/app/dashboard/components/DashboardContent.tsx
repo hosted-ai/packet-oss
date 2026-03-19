@@ -16,9 +16,13 @@ import ReferralCard from "@/components/ReferralCard";
 import { formatSmartPrice } from "@/lib/format";
 import { ApiKeysSettings } from "@/components/ApiKeysSettings";
 import { GPUHardwareMetrics } from "@/components/GPUHardwareMetrics";
-import { SupportTab } from "./SupportTab";
 import { AppsTab } from "./AppsTab";
 import { StorageTab } from "./StorageTab";
+
+// Support tab — edition-gated: Pro uses Zammad ticketing, OSS uses contact form
+const SupportTab = hasPremiumFeature("support")
+  ? dynamic(() => import("./SupportTab").then(m => ({ default: m.SupportTab })))
+  : dynamic(() => import("./OssSupportTab").then(m => ({ default: m.OssSupportTab })));
 
 // Premium tabs — dynamically imported, only available in Pro edition
 const TokenFactoryTab = hasPremiumFeature("token-factory")
