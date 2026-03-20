@@ -82,7 +82,8 @@ export {
 export function sendBatchCompletionEmail(..._args: unknown[]) { return undefined as any; }
 
 // Template functions - Pod Failure Alerts
-export { sendPodFailureAlertEmail } from "./templates/pod-failure";
+// OSS stub — original: export { sendPodFailureAlertEmail } from "./templates/pod-failure";
+export function sendPodFailureAlertEmail(..._args: unknown[]) { return undefined as any; }
 
 // Template functions - Midnight Status Report
 export { sendMidnightStatusEmail, type DailySnapshot, type MidnightStatusEmailParams } from "./templates/midnight-status";

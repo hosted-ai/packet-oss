@@ -76,15 +76,17 @@ run_with_progress() {
 
   if [[ $exit_code -eq 0 ]]; then
     success "$msg ${YELLOW}[${mins}m ${secs}s]${NC}"
+    rm -f "$logfile"
   else
     echo ""
-    fail "$msg failed after ${mins}m ${secs}s. Log: $logfile"
-    echo -e "${RED}Last 20 lines:${NC}"
-    tail -20 "$logfile"
+    echo -e "${RED}✗ $msg failed after ${mins}m ${secs}s${NC}"
+    echo ""
+    echo -e "${RED}Last 30 lines of log:${NC}"
+    tail -30 "$logfile"
+    echo ""
+    echo -e "${YELLOW}Full log: $logfile${NC}"
     exit 1
   fi
-
-  rm -f "$logfile"
   return $exit_code
 }
 
