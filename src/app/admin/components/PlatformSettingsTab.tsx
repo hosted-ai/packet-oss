@@ -9,8 +9,15 @@ interface ServiceConfig {
   settings: Record<string, string | null>;
 }
 
+interface EmailBlocklistData {
+  enabled: boolean;
+  domains: string[];
+  defaultDomains: string[];
+}
+
 interface PlatformSettingsData {
   services: Record<string, ServiceConfig>;
+  emailBlocklist?: EmailBlocklistData;
 }
 
 const SERVICE_KEY_LABELS: Record<string, string> = {
@@ -322,6 +329,11 @@ export function PlatformSettingsTab() {
   const [saveMessage, setSaveMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [smtpTestResult, setSmtpTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [smtpTesting, setSmtpTesting] = useState(false);
+  const [blocklistEnabled, setBlocklistEnabled] = useState(false);
+  const [blocklistDomains, setBlocklistDomains] = useState<string[]>([]);
+  const [blocklistNewDomain, setBlocklistNewDomain] = useState("");
+  const [blocklistSaving, setBlocklistSaving] = useState(false);
+  const [blocklistMessage, setBlocklistMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -338,6 +350,14 @@ export function PlatformSettingsTab() {
   }, []);
 
   useEffect(() => { fetchSettings(); }, [fetchSettings]);
+
+  // Sync blocklist state when data loads
+  useEffect(() => {
+    if (data?.emailBlocklist) {
+      setBlocklistEnabled(data.emailBlocklist.enabled);
+      setBlocklistDomains(data.emailBlocklist.domains);
+    }
+  }, [data]);
 
   function startEditing(serviceName: string) {
     if (!data) return;
@@ -578,6 +598,177 @@ export function PlatformSettingsTab() {
           {saveMessage.text}
         </div>
       )}
+
+      {/* ── Email Domain Blocklist ── */}
+      <div className="bg-white border border-[#e4e7ef] rounded-lg overflow-hidden">
+        <div className="p-5">
+          <div className="flex items-center justify-between mb-1">
+            <div className="flex items-center gap-3">
+              <div className={`w-2.5 h-2.5 rounded-full ${blocklistEnabled ? "bg-green-500" : "bg-zinc-300"}`} />
+              <div>
+                <h3 className="font-semibold text-[#0b0f1c]">Email Domain Blocklist</h3>
+                <p className="text-xs text-[#5b6476] mt-0.5">
+                  Block signups from disposable/temporary email domains
+                </p>
+              </div>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={blocklistEnabled}
+                onChange={async (e) => {
+                  const enabled = e.target.checked;
+                  setBlocklistEnabled(enabled);
+                  setBlocklistSaving(true);
+                  setBlocklistMessage(null);
+                  try {
+                    // If enabling for the first time and no domains exist, seed with defaults
+                    const domainsToSave = enabled && blocklistDomains.length === 0
+                      ? (data?.emailBlocklist?.defaultDomains || [])
+                      : undefined;
+                    if (domainsToSave) setBlocklistDomains(domainsToSave);
+
+                    const res = await fetch("/api/admin/platform-settings", {
+                      method: "PUT",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        emailBlocklist: {
+                          enabled,
+                          ...(domainsToSave ? { domains: domainsToSave } : {}),
+                        },
+                      }),
+                    });
+                    if (res.ok) {
+                      setBlocklistMessage({ type: "success", text: enabled ? "Blocklist enabled" : "Blocklist disabled" });
+                    } else {
+                      setBlocklistMessage({ type: "error", text: "Failed to update" });
+                      setBlocklistEnabled(!enabled);
+                    }
+                  } catch {
+                    setBlocklistMessage({ type: "error", text: "Failed to update" });
+                    setBlocklistEnabled(!enabled);
+                  } finally {
+                    setBlocklistSaving(false);
+                    setTimeout(() => setBlocklistMessage(null), 3000);
+                  }
+                }}
+                className="sr-only peer"
+              />
+              <div className="w-9 h-5 bg-zinc-200 peer-focus:ring-2 peer-focus:ring-[#1a4fff]/30 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-[#1a4fff]" />
+            </label>
+          </div>
+
+          {blocklistMessage && (
+            <div className={`mt-3 p-2 rounded text-xs ${
+              blocklistMessage.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"
+            }`}>
+              {blocklistMessage.text}
+            </div>
+          )}
+
+          {blocklistEnabled && (
+            <div className="mt-4 border-t border-[#e4e7ef] pt-4">
+              {/* Add domain input */}
+              <div className="flex gap-2 mb-3">
+                <input
+                  type="text"
+                  value={blocklistNewDomain}
+                  onChange={(e) => setBlocklistNewDomain(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      const domain = blocklistNewDomain.toLowerCase().trim();
+                      if (domain && domain.includes(".") && !blocklistDomains.includes(domain)) {
+                        const updated = [...blocklistDomains, domain].sort();
+                        setBlocklistDomains(updated);
+                        setBlocklistNewDomain("");
+                        // Auto-save
+                        fetch("/api/admin/platform-settings", {
+                          method: "PUT",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ emailBlocklist: { domains: updated } }),
+                        }).catch(() => {});
+                      }
+                    }
+                  }}
+                  placeholder="Add domain (e.g., tempmail.com)"
+                  className="flex-1 px-3 py-1.5 bg-white border border-[#e4e7ef] rounded-lg text-sm text-[#0b0f1c] placeholder-[#5b6476]/50 focus:outline-none focus:ring-2 focus:ring-[#1a4fff]"
+                />
+                <button
+                  onClick={() => {
+                    const domain = blocklistNewDomain.toLowerCase().trim();
+                    if (domain && domain.includes(".") && !blocklistDomains.includes(domain)) {
+                      const updated = [...blocklistDomains, domain].sort();
+                      setBlocklistDomains(updated);
+                      setBlocklistNewDomain("");
+                      fetch("/api/admin/platform-settings", {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ emailBlocklist: { domains: updated } }),
+                      }).catch(() => {});
+                    }
+                  }}
+                  disabled={!blocklistNewDomain.trim() || !blocklistNewDomain.includes(".")}
+                  className="px-3 py-1.5 bg-[#1a4fff] hover:bg-[#1a4fff]/90 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Add
+                </button>
+              </div>
+
+              {/* Domain list */}
+              <div className="text-xs text-[#5b6476] mb-2">
+                {blocklistDomains.length} domain{blocklistDomains.length !== 1 ? "s" : ""} blocked
+              </div>
+              <div className="max-h-60 overflow-y-auto border border-[#e4e7ef] rounded-lg divide-y divide-[#e4e7ef]">
+                {blocklistDomains.length === 0 ? (
+                  <div className="p-3 text-sm text-[#5b6476] text-center">
+                    No domains blocked. Add one above or the default list will be loaded when you enable the blocklist.
+                  </div>
+                ) : (
+                  blocklistDomains.map((domain) => (
+                    <div key={domain} className="flex items-center justify-between px-3 py-1.5 hover:bg-zinc-50">
+                      <span className="text-sm text-[#0b0f1c] font-mono">{domain}</span>
+                      <button
+                        onClick={() => {
+                          const updated = blocklistDomains.filter(d => d !== domain);
+                          setBlocklistDomains(updated);
+                          fetch("/api/admin/platform-settings", {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ emailBlocklist: { domains: updated } }),
+                          }).catch(() => {});
+                        }}
+                        className="text-xs text-red-500 hover:text-red-700 font-medium"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Reset to defaults */}
+              <button
+                onClick={() => {
+                  const defaults = data?.emailBlocklist?.defaultDomains || [];
+                  setBlocklistDomains(defaults);
+                  fetch("/api/admin/platform-settings", {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ emailBlocklist: { domains: defaults } }),
+                  }).then(() => {
+                    setBlocklistMessage({ type: "success", text: "Reset to default list" });
+                    setTimeout(() => setBlocklistMessage(null), 3000);
+                  }).catch(() => {});
+                }}
+                className="mt-2 text-xs text-[#5b6476] hover:text-[#0b0f1c] underline"
+              >
+                Reset to default list ({data?.emailBlocklist?.defaultDomains?.length || 0} domains)
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
 
       {SERVICE_ORDER.map((serviceName) => {
         const service = data.services[serviceName];

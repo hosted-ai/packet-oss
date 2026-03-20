@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
 import {
   SERVICE_GROUPS,
+  getSetting,
   getSettings,
   setSetting,
   isSensitiveKey,
@@ -12,6 +13,7 @@ import {
   type ServiceName,
 } from "@/lib/settings";
 import { clearSmtpPool } from "@/lib/email/client";
+import { DEFAULT_BLOCKED_DOMAINS } from "@/lib/email-blocklist";
 
 function verifyAdmin(request: NextRequest) {
   const sessionToken = request.cookies.get("admin_session")?.value;
@@ -63,7 +65,24 @@ export async function GET(request: NextRequest) {
     };
   }
 
-  return NextResponse.json({ services });
+  // ── Email blocklist settings ──
+  const [blocklistEnabled, blocklistDomains] = await Promise.all([
+    getSetting("email_blocklist_enabled"),
+    getSetting("email_blocklist_domains"),
+  ]);
+
+  let domains: string[] = [];
+  if (blocklistDomains) {
+    try { domains = JSON.parse(blocklistDomains); } catch { /* malformed, return empty */ }
+  }
+
+  const emailBlocklist = {
+    enabled: blocklistEnabled === "true",
+    domains,
+    defaultDomains: DEFAULT_BLOCKED_DOMAINS,
+  };
+
+  return NextResponse.json({ services, emailBlocklist });
 }
 
 /**
@@ -77,6 +96,30 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json();
+
+  // ── Handle email blocklist updates ──
+  if (body.emailBlocklist !== undefined) {
+    const { enabled, domains } = body.emailBlocklist as { enabled?: boolean; domains?: string[] };
+
+    if (enabled !== undefined) {
+      await setSetting("email_blocklist_enabled", enabled ? "true" : "false");
+    }
+
+    if (Array.isArray(domains)) {
+      // Sanitize: lowercase, trim, deduplicate, remove empty
+      const cleaned = [...new Set(
+        domains.map(d => d.toLowerCase().trim()).filter(d => d.length > 0 && d.includes("."))
+      )];
+      await setSetting("email_blocklist_domains", JSON.stringify(cleaned));
+    }
+
+    // Clear cache so blocklist takes effect immediately
+    clearSettingsCache();
+
+    return NextResponse.json({ success: true });
+  }
+
+  // ── Handle service group settings ──
   const incoming: Record<string, string> = body.settings;
 
   if (!incoming || typeof incoming !== "object") {

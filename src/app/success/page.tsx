@@ -20,6 +20,7 @@ function SuccessContent() {
   const directToken = searchParams.get("token");
   const isFreeTrial = type === "free-trial" || type === "free";
   const isVoucher = type === "voucher";
+  const isExistingUser = type === "existing";
 
   useEffect(() => {
     setMounted(true);
@@ -173,11 +174,17 @@ function SuccessContent() {
           </div>
 
           <h1 className="text-3xl font-bold tracking-tight mb-3">
-            {isFreeTrial ? "Your free account is ready!" : `Welcome to ${getBrandName()}`}
+            {isExistingUser
+              ? "Check your email"
+              : isFreeTrial
+              ? "Your free account is ready!"
+              : `Welcome to ${getBrandName()}`}
           </h1>
 
           <p className="text-zinc-500 mb-10">
-            {isFreeTrial
+            {isExistingUser
+              ? "We sent you a login link. Click it to access your dashboard."
+              : isFreeTrial
               ? "Check your email for your API key and dashboard link."
               : "Your payment was successful. Your GPU dashboard is being set up now."}
           </p>
@@ -220,10 +227,12 @@ function SuccessContent() {
                   </div>
                   <div className="pt-1">
                     <p className="font-medium text-zinc-900">
-                      {sessionId && !isFreeTrial && !pollFailed ? "Setting up your account..." : "Check your email"}
+                      {sessionId && !isFreeTrial && !isExistingUser && !pollFailed ? "Setting up your account..." : "Check your email"}
                     </p>
                     <p className="text-sm text-zinc-500">
-                      {isFreeTrial
+                      {isExistingUser
+                        ? `We sent a login link${email ? ` to ${email}` : ""}`
+                        : isFreeTrial
                         ? `We sent your API key and login link${email ? ` to ${email}` : ""}`
                         : pollFailed
                         ? "We're sending you a login link"
@@ -239,10 +248,10 @@ function SuccessContent() {
                   </div>
                   <div className="pt-1">
                     <p className="font-medium text-zinc-900">
-                      {isFreeTrial || pollFailed || !sessionId ? "Click the link" : "Auto-login to dashboard"}
+                      {isFreeTrial || isExistingUser || pollFailed || !sessionId ? "Click the link" : "Auto-login to dashboard"}
                     </p>
                     <p className="text-sm text-zinc-500">
-                      {isFreeTrial || pollFailed || !sessionId ? "No password needed" : "We'll redirect you automatically"}
+                      {isFreeTrial || isExistingUser || pollFailed || !sessionId ? "No password needed" : "We'll redirect you automatically"}
                     </p>
                   </div>
                 </div>
@@ -252,10 +261,16 @@ function SuccessContent() {
                   </div>
                   <div className="pt-1">
                     <p className="font-medium text-zinc-900">
-                      {isFreeTrial ? "Start using Token Factory" : "Launch your first GPU"}
+                      {isExistingUser
+                        ? "Access your dashboard"
+                        : isFreeTrial
+                        ? "Start using Token Factory"
+                        : "Launch your first GPU"}
                     </p>
                     <p className="text-sm text-zinc-500">
-                      {isFreeTrial
+                      {isExistingUser
+                        ? "Your account and data are right where you left them"
+                        : isFreeTrial
                         ? "You have 10,000 free tokens to explore LLM inference"
                         : "Start computing in minutes"}
                     </p>

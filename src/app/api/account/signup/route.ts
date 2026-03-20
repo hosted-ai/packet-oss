@@ -18,6 +18,8 @@ import { logAccountCreated, logApiKeyCreated } from "@/lib/activity";
 import { sendOnboardingEvent } from "@/lib/email/onboarding-events";
 import { cacheCustomer } from "@/lib/customer-cache";
 import { getBrandName, getDashboardUrl, getCompanyName } from "@/lib/branding";
+import { sendLoginEmailForCustomer } from "@/lib/customer-login-email";
+import { isBlockedDomain } from "@/lib/email-blocklist";
 import crypto from "crypto";
 
 const FREE_TRIAL_TOKENS = 10000;
@@ -185,6 +187,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Check email domain blocklist (fails open if DB unavailable)
+    if (await isBlockedDomain(customerEmail)) {
+      return NextResponse.json(
+        { error: "Signups from this email domain are not allowed. Please use a different email address." },
+        { status: 400 }
+      );
+    }
+
     const stripe = await getStripeAsync();
 
     // Check if customer already exists
@@ -194,11 +204,19 @@ export async function POST(request: NextRequest) {
     });
 
     if (existingCustomers.data.length > 0) {
-      // Customer already exists - don't reveal this, send generic message
-      // but don't create duplicate account
+      // Customer already exists — send them a login link instead of creating
+      // a duplicate account. The response is deliberately identical to the
+      // new-account path so we don't leak account existence.
+      console.log(`[Signup] Existing customer found for ${customerEmail}, sending login link instead`);
+      try {
+        await sendLoginEmailForCustomer(customerEmail);
+      } catch (loginEmailError) {
+        console.error(`[Signup] Failed to send login email for existing customer ${customerEmail}:`, loginEmailError);
+      }
       return NextResponse.json({
         success: true,
-        message: "If this email is not already registered, you will receive a welcome email shortly.",
+        message: "Account created! Check your email for your dashboard link and API key.",
+        redirect: `${process.env.NEXT_PUBLIC_APP_URL}/success?type=existing&email=${encodeURIComponent(customerEmail)}`,
       });
     }
 
