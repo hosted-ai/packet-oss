@@ -166,14 +166,14 @@ if [[ -z "$DOMAIN" ]]; then
   echo "  Examples: dash.example.com, gpu.mycompany.io"
   echo "  Leave blank for localhost (no SSL)."
   echo ""
-  read -rp "  Domain: " DOMAIN
+  read -rp "  Domain: " DOMAIN < /dev/tty
 fi
 
 # HostedAI API
 if [[ -z "${HOSTEDAI_API_URL:-}" ]]; then
   echo ""
   echo "  Is the HostedAI User Panel + Admin Panel installed on this server?"
-  read -rp "  Same node? [Y/n] " SAME_NODE
+  read -rp "  Same node? [Y/n] " SAME_NODE < /dev/tty
   SAME_NODE="${SAME_NODE:-Y}"
 
   if [[ "$SAME_NODE" =~ ^[Yy]$ ]]; then
@@ -184,12 +184,12 @@ if [[ -z "${HOSTEDAI_API_URL:-}" ]]; then
     echo ""
     echo "  HostedAI User Panel API URL (port 8055):"
     echo "    Example: https://user-panel.example.com"
-    read -rp "  HOSTEDAI_API_URL: " HOSTEDAI_API_URL
+    read -rp "  HOSTEDAI_API_URL: " HOSTEDAI_API_URL < /dev/tty
 
     echo ""
     echo "  HostedAI Admin Panel API URL (port 8999):"
     echo "    Example: https://admin-panel.example.com"
-    read -rp "  GPUAAS_ADMIN_URL: " GPUAAS_ADMIN_URL
+    read -rp "  GPUAAS_ADMIN_URL: " GPUAAS_ADMIN_URL < /dev/tty
   fi
 fi
 
@@ -198,28 +198,28 @@ if [[ -z "${HOSTEDAI_API_KEY:-}" ]]; then
   echo ""
   echo "  HostedAI User Panel API key."
   echo "  Generate one in the HostedAI User Panel, or configure later in admin UI."
-  read -rp "  HOSTEDAI_API_KEY (Enter to skip): " HOSTEDAI_API_KEY
+  read -rp "  HOSTEDAI_API_KEY (Enter to skip): " HOSTEDAI_API_KEY < /dev/tty
 fi
 
 # Admin Panel credentials (login/password auth — no API key)
 echo ""
 echo "  HostedAI Admin Panel login credentials (used for pod management)."
 if [[ -z "${GPUAAS_ADMIN_USER:-}" ]]; then
-  read -rp "  GPUAAS_ADMIN_USER: " GPUAAS_ADMIN_USER
+  read -rp "  GPUAAS_ADMIN_USER: " GPUAAS_ADMIN_USER < /dev/tty
 fi
 if [[ -z "${GPUAAS_ADMIN_PASSWORD:-}" ]]; then
-  read -srp "  GPUAAS_ADMIN_PASSWORD: " GPUAAS_ADMIN_PASSWORD
+  read -srp "  GPUAAS_ADMIN_PASSWORD: " GPUAAS_ADMIN_PASSWORD < /dev/tty
   echo ""
 fi
 
 # Stripe (optional)
 if [[ -z "${STRIPE_SECRET_KEY:-}" ]]; then
-  read -rp "  STRIPE_SECRET_KEY (optional, press Enter to skip): " STRIPE_SECRET_KEY
+  read -rp "  STRIPE_SECRET_KEY (optional, press Enter to skip): " STRIPE_SECRET_KEY < /dev/tty
 fi
 
 # Admin email (optional — for certbot and first admin bootstrap)
 if [[ -z "${ADMIN_EMAIL:-}" ]]; then
-  read -rp "  Admin email (for SSL certificate and first login): " ADMIN_EMAIL
+  read -rp "  Admin email (for SSL certificate and first login): " ADMIN_EMAIL < /dev/tty
 fi
 
 # Generate secrets (may be overridden by existing .env.local below)
@@ -526,7 +526,7 @@ APACHE
         echo "  Fix with:  iptables -I INPUT -p tcp --dport 80 -j ACCEPT && iptables -I INPUT -p tcp --dport 443 -j ACCEPT"
       fi
       echo ""
-      read -rp "  Continue anyway? [y/N] " FW_CONTINUE
+      read -rp "  Continue anyway? [y/N] " FW_CONTINUE < /dev/tty
       if [[ ! "$FW_CONTINUE" =~ ^[Yy]$ ]]; then
         warn "Skipping SSL setup. Open the firewall ports and re-run, or run manually:"
         warn "  certbot --apache -d ${DOMAIN}"
