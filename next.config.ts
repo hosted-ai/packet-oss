@@ -4,9 +4,7 @@ import { join } from "path";
 
 function getPackageVersion(): string {
   try {
-    const changelog = readFileSync(join(process.cwd(), "debian/changelog"), "utf-8");
-    const match = changelog.match(/^[^\s]+\s+\(([^)]+)\)/);
-    return match?.[1] ?? "unknown";
+    return readFileSync(join(process.cwd(), "VERSION"), "utf-8").trim();
   } catch {
     return "";
   }

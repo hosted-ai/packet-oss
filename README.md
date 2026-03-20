@@ -4,6 +4,14 @@
 
 A full-featured GPU cloud platform dashboard powered by the **[hosted.ai](https://hosted.ai)** GPU infrastructure API. Fork and deploy to run your own GPU-as-a-Service business.
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hosted-ai/packet-oss/main/install.sh | sudo bash
+```
+
+Installs to `/opt/packet-oss` with MariaDB, systemd, and Apache reverse proxy. Requires a fresh Linux server (Ubuntu/Debian).
+
 ---
 
 **This platform requires [hosted.ai](https://hosted.ai).** All GPU pod deployment, orchestration, scaling, monitoring, and billing runs through the hosted.ai API. You need a hosted.ai account and API credentials for the platform to function. Visit [hosted.ai](https://hosted.ai) to get access.
@@ -28,11 +36,11 @@ A full-featured GPU cloud platform dashboard powered by the **[hosted.ai](https:
 - **MariaDB 10.6+** (or MySQL 8.0+)
 - **Stripe account** (optional) - For billing features
 
-## Quick Start
+## Manual Setup
 
 ```bash
 # 1. Clone and install
-git clone <your-repo-url> && cd gpu-cloud-dashboard
+git clone https://github.com/hosted-ai/packet-oss.git && cd packet-oss
 pnpm install
 
 # 2. Create environment file
@@ -51,20 +59,6 @@ pnpm dev
 # Visit http://localhost:3000/admin
 # Create your admin account with email + password
 # Go to Platform Settings to configure your hosted.ai API keys
-```
-
-### One-Line Install (Linux)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/<your-repo>/main/install.sh | bash
-```
-
-### Docker
-
-```bash
-cp .env.example .env.local
-# Edit .env.local with your settings
-docker-compose up -d
 ```
 
 ## Configuration
@@ -96,7 +90,7 @@ The app boots and runs with just `DATABASE_URL` configured. All other settings c
 - **Styling**: Tailwind CSS 4
 - **Payments**: Stripe (optional)
 - **GPU Backend**: [hosted.ai](https://hosted.ai) API (required)
-- **Auth**: JWT (jsonwebtoken) with password + magic link login
+- **Auth**: JWT (jsonwebtoken) with password + optional TOTP 2FA
 - **Process Manager**: PM2
 
 ## Architecture
@@ -152,7 +146,23 @@ pm2 start ecosystem.config.cjs
 pnpm start
 ```
 
-See `install.sh` for automated server setup with systemd and nginx.
+See `install.sh` for automated server setup with systemd and Apache.
+
+## Upgrade
+
+```bash
+sudo bash upgrade.sh                    # Upgrade to latest
+sudo bash upgrade.sh --branch v1.2.0    # Upgrade to specific version
+```
+
+## Reconfigure
+
+```bash
+sudo bash reconfigure.sh                         # Interactive menu
+sudo bash reconfigure.sh --domain new.example.com # Change domain
+sudo bash reconfigure.sh --ssl-on                 # Enable SSL
+sudo bash reconfigure.sh --check                  # Health diagnostics
+```
 
 ## Development
 

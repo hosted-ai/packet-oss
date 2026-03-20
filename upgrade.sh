@@ -16,7 +16,7 @@ APP_NAME="packet-oss"
 INSTALL_DIR="/opt/${APP_NAME}"
 SERVICE_NAME="${APP_NAME}"
 APP_USER="${APP_NAME}"
-BRANCH="${BRANCH:-upgrade/hai-2.2}"
+BRANCH="${BRANCH:-main}"
 
 # Colors
 RED='\033[0;31m'
@@ -69,7 +69,7 @@ DB_URL=$(grep '^DATABASE_URL' "${INSTALL_DIR}/.env.local" | sed 's/DATABASE_URL=
 
 # ── Get current version ─────────────────────────────────────────────────────
 
-CURRENT_VERSION=$(node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "unknown")
+CURRENT_VERSION=$(cat VERSION 2>/dev/null || node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "unknown")
 log "Current version: ${CURRENT_VERSION}"
 log "Upgrading to branch: ${BRANCH}"
 
@@ -121,7 +121,7 @@ sudo -u "$APP_USER" git fetch origin "$BRANCH"
 sudo -u "$APP_USER" git checkout "$BRANCH" 2>/dev/null || sudo -u "$APP_USER" git checkout -b "$BRANCH" "origin/$BRANCH"
 sudo -u "$APP_USER" git pull origin "$BRANCH"
 
-NEW_VERSION=$(node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "unknown")
+NEW_VERSION=$(cat VERSION 2>/dev/null || node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "unknown")
 success "Code updated (${CURRENT_VERSION} → ${NEW_VERSION})"
 
 # ── Step 4: Install dependencies ────────────────────────────────────────────

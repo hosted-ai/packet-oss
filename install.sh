@@ -5,15 +5,13 @@
 # Installs the GPU Cloud Dashboard on a fresh Linux server.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/discod/packet-oss/main/install.sh | bash
-#   HOSTEDAI_API_URL=http://localhost:5000 bash install.sh   # Non-interactive
-#   bash install.sh --docker                                  # Docker mode
-#   bash install.sh --skip-apache                             # Skip Apache setup
+#   curl -fsSL https://raw.githubusercontent.com/hosted-ai/packet-oss/main/install.sh | sudo bash
+#   HOSTEDAI_API_URL=http://localhost:5000 sudo bash install.sh   # Non-interactive
+#   sudo bash install.sh --skip-apache                             # Skip Apache setup
 #
 # Supports:
 #   - Same-node as HAI (recommended): HOSTEDAI_API_URL=http://localhost:<port>
 #   - Separate server: HOSTEDAI_API_URL=https://hai-server.example.com
-#   - Docker: install.sh --docker
 # =============================================================================
 
 set -euo pipefail
@@ -29,7 +27,7 @@ SSH_WS_PORT=3002
 DB_NAME="packetdb_oss"
 DB_USER="packetos_user"
 REPO_URL="https://github.com/hosted-ai/packet-oss"
-BRANCH="${BRANCH:-upgrade/hai-2.2}"
+BRANCH="${BRANCH:-main}"
 DOMAIN="${DOMAIN:-}"
 
 # Colors
@@ -92,60 +90,16 @@ run_with_progress() {
 
 # ── Parse args ───────────────────────────────────────────────────────────────
 
-DOCKER_MODE=false
 SKIP_APACHE=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --docker)       DOCKER_MODE=true; shift ;;
     --skip-apache)  SKIP_APACHE=true; shift ;;
     --branch)       BRANCH="$2"; shift 2 ;;
     --domain)       DOMAIN="$2"; shift 2 ;;
     *)              shift ;;
   esac
 done
-
-# ── Docker mode ──────────────────────────────────────────────────────────────
-
-if $DOCKER_MODE; then
-  log "Docker installation mode"
-
-  if ! command -v docker &>/dev/null; then
-    fail "Docker is not installed. Install it first: https://docs.docker.com/engine/install/"
-  fi
-  if ! command -v docker-compose &>/dev/null && ! docker compose version &>/dev/null; then
-    fail "Docker Compose is not installed."
-  fi
-
-  log "Cloning repository..."
-  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR" 2>/dev/null || {
-    if [[ -d "$INSTALL_DIR" ]]; then
-      log "Directory exists, pulling latest..."
-      cd "$INSTALL_DIR" && git pull origin "$BRANCH"
-    else
-      fail "Failed to clone repository"
-    fi
-  }
-
-  cd "$INSTALL_DIR"
-
-  if [[ ! -f .env.local ]]; then
-    cp .env.example .env.local
-    log "Created .env.local from .env.example"
-    warn "Edit .env.local with your settings, then run: docker-compose up -d"
-  else
-    log ".env.local already exists"
-  fi
-
-  success "Docker setup complete!"
-  echo ""
-  log "Next steps:"
-  echo "  1. Edit ${INSTALL_DIR}/.env.local with your configuration"
-  echo "  2. Run: cd ${INSTALL_DIR} && docker-compose up -d"
-  echo "  3. Visit http://localhost:3000/admin/login to create your admin account"
-  echo ""
-  exit 0
-fi
 
 # ── Pre-flight checks ───────────────────────────────────────────────────────
 

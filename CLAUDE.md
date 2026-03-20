@@ -204,11 +204,10 @@ This directory is created automatically. Back it up alongside your database.
 
 ## Installation
 
-Three installation methods are supported:
+Two installation methods are supported:
 
-1. **Manual**: `git clone` → `pnpm install` → configure `.env.local` → `npx prisma db push` → `pnpm dev`
-2. **Bare metal**: `curl -fsSL <url>/install.sh | bash` (creates systemd service at `/opt/gpu-cloud-dashboard/`)
-3. **Docker**: `cp .env.example .env.local && docker-compose up -d`
+1. **Bare metal**: `curl -fsSL https://raw.githubusercontent.com/hosted-ai/packet-oss/main/install.sh | sudo bash` (creates systemd service at `/opt/packet-oss/`)
+2. **Manual**: `git clone` → `pnpm install` → configure `.env.local` → `npx prisma db push` → `pnpm dev`
 
 See README.md for detailed instructions.
 
