@@ -10,12 +10,14 @@ interface Message {
 interface InferencePlaygroundProps {
   subscriptionId: string;
   modelName?: string;
+  token?: string;
   onClose: () => void;
 }
 
 export default function InferencePlayground({
   subscriptionId,
   modelName,
+  token,
   onClose,
 }: InferencePlaygroundProps) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -64,6 +66,7 @@ export default function InferencePlayground({
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
         body: JSON.stringify({
           subscriptionId,
