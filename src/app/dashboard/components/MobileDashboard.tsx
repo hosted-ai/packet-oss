@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import Image from "next/image";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 import { getLogoUrl } from "@/lib/branding";
 
 interface MobileHeaderProps {
@@ -28,7 +28,7 @@ export function MobileHeader({ balance, onMenuOpen, onTopUp, logoUrl }: MobileHe
         </button>
 
         <Link href="/" className="flex items-center gap-1.5">
-          <Image
+          <BrandLogo
             src={logoUrl || getLogoUrl()}
             alt="Logo"
             width={100}

@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Image from "next/image";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 import { getLogoUrl } from "@/lib/branding";
 import { useBranding } from "@/hooks/useBranding";
 
@@ -123,7 +123,7 @@ export default function AdminLoginPage() {
       <header className="border-b border-zinc-800 bg-zinc-900">
         <div className="mx-auto max-w-6xl px-6 py-4">
           <Link href="/" className="flex items-center gap-2">
-            <Image
+            <BrandLogo
               src={logoUrl}
               alt="Admin Login"
               width={120}

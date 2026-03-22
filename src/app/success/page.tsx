@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { BrandLogo } from "@/components/BrandLogo";
 import { getBrandName, getAppUrl, getLogoUrl } from "@/lib/branding";
 import { useBranding } from "@/hooks/useBranding";
 
@@ -122,7 +122,7 @@ function SuccessContent() {
       <header className="border-b border-zinc-100 bg-white/80 backdrop-blur-sm sticky top-0 z-40">
         <div className="mx-auto max-w-6xl px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center">
-            <Image
+            <BrandLogo
               src={LOGO_URL}
               alt={getBrandName()}
               width={120}

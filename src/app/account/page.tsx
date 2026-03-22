@@ -2,8 +2,8 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 import { captureUtm, getUtmData, clearUtmData } from "@/lib/utm";
 import { getSessionId } from "@/lib/tracker";
 import { getBrandName, getLogoUrl } from "@/lib/branding";
@@ -120,7 +120,7 @@ function AccountContent() {
       <header className="account-header">
         <div className="account-header-inner">
           <Link href="/">
-            <Image
+            <BrandLogo
               src={LOGO_URL}
               alt={getBrandName()}
               width={120}

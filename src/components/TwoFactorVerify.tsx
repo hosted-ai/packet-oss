@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import Image from "next/image";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 import { getBrandName, getLogoUrl } from "@/lib/branding";
 import { useBranding } from "@/hooks/useBranding";
 
@@ -100,7 +100,7 @@ export default function TwoFactorVerify({
         <header className="sticky top-0 z-50 border-b border-[var(--line)] bg-[rgba(247,248,251,0.92)] backdrop-blur-[12px]">
           <div className="mx-auto max-w-[1120px] px-6 h-16 flex items-center justify-between">
             <Link href="/" className="flex items-center">
-              <Image
+              <BrandLogo
                 src={logoUrl}
                 alt={getBrandName()}
                 width={140}
@@ -175,7 +175,7 @@ export default function TwoFactorVerify({
       <header className="sticky top-0 z-50 border-b border-[var(--line)] bg-[rgba(247,248,251,0.92)] backdrop-blur-[12px]">
         <div className="mx-auto max-w-[1120px] px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center">
-            <Image
+            <BrandLogo
               src={logoUrl}
               alt={getBrandName()}
               width={140}

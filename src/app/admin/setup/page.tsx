@@ -2,8 +2,8 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 import { getLogoUrl } from "@/lib/branding";
 import { useBranding } from "@/hooks/useBranding";
 
@@ -118,7 +118,7 @@ function AdminSetupContent() {
       <header className="border-b border-zinc-800 bg-zinc-900">
         <div className="mx-auto max-w-6xl px-6 py-4">
           <Link href="/" className="flex items-center gap-2">
-            <Image
+            <BrandLogo
               src={logoUrl}
               alt="Admin Setup"
               width={120}

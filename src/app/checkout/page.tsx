@@ -3,7 +3,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
+import { BrandLogo } from "@/components/BrandLogo";
 import { getBrandName, getLogoUrl } from "@/lib/branding";
 import { useBranding } from "@/hooks/useBranding";
 
@@ -191,7 +191,7 @@ function CheckoutContent() {
     <div className="min-h-screen bg-[#f7f8fb] text-[#0b0f1c] flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-lg p-8 text-center">
         <Link href="/" className="inline-flex items-center justify-center gap-2 mb-6">
-          <Image
+          <BrandLogo
             src={LOGO_URL}
             alt={getBrandName()}
             width={180}

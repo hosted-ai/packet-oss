@@ -929,7 +929,7 @@ if os.environ["RESET_EMAIL"].lower() not in emails:
 import json, os
 data = json.load(open(os.environ["ADMINS_PATH"]))
 for a in data["admins"]:
-    print(f"    - {a[\"email\"]}")
+    print("    - " + a["email"])
 '
     exit 1
   fi
@@ -1085,7 +1085,7 @@ interactive_menu() {
 import json, os
 data = json.load(open(os.environ["ADMINS_PATH"]))
 for a in data["admins"]:
-    print(f"    - {a[\"email\"]}")
+    print("    - " + a["email"])
 ' 2>/dev/null || echo "    (could not read admins file)"
         echo ""
       fi

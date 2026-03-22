@@ -1,8 +1,8 @@
 "use client";
 
 import React from "react";
-import Image from "next/image";
 import Link from "next/link";
+import { BrandLogo } from "@/components/BrandLogo";
 import { isPro, hasPremiumFeature } from "@/lib/edition";
 import dynamic from "next/dynamic";
 
@@ -527,7 +527,7 @@ export function DashboardContent() {
         {/* Logo */}
         <div className="p-6 border-b border-[var(--line)]">
           <Link href="/" className="flex items-center gap-2">
-            <Image
+            <BrandLogo
               src={logoUrl}
               alt={brandName}
               width={140}

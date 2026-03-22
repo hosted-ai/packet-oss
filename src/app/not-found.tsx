@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { useState, useEffect } from "react";
+import { BrandLogo } from "@/components/BrandLogo";
 import { getLogoUrl } from "@/lib/branding";
 
 const gpuJokes = [
@@ -73,7 +73,7 @@ export default function NotFound() {
       <div className="relative z-10 text-center max-w-2xl">
         {/* Logo */}
         <Link href="/" className="inline-block mb-8 opacity-60 hover:opacity-100 transition-opacity">
-          <Image
+          <BrandLogo
             src={getLogoUrl()}
             alt="Logo"
             width={120}
