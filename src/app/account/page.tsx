@@ -6,13 +6,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { captureUtm, getUtmData, clearUtmData } from "@/lib/utm";
 import { getSessionId } from "@/lib/tracker";
-import { getBrandName } from "@/lib/branding";
+import { getBrandName, getLogoUrl } from "@/lib/branding";
+import { useBranding } from "@/hooks/useBranding";
 
 // MAINTENANCE MODE — set to false when hosted.ai team creation is fixed
 const SIGNUP_MAINTENANCE = false;
 
 const IS_OSS = process.env.NEXT_PUBLIC_EDITION === "oss";
-const LOGO_URL = process.env.NEXT_PUBLIC_LOGO_URL || (IS_OSS ? "/logo.png" : "/packet-logo.png");
 
 type Mode = "signin" | "signup";
 
@@ -27,6 +27,8 @@ const GPU_NAMES: Record<string, string> = {
 function AccountContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const branding = useBranding();
+  const LOGO_URL = branding?.logoUrl || getLogoUrl();
 
   // URL params from marketing pages
   const urlEmail = searchParams.get("email") || "";

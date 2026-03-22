@@ -11,9 +11,6 @@ function getAdminSession(request: NextRequest): { email: string } | null {
   return verifySessionToken(sessionToken);
 }
 
-const MAX_WIDTH = 400;
-const MAX_HEIGHT = 100;
-
 export async function POST(request: NextRequest) {
   const session = getAdminSession(request);
   if (!session) {
@@ -22,25 +19,28 @@ export async function POST(request: NextRequest) {
 
   try {
     const formData = await request.formData();
-    const file = formData.get("logo") as File | null;
+    const file = formData.get("favicon") as File | null;
 
     if (!file) {
-      return NextResponse.json({ error: "No logo file provided" }, { status: 400 });
+      return NextResponse.json({ error: "No favicon file provided" }, { status: 400 });
     }
 
-    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/svg+xml"];
+    const allowedTypes = [
+      "image/x-icon", "image/vnd.microsoft.icon",
+      "image/png", "image/svg+xml", "image/webp",
+    ];
     if (!allowedTypes.includes(file.type)) {
       return NextResponse.json(
-        { error: "Invalid file type. Allowed: JPEG, PNG, WebP, SVG" },
-        { status: 400 }
+        { error: "Invalid file type. Allowed: ICO, PNG, SVG, WebP" },
+        { status: 400 },
       );
     }
 
-    const maxSize = 2 * 1024 * 1024;
+    const maxSize = 1 * 1024 * 1024; // 1 MB
     if (file.size > maxSize) {
       return NextResponse.json(
-        { error: "File too large. Maximum size is 2MB" },
-        { status: 400 }
+        { error: "File too large. Maximum size is 1MB" },
+        { status: 400 },
       );
     }
 
@@ -53,37 +53,35 @@ export async function POST(request: NextRequest) {
     let filename: string;
     let outputBuffer: Buffer;
 
-    if (file.type === "image/svg+xml") {
-      // SVGs are served as-is (Sharp has limited SVG support)
-      filename = `logo_${Date.now()}.svg`;
+    if (file.type === "image/svg+xml" || file.type === "image/x-icon" || file.type === "image/vnd.microsoft.icon") {
+      // Serve ICO and SVG as-is
+      const ext = file.type === "image/svg+xml" ? "svg" : "ico";
+      filename = `favicon_${Date.now()}.${ext}`;
       outputBuffer = inputBuffer;
     } else {
-      filename = `logo_${Date.now()}.webp`;
+      // Convert PNG/WebP to a 48x48 PNG (standard favicon size)
+      filename = `favicon_${Date.now()}.png`;
       outputBuffer = await sharp(inputBuffer)
-        .resize(MAX_WIDTH, MAX_HEIGHT, {
-          fit: "inside",
-          withoutEnlargement: true,
-        })
-        .webp({ quality: 90 })
+        .resize(48, 48, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .png()
         .toBuffer();
     }
 
     const filePath = path.join(brandingDir, filename);
     fs.writeFileSync(filePath, outputBuffer);
 
-    const logoUrl = `/branding/${filename}`;
+    const faviconUrl = `/branding/${filename}`;
 
-    // Persist to platform settings so branding picks it up
-    await setSetting("NEXT_PUBLIC_LOGO_URL", logoUrl);
+    await setSetting("NEXT_PUBLIC_FAVICON_URL", faviconUrl);
 
-    console.log(`Logo uploaded by ${session.email}: ${logoUrl} (${outputBuffer.length} bytes)`);
+    console.log(`Favicon uploaded by ${session.email}: ${faviconUrl} (${outputBuffer.length} bytes)`);
 
-    return NextResponse.json({ success: true, logoUrl });
+    return NextResponse.json({ success: true, faviconUrl });
   } catch (error) {
-    console.error("Failed to upload logo:", error);
+    console.error("Failed to upload favicon:", error);
     return NextResponse.json(
-      { error: "Failed to upload logo" },
-      { status: 500 }
+      { error: "Failed to upload favicon" },
+      { status: 500 },
     );
   }
 }

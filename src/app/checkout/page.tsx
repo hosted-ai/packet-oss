@@ -4,10 +4,10 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { getBrandName } from "@/lib/branding";
+import { getBrandName, getLogoUrl } from "@/lib/branding";
+import { useBranding } from "@/hooks/useBranding";
 
 const IS_OSS = process.env.NEXT_PUBLIC_EDITION === "oss";
-const LOGO_URL = process.env.NEXT_PUBLIC_LOGO_URL || (IS_OSS ? "/logo.png" : "/packet-logo.png");
 
 interface GpuProduct {
   id: string;
@@ -26,6 +26,8 @@ interface GpuProduct {
 
 function CheckoutContent() {
   const searchParams = useSearchParams();
+  const branding = useBranding();
+  const LOGO_URL = branding?.logoUrl || getLogoUrl();
   const initialEmail = searchParams.get("email") || "";
   // Support both "product" and "gpu" URL parameters for backwards compatibility
   const initialProductId = searchParams.get("product") || searchParams.get("gpu") || "";

@@ -3,10 +3,15 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { getLogoUrl } from "@/lib/branding";
+import { useBranding } from "@/hooks/useBranding";
 
 type LoginMode = "loading" | "magic-link" | "password" | "setup";
 
 export default function AdminLoginPage() {
+  const branding = useBranding();
+  const logoUrl = branding?.logoUrl || getLogoUrl();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -119,7 +124,7 @@ export default function AdminLoginPage() {
         <div className="mx-auto max-w-6xl px-6 py-4">
           <Link href="/" className="flex items-center gap-2">
             <Image
-              src="/packet-logo.png"
+              src={logoUrl}
               alt="Admin Login"
               width={120}
               height={32}

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" fill="none">
+  <rect x="0" y="8" width="32" height="32" rx="6" fill="#1a4fff"/>
+  <path d="M10 28l6-12h4l-6 12H10zm6-12h4l6 12h-4l-6-12z" fill="white"/>
+  <text x="40" y="32" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="22" fill="#0b0f1c">GPU Cloud</text>
+</svg>

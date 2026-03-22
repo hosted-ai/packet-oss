@@ -58,7 +58,8 @@ import { TopupModal, ActivityLogModal, TransactionsModal, BlackwellModal, Welcom
 import { MobileHeader, MobileNav, MobileMenuSheet, MobileMoreSheet } from "./MobileDashboard";
 import { ProfileSettings } from "./ProfileSettings";
 import { BudgetSettings } from "./BudgetSettings";
-import { getBrandName, getAppUrl } from "@/lib/branding";
+import { getBrandName, getAppUrl, getLogoUrl } from "@/lib/branding";
+import { useBranding } from "@/hooks/useBranding";
 import { RateLimitSettings } from "./RateLimitSettings";
 import { SessionSettings } from "./SessionSettings";
 import { useDashboardData, useDashboardActions, useModals, TabType } from "./hooks";
@@ -124,6 +125,11 @@ export function DashboardContent() {
     setShowTransactionsModal,
     setActiveTab,
   } = useModals();
+
+  // DB-backed branding (logo URL, brand name, etc.)
+  const branding = useBranding();
+  const logoUrl = branding?.logoUrl || getLogoUrl();
+  const brandName = branding?.brandName || getBrandName();
 
   // Refresh account data (e.g. after voucher redemption)
   const refreshAccountData = React.useCallback(async () => {
@@ -513,6 +519,7 @@ export function DashboardContent() {
         userName={data.customer.name || data.customer.email.split("@")[0]}
         onMenuOpen={() => setShowMobileMenu(true)}
         onTopUp={() => setShowTopupModal(true)}
+        logoUrl={logoUrl}
       />
 
       {/* Sidebar - Desktop only */}
@@ -521,8 +528,8 @@ export function DashboardContent() {
         <div className="p-6 border-b border-[var(--line)]">
           <Link href="/" className="flex items-center gap-2">
             <Image
-              src="/packet-logo.png"
-              alt={getBrandName()}
+              src={logoUrl}
+              alt={brandName}
               width={140}
               height={50}
               className="h-12 w-auto"
@@ -1361,7 +1368,7 @@ export function DashboardContent() {
           <p className="text-center text-[var(--muted)] text-xs">
             Session expires in {sessionTimeoutHours} {sessionTimeoutHours === 1 ? "hour" : "hours"} · <Link href="/account" className="text-[var(--blue)] hover:underline">Request new link</Link>
             <span className="mx-2">·</span>
-            © {new Date().getFullYear()} {getBrandName()} · Powered by <a href="https://hosted.ai" className="text-[var(--blue)] hover:underline" target="_blank" rel="noopener noreferrer">hosted.ai</a>
+            © {new Date().getFullYear()} {brandName} · Powered by <a href="https://hosted.ai" className="text-[var(--blue)] hover:underline" target="_blank" rel="noopener noreferrer">hosted.ai</a>
             {process.env.NEXT_PUBLIC_APP_VERSION && <>
               <span className="mx-2">·</span>
               <span className="text-zinc-400">v{process.env.NEXT_PUBLIC_APP_VERSION}</span>

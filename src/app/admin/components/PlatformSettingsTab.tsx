@@ -193,6 +193,88 @@ function LogoUploadField({
   );
 }
 
+function FaviconUploadField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (url: string) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleUpload(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.append("favicon", file);
+      const res = await fetch("/api/admin/branding/upload-favicon", {
+        method: "POST",
+        body: formData,
+      });
+      if (res.ok) {
+        const { faviconUrl } = await res.json();
+        onChange(faviconUrl);
+      } else {
+        const err = await res.json();
+        setError(err.error || "Upload failed");
+      }
+    } catch {
+      setError("Upload failed");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div>
+      <label className="block text-sm font-medium text-[#0b0f1c] mb-1">
+        Favicon
+      </label>
+      {value && (
+        <div className="mb-2 p-3 bg-white border border-[#e4e7ef] rounded-lg inline-block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={value}
+            alt="Favicon preview"
+            className="h-6 w-6 object-contain"
+          />
+        </div>
+      )}
+      <div className="flex gap-2 items-center">
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="/favicon.ico or https://..."
+          className="flex-1 px-3 py-2 bg-white border border-[#e4e7ef] rounded-lg text-sm text-[#0b0f1c] placeholder-[#5b6476]/50 focus:outline-none focus:ring-2 focus:ring-[#1a4fff]"
+        />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/x-icon,image/vnd.microsoft.icon,image/png,image/svg+xml,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handleUpload(file);
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={uploading}
+          className="px-3 py-2 bg-white border border-[#e4e7ef] hover:bg-zinc-50 text-[#0b0f1c] rounded-lg text-sm whitespace-nowrap disabled:opacity-50"
+        >
+          {uploading ? "Uploading..." : "Upload"}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+    </div>
+  );
+}
+
 function ColorField({
   label,
   value,
@@ -408,6 +490,16 @@ export function PlatformSettingsTab() {
     if (key === "NEXT_PUBLIC_LOGO_URL") {
       return (
         <LogoUploadField
+          key={key}
+          value={formValues[key] || ""}
+          onChange={(url) => updateFormValue(key, url)}
+        />
+      );
+    }
+
+    if (key === "NEXT_PUBLIC_FAVICON_URL") {
+      return (
+        <FaviconUploadField
           key={key}
           value={formValues[key] || ""}
           onChange={(url) => updateFormValue(key, url)}

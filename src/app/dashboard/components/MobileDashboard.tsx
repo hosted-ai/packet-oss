@@ -3,15 +3,17 @@
 import React from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { getLogoUrl } from "@/lib/branding";
 
 interface MobileHeaderProps {
   balance: string;
   userName: string;
   onMenuOpen: () => void;
   onTopUp: () => void;
+  logoUrl?: string;
 }
 
-export function MobileHeader({ balance, userName, onMenuOpen, onTopUp }: MobileHeaderProps) {
+export function MobileHeader({ balance, onMenuOpen, onTopUp, logoUrl }: MobileHeaderProps) {
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-[var(--line)] px-4 py-3 md:hidden">
       <div className="flex items-center justify-between">
@@ -27,7 +29,7 @@ export function MobileHeader({ balance, userName, onMenuOpen, onTopUp }: MobileH
 
         <Link href="/" className="flex items-center gap-1.5">
           <Image
-            src="/packet-logo.png"
+            src={logoUrl || getLogoUrl()}
             alt="Logo"
             width={100}
             height={36}

@@ -46,7 +46,7 @@ const OSS_DEFAULTS = {
   dashboardUrl: "http://localhost:3000",
   apiBaseUrl: "http://localhost:3000/api",
   supportEmail: "admin@localhost",
-  logoUrl: "/logo.png",
+  logoUrl: "/logo.svg",
   faviconUrl: "/favicon.ico",
   primaryColor: "#1a4fff",
   accentColor: "#18b6a8",
@@ -109,14 +109,22 @@ export function getSupportEmail(): string {
   return env("SUPPORT_EMAIL") || defaults().supportEmail;
 }
 
+/** Strip query strings from local paths — next/image rejects them. */
+function cleanLocalUrl(url: string): string {
+  if (url.startsWith("/") && url.includes("?")) {
+    return url.split("?")[0];
+  }
+  return url;
+}
+
 /** Brand logo path or URL. */
 export function getLogoUrl(): string {
-  return env("NEXT_PUBLIC_LOGO_URL") || defaults().logoUrl;
+  return cleanLocalUrl(env("NEXT_PUBLIC_LOGO_URL") || defaults().logoUrl);
 }
 
 /** Favicon path or URL. */
 export function getFaviconUrl(): string {
-  return env("NEXT_PUBLIC_FAVICON_URL") || defaults().faviconUrl;
+  return cleanLocalUrl(env("NEXT_PUBLIC_FAVICON_URL") || defaults().faviconUrl);
 }
 
 /** Primary brand color (hex). */

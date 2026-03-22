@@ -4,12 +4,13 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { getBrandName, getAppUrl } from "@/lib/branding";
-
-const LOGO_URL = process.env.NEXT_PUBLIC_LOGO_URL || (process.env.NEXT_PUBLIC_EDITION === "oss" ? "/logo.png" : "/packet-logo.png");
+import { getBrandName, getAppUrl, getLogoUrl } from "@/lib/branding";
+import { useBranding } from "@/hooks/useBranding";
 
 function SuccessContent() {
   const searchParams = useSearchParams();
+  const branding = useBranding();
+  const LOGO_URL = branding?.logoUrl || getLogoUrl();
   const [mounted, setMounted] = useState(false);
   const [accountReady, setAccountReady] = useState(false);
   const [dashboardUrl, setDashboardUrl] = useState<string | null>(null);

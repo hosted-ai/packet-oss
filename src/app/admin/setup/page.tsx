@@ -4,10 +4,14 @@ import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
+import { getLogoUrl } from "@/lib/branding";
+import { useBranding } from "@/hooks/useBranding";
 
 function AdminSetupContent() {
   const searchParams = useSearchParams();
   const invite = searchParams.get("invite");
+  const branding = useBranding();
+  const logoUrl = branding?.logoUrl || getLogoUrl();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -115,7 +119,7 @@ function AdminSetupContent() {
         <div className="mx-auto max-w-6xl px-6 py-4">
           <Link href="/" className="flex items-center gap-2">
             <Image
-              src="/packet-logo.png"
+              src={logoUrl}
               alt="Admin Setup"
               width={120}
               height={32}

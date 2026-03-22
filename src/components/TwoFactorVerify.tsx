@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { getBrandName } from "@/lib/branding";
+import { getBrandName, getLogoUrl } from "@/lib/branding";
+import { useBranding } from "@/hooks/useBranding";
 
 interface TwoFactorVerifyProps {
   token: string;
@@ -16,6 +17,9 @@ export default function TwoFactorVerify({
   userEmail,
   onSuccess,
 }: TwoFactorVerifyProps) {
+  const branding = useBranding();
+  const logoUrl = branding?.logoUrl || getLogoUrl();
+
   const [code, setCode] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +101,7 @@ export default function TwoFactorVerify({
           <div className="mx-auto max-w-[1120px] px-6 h-16 flex items-center justify-between">
             <Link href="/" className="flex items-center">
               <Image
-                src="/packet-logo.png"
+                src={logoUrl}
                 alt={getBrandName()}
                 width={140}
                 height={50}
@@ -172,7 +176,7 @@ export default function TwoFactorVerify({
         <div className="mx-auto max-w-[1120px] px-6 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center">
             <Image
-              src="/packet-logo.png"
+              src={logoUrl}
               alt={getBrandName()}
               width={140}
               height={50}

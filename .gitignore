@@ -108,3 +108,7 @@ dist/deb/
 packetdb-production-*
 .cache/
 .gstack/
+
+# Recipe builds (compressed archives for HAI upload)
+recipes/builds/
+recipes/packet_recipes/creds

@@ -17,6 +17,8 @@ const nextConfig: NextConfig = {
   },
   output: "standalone",
   images: {
+    dangerouslyAllowSVG: true,
+    contentDispositionType: "inline",
     remotePatterns: [
       {
         protocol: "https",

@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { isPro } from "@/lib/edition";
-import { getBrandName, getAppUrl } from "@/lib/branding";
+import { getBrandName, getAppUrl, getLogoUrl, getFaviconUrl } from "@/lib/branding";
 import { BrandStyles } from "@/components/BrandStyles";
 import "./globals.css";
 
 const brandName = getBrandName();
 const appUrl = getAppUrl();
+const logoUrl = getLogoUrl();
+const faviconUrl = getFaviconUrl();
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -79,6 +81,9 @@ export const metadata: Metadata = {
     description:
       "Rent NVIDIA B200, H200, and RTX 6000 96GB GPUs on-demand. Deploy in under 5 minutes, no contracts.",
     images: ["/og-image.jpg"],
+  },
+  icons: {
+    icon: faviconUrl,
   },
   alternates: {
     canonical: appUrl,
@@ -222,7 +227,7 @@ c.parentNode.insertBefore(t,c)}();`}
                 "@type": "Organization",
                 name: brandName,
                 url: appUrl,
-                logo: `${appUrl}/packet-logo.png`,
+                logo: `${appUrl}${logoUrl}`,
                 description:
                   "On-demand GPU cloud infrastructure for AI and machine learning. Rent NVIDIA B200, H200, and RTX 6000 96GB GPUs with instant setup, SSH access, and no contracts.",
                 foundingDate: "2024",

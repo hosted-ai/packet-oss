@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { useState, useEffect } from "react";
+import { getLogoUrl } from "@/lib/branding";
 
 const gpuJokes = [
   "Looks like this page got lost in the tensor cores.",
@@ -73,7 +74,7 @@ export default function NotFound() {
         {/* Logo */}
         <Link href="/" className="inline-block mb-8 opacity-60 hover:opacity-100 transition-opacity">
           <Image
-            src="/packet-logo.png"
+            src={getLogoUrl()}
             alt="Logo"
             width={120}
             height={40}

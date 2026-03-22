@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useId, useEffect } from "react";
+import { useState, useId } from "react";
+import { useBranding } from "@/hooks/useBranding";
 
 interface OssSupportTabProps {
   token: string;
@@ -17,21 +18,13 @@ export function OssSupportTab({ token }: OssSupportTabProps) {
   const [priority, setPriority] = useState<Priority>("normal");
   const [formState, setFormState] = useState<FormState>("idle");
   const [errorMessage, setErrorMessage] = useState("");
-  const [supportEmail, setSupportEmail] = useState("");
+
+  const branding = useBranding();
+  const supportEmail = branding?.supportEmail || "";
 
   const subjectId = useId();
   const messageId = useId();
   const priorityId = useId();
-
-  // Fetch support email from branding API (DB-backed, not env var)
-  useEffect(() => {
-    fetch("/api/branding")
-      .then((res) => res.ok ? res.json() : null)
-      .then((data) => {
-        if (data?.supportEmail) setSupportEmail(data.supportEmail);
-      })
-      .catch(() => {});
-  }, []);
 
   const isSubmitting = formState === "submitting";
 
