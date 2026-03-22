@@ -16,6 +16,7 @@
 #   sudo bash reconfigure.sh --ssl-on               # Enable SSL via certbot
 #   sudo bash reconfigure.sh --ssl-off              # Disable SSL
 #   sudo bash reconfigure.sh --ssl-renew            # Force cert renewal
+#   sudo bash reconfigure.sh --reset-password <email> # Reset admin password
 #   sudo bash reconfigure.sh --dry-run --domain x   # Preview changes
 # =============================================================================
 
@@ -200,6 +201,7 @@ ARG_SSL_OFF=false
 ARG_SSL_RENEW=false
 ARG_SHOW=false
 ARG_CHECK=false
+ARG_RESET_PASSWORD=""
 ARG_DRY_RUN=false
 HAS_FLAGS=false
 
@@ -212,6 +214,7 @@ while [[ $# -gt 0 ]]; do
     --ssl-on)         ARG_SSL_ON=true; HAS_FLAGS=true; shift ;;
     --ssl-off)        ARG_SSL_OFF=true; HAS_FLAGS=true; shift ;;
     --ssl-renew)      ARG_SSL_RENEW=true; HAS_FLAGS=true; shift ;;
+    --reset-password) ARG_RESET_PASSWORD="$2"; HAS_FLAGS=true; shift 2 ;;
     --show)           ARG_SHOW=true; HAS_FLAGS=true; shift ;;
     --check)          ARG_CHECK=true; HAS_FLAGS=true; shift ;;
     --dry-run)        ARG_DRY_RUN=true; shift ;;
@@ -899,6 +902,93 @@ restart_service() {
   fi
 }
 
+# ── Admin password reset ─────────────────────────────────────────────────────
+
+ADMINS_FILE="${INSTALL_DIR}/data/admins.json"
+
+reset_admin_password() {
+  local email="$1"
+
+  if [[ ! -f "$ADMINS_FILE" ]]; then
+    fail "No admins file found at ${ADMINS_FILE}. Has the app been set up?"
+  fi
+
+  # Check if the email exists in admins.json
+  if ! RESET_EMAIL="$email" ADMINS_PATH="$ADMINS_FILE" python3 -c '
+import json, os, sys
+data = json.load(open(os.environ["ADMINS_PATH"]))
+emails = [a["email"].lower() for a in data["admins"]]
+if os.environ["RESET_EMAIL"].lower() not in emails:
+    sys.exit(1)
+' 2>/dev/null; then
+    echo ""
+    echo -e "${RED}✗ No admin found with email \"${email}\"${NC}"
+    echo ""
+    echo "  Existing admins:"
+    ADMINS_PATH="$ADMINS_FILE" python3 -c '
+import json, os
+data = json.load(open(os.environ["ADMINS_PATH"]))
+for a in data["admins"]:
+    print(f"    - {a[\"email\"]}")
+'
+    exit 1
+  fi
+
+  echo ""
+  log "Resetting password for: ${email}"
+  echo ""
+
+  # Prompt for new password
+  read -rsp "  New password (min 8 chars): " NEW_PASS
+  echo ""
+  if [[ ${#NEW_PASS} -lt 8 ]]; then
+    fail "Password must be at least 8 characters"
+  fi
+
+  read -rsp "  Confirm password: " CONFIRM_PASS
+  echo ""
+  if [[ "$NEW_PASS" != "$CONFIRM_PASS" ]]; then
+    fail "Passwords do not match"
+  fi
+
+  # Hash with scrypt and update admins.json (matches app's auth params)
+  RESET_EMAIL="$email" RESET_PASS="$NEW_PASS" ADMINS_PATH="$ADMINS_FILE" \
+  python3 -c '
+import json, hashlib, os, sys
+
+email = os.environ["RESET_EMAIL"].lower()
+password = os.environ["RESET_PASS"]
+admins_path = os.environ["ADMINS_PATH"]
+
+# scrypt params matching src/lib/auth/admin.ts
+salt = os.urandom(16).hex()
+dk = hashlib.scrypt(password.encode(), salt=salt.encode(), n=16384, r=8, p=1, dklen=64)
+password_hash = salt + ":" + dk.hex()
+
+with open(admins_path, "r") as f:
+    data = json.load(f)
+
+for admin in data["admins"]:
+    if admin["email"].lower() == email:
+        admin["passwordHash"] = password_hash
+        break
+
+with open(admins_path, "w") as f:
+    json.dump(data, f, indent=2)
+
+print("OK")
+'
+
+  if [[ $? -eq 0 ]]; then
+    echo ""
+    success "Password reset for ${email}"
+    info "You can now log in at /admin/login"
+    echo ""
+  else
+    fail "Failed to reset password"
+  fi
+}
+
 # ── Interactive menu ─────────────────────────────────────────────────────────
 
 interactive_menu() {
@@ -911,6 +1001,7 @@ interactive_menu() {
   echo "    3) HostedAI backend URLs"
   echo "    4) SSL settings"
   echo "    5) Run health check"
+  echo "    6) Reset admin password"
   echo "    q) Quit"
   echo ""
   read -rp "  Choice: " CHOICE
@@ -986,6 +1077,23 @@ interactive_menu() {
     5)
       run_check
       ;;
+    6)
+      echo ""
+      if [[ -f "$ADMINS_FILE" ]]; then
+        echo "  Existing admins:"
+        ADMINS_PATH="$ADMINS_FILE" python3 -c '
+import json, os
+data = json.load(open(os.environ["ADMINS_PATH"]))
+for a in data["admins"]:
+    print(f"    - {a[\"email\"]}")
+' 2>/dev/null || echo "    (could not read admins file)"
+        echo ""
+      fi
+      read -rp "  Admin email to reset: " RESET_EMAIL
+      if [[ -n "$RESET_EMAIL" ]]; then
+        reset_admin_password "$RESET_EMAIL"
+      fi
+      ;;
     q|Q|"")
       echo "  Bye!"
       ;;
@@ -1006,6 +1114,12 @@ fi
 # Handle --check
 if $ARG_CHECK; then
   run_check
+  exit 0
+fi
+
+# Handle --reset-password
+if [[ -n "$ARG_RESET_PASSWORD" ]]; then
+  reset_admin_password "$ARG_RESET_PASSWORD"
   exit 0
 fi
 
