@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { getDefaultResourcePolicy } from "./policies";
 import { validateSSHParams } from "@/lib/ssh-validation";
 import { spawn } from "child_process";
+import { readPoolOverviewCache, computePoolOverview } from "@/lib/pool-overview";
 import type {
   GPURegion,
   GPUPool,
@@ -256,7 +257,7 @@ export async function calculatePoolSubscriptionCost(
     "/gpuaas/calculate-pool-subscription",
     {
       pool_id: typeof params.pool_id === "number" ? params.pool_id : parseInt(String(params.pool_id), 10),
-      gpu_count: params.gpu_count,
+      vgpus: params.gpu_count,
       duration_hours: params.duration_hours || 1,
       team_id: params.team_id,
     }
@@ -1015,8 +1016,33 @@ export async function selectOptimalPool(
     if (o.maintenance) maintenancePoolIds.add(o.gpuaasPoolId);
   }
 
-  // 8. Score and rank eligible pools
-  // RULE 1: Maintenance is a hard filter — maintenance pools are excluded
+  // 8. Get pod counts per pool from pool overview (refreshed every 2 min, max 5 min stale)
+  //    This covers ALL pods across all customers, not just pods we can SSH into.
+  //    If cache is stale/missing, fetch fresh data on-demand to ensure we never deploy blind.
+  const podCountByPool = new Map<number, number>();
+  try {
+    let poolOverview = readPoolOverviewCache();
+    if (!poolOverview) {
+      console.log("[selectOptimalPool] Pool overview cache stale/missing — fetching fresh data...");
+      poolOverview = await computePoolOverview();
+    }
+    for (const pool of poolOverview.pools) {
+      podCountByPool.set(pool.id, pool.pods.length);
+    }
+    console.log(
+      `[selectOptimalPool] Pod counts for ${podCountByPool.size} pools: ` +
+      Array.from(podCountByPool.entries())
+        .filter(([pid]) => eligiblePools.some(p => String(p.id) === String(pid)))
+        .sort((a, b) => a[1] - b[1])
+        .map(([pid, count]) => `pool ${pid}: ${count} pods`)
+        .join(', ')
+    );
+  } catch (err) {
+    console.error("[selectOptimalPool] Failed to get pool overview:", err);
+  }
+
+  // 9. Score and rank eligible pools
+  // Maintenance is a hard filter — maintenance pools are excluded
   const scorablePools = eligiblePools.filter(p => !maintenancePoolIds.has(parseInt(String(p.id), 10)));
   if (maintenancePoolIds.size > 0) {
     const excluded = eligiblePools.length - scorablePools.length;
@@ -1026,44 +1052,92 @@ export async function selectOptimalPool(
       );
     }
   }
-  const scored = scorablePools
-    .map(pool => {
-      const poolIdNum = parseInt(String(pool.id), 10);
-      return {
-        pool,
-        available: availabilityMap.get(String(pool.id)),
-        vram: vramByPool.get(poolIdNum),
-        priority: priorityMap.get(poolIdNum) ?? 0,
-      };
-    })
-    .filter(entry => {
-      // If we have availability data, exclude pools with insufficient capacity
-      if (entry.available !== undefined) {
-        return entry.available >= gpuCount;
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      // RULE 0: Higher priority pools first (admin-configured)
+  // 9. Score all eligible pools
+  const scored = scorablePools.map(pool => {
+    const poolIdNum = parseInt(String(pool.id), 10);
+    return {
+      pool,
+      available: availabilityMap.get(String(pool.id)),
+      vram: vramByPool.get(poolIdNum),
+      podCount: podCountByPool.get(poolIdNum) ?? -1, // -1 = unknown
+      priority: priorityMap.get(poolIdNum) ?? 0,
+    };
+  });
+
+  // Log blocked pools for debugging
+  if (blockedPoolIds.size > 0) {
+    console.log(`[selectOptimalPool] Blocked pools (user already subscribed): ${[...blockedPoolIds].join(', ')}`);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // RULE 1 (HIGHEST PRIORITY): Pick an empty pool if one exists.
+  // An empty pool = 0 pods. This is always the best choice because the
+  // GPU will have all its VRAM free. No exceptions, no overrides.
+  // ─────────────────────────────────────────────────────────────────────
+  const emptyPools = scored.filter(s => s.podCount === 0);
+  if (emptyPools.length > 0) {
+    // Among empty pools, prefer: higher admin priority, then API-confirmed capacity
+    emptyPools.sort((a, b) => {
       if (a.priority !== b.priority) return b.priority - a.priority;
-
-      // RULE 1: (maintenance is a hard filter — applied before scoring)
-
-      // RULE 2: Empty pools first — if ANY pool has zero pods, pick it
-      const aEmpty = !a.vram || a.vram.usedMb === 0;
-      const bEmpty = !b.vram || b.vram.usedMb === 0;
-      if (aEmpty !== bEmpty) return aEmpty ? -1 : 1;
-
-      // RULE 3: Among non-empty pools, prefer the one with LEAST VRAM consumption
-      const aUsed = a.vram?.usedMb ?? 0;
-      const bUsed = b.vram?.usedMb ?? 0;
-      if (aUsed !== bUsed) return aUsed - bUsed;
-
-      // Tiebreaker: more available GPU slots preferred
-      const aAvail = a.available ?? 0;
-      const bAvail = b.available ?? 0;
-      return bAvail - aAvail;
+      const aSlots = a.available ?? 0;
+      const bSlots = b.available ?? 0;
+      return bSlots - aSlots;
     });
+
+    const selected = emptyPools[0];
+    // Fallbacks: remaining empty pools first, then non-empty pools sorted by pod count
+    const otherEmpty = emptyPools.slice(1);
+    const nonEmpty = scored
+      .filter(s => s.podCount !== 0)
+      .sort((a, b) => {
+        const aPods = a.podCount >= 0 ? a.podCount : Infinity;
+        const bPods = b.podCount >= 0 ? b.podCount : Infinity;
+        return aPods - bPods;
+      });
+    const fallbackPools = [...otherEmpty, ...nonEmpty].map(s => s.pool);
+
+    console.log(
+      `[selectOptimalPool] EMPTY POOL FOUND — picked pool ${selected.pool.id} (${selected.pool.name}) ` +
+      `[0 pods, ${emptyPools.length} empty pools available, ${scored.length} total eligible]`
+    );
+
+    return { pool: selected.pool, fallbackPools, blockedPoolIds };
+  }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // RULE 2: No empty pools — pick the pool with lowest VRAM consumption.
+  // Uses real nvidia-smi VRAM data when available (from GpuHardwareMetrics,
+  // collected every ~3 min via SSH). For pools without VRAM data, estimates
+  // based on pod count (more pods = more VRAM used).
+  // ─────────────────────────────────────────────────────────────────────
+
+  // Compute average VRAM per pod from pools where we have real data,
+  // so we can estimate VRAM for pools without data.
+  let avgVramPerPodMb = 48000; // Default: ~48GB per pod (half a 96GB GPU)
+  const poolsWithVram = scored.filter(s => s.vram && s.vram.usedMb > 0 && s.podCount > 0);
+  if (poolsWithVram.length > 0) {
+    const totalVram = poolsWithVram.reduce((sum, s) => sum + s.vram!.usedMb, 0);
+    const totalPods = poolsWithVram.reduce((sum, s) => sum + s.podCount, 0);
+    avgVramPerPodMb = Math.round(totalVram / totalPods);
+  }
+
+  scored.sort((a, b) => {
+    // Primary: lowest VRAM consumption
+    // Use real VRAM if available, otherwise estimate from pod count
+    const aVram = a.vram ? a.vram.usedMb : (a.podCount >= 0 ? a.podCount * avgVramPerPodMb : Infinity);
+    const bVram = b.vram ? b.vram.usedMb : (b.podCount >= 0 ? b.podCount * avgVramPerPodMb : Infinity);
+    if (aVram !== bVram) return aVram - bVram;
+
+    // Tiebreaker: fewer pods
+    const aPods = a.podCount >= 0 ? a.podCount : Infinity;
+    const bPods = b.podCount >= 0 ? b.podCount : Infinity;
+    if (aPods !== bPods) return aPods - bPods;
+
+    // Tiebreaker: higher admin priority
+    if (a.priority !== b.priority) return b.priority - a.priority;
+
+    return 0;
+  });
 
   if (scored.length === 0) {
     const err = new Error(
@@ -1076,13 +1150,22 @@ export async function selectOptimalPool(
   const selected = scored[0];
   const fallbackPools = scored.slice(1).map(s => s.pool);
 
+  // Log top 5 candidates
+  const top5 = scored.slice(0, 5);
+  console.log(
+    `[selectOptimalPool] No empty pools (avgVram/pod: ${(avgVramPerPodMb / 1024).toFixed(1)}GB). Top candidates: ` +
+    top5.map((s, i) => {
+      const estVram = s.vram ? s.vram.usedMb : (s.podCount >= 0 ? s.podCount * avgVramPerPodMb : -1);
+      return `#${i + 1} pool ${s.pool.id} pods=${s.podCount >= 0 ? s.podCount : '?'} ` +
+        `vram=${s.vram ? `${(s.vram.usedMb / 1024).toFixed(1)}/${(s.vram.totalMb / 1024).toFixed(1)}GB` : `~${(estVram / 1024).toFixed(0)}GB(est)`}`;
+    }).join(' | ')
+  );
+
   console.log(
     `[selectOptimalPool] Selected pool ${selected.pool.id} (${selected.pool.name}) ` +
+    `pods: ${selected.podCount >= 0 ? selected.podCount : 'unknown'}, ` +
     `VRAM: ${selected.vram ? `${(selected.vram.usedMb / 1024).toFixed(1)}GB / ${(selected.vram.totalMb / 1024).toFixed(1)}GB` : 'no data'}, ` +
-    `slots: ${selected.available ?? 'unknown'} ` +
-    `(${scored.length} eligible, ${fallbackPools.length} fallbacks, ` +
-    `VRAM data: ${vramDataAvailable ? 'YES' : 'NO'}, ` +
-    `availability API: ${availabilityCheckSucceeded ? 'OK' : 'failed'})`
+    `(${scored.length} eligible, ${fallbackPools.length} fallbacks)`
   );
 
   return { pool: selected.pool, fallbackPools, blockedPoolIds };
@@ -1110,7 +1193,9 @@ export async function subscribeWithFallback(params: {
   } catch (deployError) {
     const errMsg = deployError instanceof Error ? deployError.message : "";
     const isInsufficientResources =
-      errMsg.includes("Insufficient resources") || errMsg.includes("10189007");
+      errMsg.includes("Insufficient resources") ||
+      errMsg.includes("10189007") ||
+      errMsg.includes("Failed to validate subscription resources");
 
     if (!isInsufficientResources || fallbackPools.length === 0) {
       throw deployError;

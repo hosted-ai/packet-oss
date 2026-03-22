@@ -383,6 +383,20 @@ export async function DELETE(
 
     await unsubscribeFromPool(subscriptionId, teamId, poolId);
 
+    // Decrement activePods in CustomerCache so it stays in sync
+    try {
+      const cached = await prisma.customerCache.findUnique({
+        where: { id: payload.customerId },
+        select: { activePods: true },
+      });
+      if (cached && cached.activePods > 0) {
+        await prisma.customerCache.update({
+          where: { id: payload.customerId },
+          data: { activePods: cached.activePods - 1 },
+        });
+      }
+    } catch { /* non-critical */ }
+
     // Log the activity
     await logGPUTerminated(payload.customerId, poolName, displayNameForLog, String(subscriptionId));
 

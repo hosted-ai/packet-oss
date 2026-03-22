@@ -281,10 +281,38 @@ export async function GET(request: NextRequest) {
         }
 
         // Fetch HuggingFace deployments for subscriptions
+        // Also fetch pending deployments (pending-{poolId}-{timestamp}) and resolve them
         const deployments = await prisma.huggingFaceDeployment.findMany({
-          where: { subscriptionId: { in: subscriptionIds } },
+          where: {
+            OR: [
+              { subscriptionId: { in: subscriptionIds } },
+              { subscriptionId: { startsWith: "pending-" }, stripeCustomerId: payload.customerId },
+            ],
+          },
           orderBy: { createdAt: 'desc' },
         });
+
+        // Resolve any pending subscription IDs to real ones
+        for (const d of deployments) {
+          if (d.subscriptionId.startsWith("pending-")) {
+            const pendingPoolId = d.subscriptionId.split("-")[1];
+            const match = poolSubscriptions.find(
+              (s: { pool_id?: number | string; status?: string }) =>
+                String(s.pool_id) === pendingPoolId &&
+                ["subscribing", "subscribed", "active", "running"].includes(s.status || "")
+            );
+            if (match) {
+              const realId = String(match.id);
+              console.log(`[Instances] Resolved pending HF deployment ${d.subscriptionId} -> ${realId}`);
+              await prisma.huggingFaceDeployment.update({
+                where: { id: d.id },
+                data: { subscriptionId: realId },
+              });
+              d.subscriptionId = realId;
+            }
+          }
+        }
+
         hfDeployments = deployments.reduce((acc, d) => {
           // Only keep the most recent deployment per subscription
           if (!acc[d.subscriptionId]) {
@@ -460,80 +488,27 @@ export async function POST(request: NextRequest) {
       let selectedPool = pools.find(p => String(p.id) === String(pool_id));
       const regionId = selectedPool?.region_id || 2; // Default to region 2 if not found
 
-      // If no instance type provided, fetch GPU-compatible instance types and pick the best one
-      // The /gpuaas/pool/compatible-instance-types API returns types that may not have
-      // enough cluster resources. We use /api/instance-type to get all types and filter
-      // for those with gpu_workload=true, which are appropriate for GPU pods.
+      // If no instance type provided, fetch compatible instance types for this region
+      // Uses the per-region compatible-instance-types endpoint which returns only types
+      // that the hosted.ai cluster actually accepts for subscription
       if (!selectedInstanceType) {
         try {
-          console.log("Fetching GPU-compatible instance types from /api/instance-type");
-          const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
+          const { getPoolInstanceTypes } = await import("@/lib/hostedai");
+          console.log(`Fetching compatible instance types for region ${regionId}, team ${teamId}`);
+          const compatibleTypes = await getPoolInstanceTypes(String(regionId), teamId);
 
-          const instanceTypeController = new AbortController();
-          const instanceTypeTimeout = setTimeout(() => instanceTypeController.abort(), 10_000);
-          const response = await fetch(`${apiUrl}/api/instance-type`, {
-            method: "GET",
-            headers: {
-              "X-API-Key": apiKey,
-              "Content-Type": "application/json",
-            },
-            signal: instanceTypeController.signal,
-          }).finally(() => clearTimeout(instanceTypeTimeout));
+          console.log("Compatible instance types:", compatibleTypes.map(t =>
+            `${t.name} (${t.id})`
+          ));
 
-          if (response.ok) {
-            const allInstanceTypes = await response.json() as Array<{
-              id: string;
-              name: string;
-              memory_mb: number;
-              vcpus: number;
-              gpu_workload: boolean;
-              is_available: boolean;
-            }>;
-
-            // Filter for GPU-compatible types (gpu_workload=true) and available
-            const gpuTypes = allInstanceTypes.filter(t =>
-              t.gpu_workload === true && t.is_available !== false
-            );
-
-            console.log("GPU-compatible instance types:", gpuTypes.map(t =>
-              `${t.name} (${t.memory_mb/1024}GB RAM, ${t.vcpus} vCPU)`
-            ));
-
-            if (gpuTypes.length > 0) {
-              // Match instance type to GPU pool type
-              // RTX 6000 pools (gpuaas_id 18) use the dedicated RTX instance type
-              // B200 pools (gpuaas_id 21) use 2X-Large for more vCPUs
-              const poolGpuaasId = selectedPool?.gpuaas_id;
-              let matched: typeof gpuTypes[0] | undefined;
-
-              if (poolGpuaasId) {
-                // Try to match by pool's GPU type
-                const rtxType = gpuTypes.find(t => t.name.includes("RTX") || t.name.includes("6000"));
-                const genericType = gpuTypes.find(t => t.name === "2X-Large");
-
-                if (poolGpuaasId === 18 && rtxType) {
-                  matched = rtxType; // RTX 6000 pools use dedicated RTX instance type
-                } else if (genericType) {
-                  matched = genericType; // B200 and other pools use 2X-Large
-                }
-              }
-
-              if (!matched) {
-                // Fallback: sort by vCPU count (descending) and pick the most capable
-                gpuTypes.sort((a, b) => b.vcpus - a.vcpus);
-                matched = gpuTypes[0];
-              }
-
-              selectedInstanceType = matched.id;
-              console.log(`Selected instance type: ${matched.name} (${matched.memory_mb/1024}GB RAM, ${matched.vcpus} vCPU) for gpuaas_id=${poolGpuaasId}`);
-            } else {
-              throw new Error("No GPU-compatible instance types available");
-            }
+          if (compatibleTypes.length > 0) {
+            selectedInstanceType = compatibleTypes[0].id;
+            console.log(`Selected instance type: ${compatibleTypes[0].name} (${compatibleTypes[0].id})`);
           } else {
-            throw new Error(`Failed to fetch instance types: ${response.status}`);
+            throw new Error("No compatible instance types available for this region");
           }
         } catch (err) {
-          console.error("Failed to get GPU-compatible instance types:", err);
+          console.error("Failed to get compatible instance types:", err);
           throw new Error("Could not determine compatible instance type for this GPU pool");
         }
       }
@@ -874,6 +849,12 @@ export async function POST(request: NextRequest) {
           });
           console.log(`[Monthly] Saved billing metadata for subscription ${subscriptionId}`);
 
+          // Increment activePods in CustomerCache
+          prisma.customerCache.update({
+            where: { id: payload.customerId },
+            data: { activePods: { increment: 1 } },
+          }).catch(() => {});
+
           installMetricsCollector(String(subscriptionId), teamId, metricsToken).catch((err) => {
             console.error(`[Metrics] Failed to install metrics collector for ${subscriptionId}:`, err);
           });
@@ -1198,6 +1179,12 @@ export async function POST(request: NextRequest) {
           },
         });
         console.log(`[Billing] Saved billing metadata for subscription ${subscriptionId}`);
+
+        // Increment activePods in CustomerCache
+        prisma.customerCache.update({
+          where: { id: payload.customerId },
+          data: { activePods: { increment: 1 } },
+        }).catch(() => {});
 
         // Schedule metrics collector and startup script installation (runs in background)
         installMetricsCollector(String(subscriptionId), teamId, metricsToken).catch((err) => {

@@ -9,8 +9,7 @@ import {
   createSharedVolume,
   subscribeToPool,
   unsubscribeFromPool,
-  getApiUrl,
-  getApiKey,
+  getPoolInstanceTypes,
 } from "@/lib/hostedai";
 import Stripe from "stripe";
 
@@ -173,30 +172,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // Get instance type
-    const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
-
+    // Get compatible instance type for this region
     let instanceTypeId: string | undefined;
     try {
-      const response = await fetch(`${apiUrl}/api/instance-type`, {
-        method: "GET",
-        headers: {
-          "X-API-Key": apiKey,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (response.ok) {
-        const allTypes = await response.json() as Array<{
-          id: string;
-          name: string;
-          gpu_workload: boolean;
-          is_available: boolean;
-        }>;
-
-        const gpuTypes = allTypes.filter(t => t.gpu_workload === true && t.is_available !== false);
-        const mediumType = gpuTypes.find(t => t.name === "Medium");
-        instanceTypeId = mediumType ? mediumType.id : gpuTypes[0]?.id;
+      const compatibleTypes = await getPoolInstanceTypes(String(regionId), teamId);
+      if (compatibleTypes.length > 0) {
+        instanceTypeId = compatibleTypes[0].id;
+        console.log(`[Add Storage] Selected instance type: ${compatibleTypes[0].name} (${compatibleTypes[0].id})`);
       }
     } catch (err) {
       console.error("Failed to get instance types:", err);

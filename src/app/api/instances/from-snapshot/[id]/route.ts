@@ -8,8 +8,7 @@ import {
   getSharedVolumes,
   selectOptimalPool,
   subscribeWithFallback,
-  getApiUrl,
-  getApiKey,
+  getPoolInstanceTypes,
 } from "@/lib/hostedai";
 import { logGPULaunched } from "@/lib/activity";
 import { getWalletBalance, deductUsage, refundDeployment } from "@/lib/wallet";
@@ -133,38 +132,12 @@ export async function POST(
 
     // Get instance type if not specified
     if (!instanceTypeId) {
-      const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
-
-      const response = await fetch(`${apiUrl}/api/instance-type`, {
-        method: "GET",
-        headers: {
-          "X-API-Key": apiKey,
-          "Content-Type": "application/json",
-        },
-      });
-
-      if (response.ok) {
-        const allInstanceTypes = (await response.json()) as Array<{
-          id: string;
-          name: string;
-          memory_mb: number;
-          gpu_workload: boolean;
-          is_available: boolean;
-        }>;
-
-        const gpuTypes = allInstanceTypes.filter(
-          (t) => t.gpu_workload === true && t.is_available !== false
-        );
-
-        if (gpuTypes.length > 0) {
-          gpuTypes.sort((a, b) => a.memory_mb - b.memory_mb);
-          const mediumType = gpuTypes.find((t) => t.name === "Medium");
-          instanceTypeId = mediumType ? mediumType.id : gpuTypes[0].id;
-        } else {
-          throw new Error("No GPU-compatible instance types available");
-        }
+      const compatibleTypes = await getPoolInstanceTypes(String(regionId), teamId);
+      if (compatibleTypes.length > 0) {
+        instanceTypeId = compatibleTypes[0].id;
+        console.log(`[Snapshot Restore] Selected instance type: ${compatibleTypes[0].name} (${compatibleTypes[0].id})`);
       } else {
-        throw new Error(`Failed to fetch instance types: ${response.status}`);
+        throw new Error("No compatible instance types available for this region");
       }
     }
 

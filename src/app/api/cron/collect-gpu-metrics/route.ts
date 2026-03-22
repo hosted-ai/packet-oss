@@ -314,35 +314,9 @@ export async function GET(request: NextRequest) {
   };
 
   try {
-    // In DB mode, pods push their own metrics — skip SSH collection, just do cleanup
-    if (process.env.GPU_METRICS_SOURCE === "db") {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const deleteResult = await prisma.gpuHardwareMetrics.deleteMany({
-        where: { timestamp: { lt: sevenDaysAgo } },
-      });
-      // Clean up PodUptimeDay for pods with no heartbeat in 7+ days
-      const uptimeCleanup = await prisma.$executeRaw`
-        DELETE FROM pod_uptime_day
-        WHERE subscription_id IN (
-          SELECT subscription_id FROM pod_uptime_day
-          GROUP BY subscription_id
-          HAVING MAX(last_seen) < ${sevenDaysAgo}
-        )
-      `;
-      if (uptimeCleanup > 0) {
-        console.log(`[GPU Metrics] Cleaned up uptime data for ${uptimeCleanup} terminated pod records`);
-      }
-
-      const duration = Date.now() - startTime;
-      return NextResponse.json({
-        success: true,
-        mode: "db",
-        duration: `${duration}ms`,
-        cleaned: deleteResult.count,
-        uptimeCleaned: uptimeCleanup,
-        results: { ...results, skipped: 0, collected: 0 },
-      });
-    }
+    // Always collect via SSH — even in "db" mode, pods may not have the collector installed
+    // (e.g. HuggingFace deployments). SSH collection ensures we always have VRAM data
+    // for pool selection (selectOptimalPool needs GpuHardwareMetrics).
 
     // Step 1: Get all teams from the default resource policy (same as admin pods)
     const policy = await getDefaultResourcePolicy();
