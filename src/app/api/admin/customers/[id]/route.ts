@@ -12,6 +12,7 @@ import { logAdminActivity } from "@/lib/admin-activity";
 import { cacheCustomer, markCustomerCacheDeleted } from "@/lib/customer-cache";
 import { getBrandName, getDashboardUrl } from "@/lib/branding";
 import { loadTemplate } from "@/lib/email/template-loader";
+import { prisma } from "@/lib/prisma";
 import Stripe from "stripe";
 
 async function sendCredentialsEmail(params: {
@@ -404,6 +405,32 @@ export async function POST(
         return NextResponse.json({
           success: true,
           url: dashboardUrl,
+        });
+      }
+
+      case "toggle-bare-metal": {
+        const existing = await prisma.customerSettings.findUnique({
+          where: { stripeCustomerId: customerId },
+        });
+        const newValue = !(existing?.bareMetalEnabled ?? false);
+
+        await prisma.customerSettings.upsert({
+          where: { stripeCustomerId: customerId },
+          update: { bareMetalEnabled: newValue },
+          create: { stripeCustomerId: customerId, bareMetalEnabled: newValue },
+        });
+
+        await logAdminActivity(
+          session.email,
+          "customer_viewed",
+          `${newValue ? "Enabled" : "Disabled"} bare metal access for ${customer.email || customerId}`,
+          { customerId, customerEmail: customer.email, bareMetalEnabled: newValue }
+        );
+
+        return NextResponse.json({
+          success: true,
+          message: `Bare metal ${newValue ? "enabled" : "disabled"} for ${customer.email}`,
+          bareMetalEnabled: newValue,
         });
       }
 

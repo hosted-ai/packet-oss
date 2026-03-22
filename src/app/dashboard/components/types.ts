@@ -53,6 +53,7 @@ export interface AccountData {
   }>;
   gpuDashboardUrl: string | null;
   billingPortalUrl: string;
+  bareMetalEnabled?: boolean;
   isOwner: boolean;
   userEmail: string;
   twoFactor: {

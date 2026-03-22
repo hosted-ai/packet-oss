@@ -85,6 +85,12 @@ export async function GET(
     // Get activity events for the customer
     const activityEvents = await getActivityEvents(customerId, 200);
 
+    // Get customer settings (bare metal flag)
+    const customerSettings = await prisma.customerSettings.findUnique({
+      where: { stripeCustomerId: customerId },
+      select: { bareMetalEnabled: true },
+    });
+
     // Calculate stats
     const totalSpent = charges.data
       .filter(c => c.paid && !c.refunded)
@@ -155,6 +161,7 @@ export async function GET(
         createdAt: referralClaim.createdAt,
       } : null,
       activityEvents,
+      bareMetalEnabled: customerSettings?.bareMetalEnabled ?? false,
     });
   } catch (error) {
     console.error("Failed to get customer details:", error);

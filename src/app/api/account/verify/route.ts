@@ -274,6 +274,12 @@ export async function POST(request: NextRequest) {
     // Track lifecycle milestone (first login)
     recordFirstLogin(customer.id).catch(() => {});
 
+    // Check if bare metal is enabled for this customer
+    const customerSettings = await prisma.customerSettings.findUnique({
+      where: { stripeCustomerId: customer.id },
+      select: { bareMetalEnabled: true },
+    });
+
     return NextResponse.json({
       customer: {
         id: customer.id,
@@ -292,6 +298,7 @@ export async function POST(request: NextRequest) {
       billingPortalUrl: portalSession.url,
       isOwner,
       userEmail: payload.email, // The logged-in user's email (may differ from customer email for team members)
+      bareMetalEnabled: customerSettings?.bareMetalEnabled ?? false,
       twoFactor: twoFactorStatus, // 2FA status for the user
       skipTwoFactor, // Admin bypass flag
     });

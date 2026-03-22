@@ -77,6 +77,7 @@ interface CustomerData {
   invoices: Invoice[];
   voucherRedemptions: VoucherRedemption[];
   referral: Referral | null;
+  bareMetalEnabled?: boolean;
 }
 
 interface CustomerDetailPanelProps {
@@ -439,6 +440,22 @@ export function CustomerDetailPanel({ customerId, onClose, onCustomerUpdated }: 
                     <div className="flex justify-between">
                       <dt className="text-[#5b6476]">Signed Up</dt>
                       <dd className="text-[#0b0f1c]">{formatDate(customer.created)}</dd>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <dt className="text-[#5b6476]">Bare Metal</dt>
+                      <dd>
+                        <button
+                          onClick={() => handleAction("toggle-bare-metal")}
+                          disabled={actionLoading === "toggle-bare-metal"}
+                          className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                            data.bareMetalEnabled
+                              ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+                              : "bg-zinc-100 text-zinc-500 hover:bg-zinc-200"
+                          }`}
+                        >
+                          {actionLoading === "toggle-bare-metal" ? "..." : data.bareMetalEnabled ? "Enabled" : "Disabled"}
+                        </button>
+                      </dd>
                     </div>
                   </dl>
                 </div>
