@@ -155,6 +155,13 @@ export const PREMIUM_ADMIN_TABS: ReadonlySet<AdminTab> = new Set([
   "spheron",
   "pixel-factory",
   "tenants",
+  "investors",
+  "payouts",
+  "node-revenue",
+  "game",
+  "landing",
+  "marketing",
+  "qa",
 ]);
 
 /**

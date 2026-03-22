@@ -1,5 +1,4 @@
 // Auto-generated OSS stub — original module excluded from OSS build
 // This file exists so imports don't break. All exports are no-ops.
 
-export default {};
-export const TenantDripConfig = (_props?: any) => null;
+export const PayoutsTab = (_props?: any) => null;

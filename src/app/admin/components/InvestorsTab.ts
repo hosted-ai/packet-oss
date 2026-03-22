@@ -1,5 +1,4 @@
 // Auto-generated OSS stub — original module excluded from OSS build
 // This file exists so imports don't break. All exports are no-ops.
 
-export default {};
-export const TenantMarginDashboard = (_props?: any) => null;
+export const InvestorsTab = (_props?: any) => null;

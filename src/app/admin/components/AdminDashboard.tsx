@@ -10,14 +10,11 @@ import dynamic from "next/dynamic";
 import {
   CustomersTab,
   AdminsTab,
-  InvestorsTab,
   ReferralsTab,
   VouchersTab,
   ActivityTab,
   SettingsTab,
   ProvidersTab,
-  LandingPageTab,
-  GameStatsTab,
   ProductsTab,
   PodsTab,
   EmailTemplatesTab,
@@ -28,10 +25,8 @@ import {
   BusinessTab,
   CreditModal,
   CustomerDetailPanel,
-  NodeRevenueTab,
   BannersTab,
   UptimeTab,
-  PayoutsTab,
   PlatformSettingsTab,
 } from "./index";
 import { OssAdminSupportTab } from "./OssAdminSupportTab";
@@ -59,6 +54,11 @@ const TenantsTab = isPro() ? dynamic(() => import("./TenantsTab").then(m => ({ d
 const PixelFactoryTab = isPro() ? dynamic(() => import("./PixelFactoryTab").then(m => ({ default: m.PixelFactoryTab }))) : NullTab;
 const InfrastructureRequestsTab = isPro() ? dynamic(() => import("./InfrastructureRequestsTab").then(m => ({ default: m.InfrastructureRequestsTab }))) : NullTab;
 const DealCalculators = isPro() ? dynamic(() => import("./DealCalculator").then(m => ({ default: m.DealCalculators }))) : NullTab;
+const InvestorsTab = isPro() ? dynamic(() => import("./InvestorsTab").then(m => ({ default: m.InvestorsTab }))) : NullTab;
+const GameStatsTab = isPro() ? dynamic(() => import("./GameStatsTab").then(m => ({ default: m.GameStatsTab }))) : NullTab;
+const LandingPageTab = isPro() ? dynamic(() => import("./LandingPageTab").then(m => ({ default: m.LandingPageTab }))) : NullTab;
+const NodeRevenueTab = isPro() ? dynamic(() => import("./NodeRevenueTab").then(m => ({ default: m.NodeRevenueTab }))) : NullTab;
+const PayoutsTab = isPro() ? dynamic(() => import("./PayoutsTab").then(m => ({ default: m.PayoutsTab }))) : NullTab;
 
 // Premium modals — dynamically imported
 const ClusterModal = isPro() ? dynamic(() => import("./ClusterModal").then(m => ({ default: m.ClusterModal }))) : NullTab;
@@ -555,7 +555,7 @@ export function AdminDashboard() {
             onRemoveInvestor={handleRemoveInvestor}
             onResendInvite={handleResendInvestorInvite}
             onLoginAs={handleLoginAsInvestor}
-            onViewRevenue={(investor) => {
+            onViewRevenue={(investor: Investor) => {
               setRevenueInvestorEmail(investor.email);
               setActiveTab("node-revenue");
             }}
