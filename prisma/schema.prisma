@@ -136,6 +136,7 @@ model HuggingFaceDeployment {
   openWebUI        Boolean  @default(false) @map("open_web_ui")
   netdataPort      Int?     @map("netdata_port")
   netdata          Boolean  @default(false)
+  hfToken          String?  @map("hf_token")
   errorMessage     String?  @map("error_message")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
@@ -995,6 +996,7 @@ model CustomerSettings {
   stripeCustomerId    String   @unique @map("stripe_customer_id")
   sessionTimeoutHours Int      @default(1) @map("session_timeout_hours") // 1-24 hours
   pixelFactoryRpm     Int?     @map("pixel_factory_rpm") // Customer's chosen RPM for Pixel Factory (null = use admin cap)
+  bareMetalEnabled    Boolean  @default(false) @map("bare_metal_enabled")
   tenantId            String   @default("default") @map("tenant_id")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
