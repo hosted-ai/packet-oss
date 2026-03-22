@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import { getConnectionInfo, getPoolSubscriptions } from "@/lib/hostedai";
+import { exposeService } from "@/lib/hostedai/services";
 import { spawn } from "child_process";
 import { prisma } from "@/lib/prisma";
 import { sendHfDeploymentEmail } from "@/lib/email";
 import { generateCustomerToken } from "@/lib/customer-auth";
 import { logActivity } from "@/lib/activity";
 import { validateSSHParams } from "@/lib/ssh-validation";
+import {
+  generateDeployScript,
+  getDefaultPort,
+} from "@/lib/huggingface-deploy-scripts";
+import { getCatalogItem, DeployScriptType } from "@/lib/huggingface-catalog";
 
 // Maximum retry attempts for SSH commands
 const MAX_SSH_RETRIES = 2;
@@ -99,6 +105,69 @@ async function executeRemoteCommand(
 }
 
 /**
+ * Execute a deploy script on a remote pod via SSH (longer timeout for install scripts)
+ */
+async function executeRemoteScript(
+  host: string,
+  port: number,
+  username: string,
+  password: string,
+  script: string,
+  timeoutMs: number = 300000
+): Promise<{ success: boolean; output: string; exitCode: number }> {
+  validateSSHParams({ host, port, username });
+
+  return new Promise((resolve) => {
+    const encodedScript = Buffer.from(script).toString("base64");
+    const remoteCommand = `echo '${encodedScript}' | base64 -d | bash`;
+
+    const args = [
+      "-e",
+      "ssh",
+      "-o", "StrictHostKeyChecking=no",
+      "-o", "UserKnownHostsFile=/dev/null",
+      "-o", "LogLevel=ERROR",
+      "-o", "ConnectTimeout=30",
+      "-o", "ServerAliveInterval=15",
+      "-o", "ServerAliveCountMax=3",
+      "-p", String(port),
+      `${username}@${host}`,
+      remoteCommand,
+    ];
+
+    let stdout = "";
+    let stderr = "";
+
+    const proc = spawn("sshpass", args, {
+      timeout: timeoutMs,
+      env: { ...process.env, SSHPASS: password },
+    });
+
+    proc.stdout.on("data", (data) => { stdout += data.toString(); });
+    proc.stderr.on("data", (data) => { stderr += data.toString(); });
+
+    proc.on("close", (code) => {
+      resolve({
+        success: code === 0,
+        output: stdout + (stderr ? `\nSTDERR: ${stderr}` : ""),
+        exitCode: code || 0,
+      });
+    });
+
+    proc.on("error", (err) => {
+      resolve({
+        success: false,
+        output: `Failed to execute: ${err.message}`,
+        exitCode: -1,
+      });
+    });
+  });
+}
+
+// Track in-flight deploy triggers to prevent duplicate script executions
+const deployTriggersInFlight = new Set<string>();
+
+/**
  * Parse SSH command to extract connection details
  */
 function parseSSHCommand(cmd: string): { host: string; port: number; username: string } {
@@ -189,7 +258,38 @@ export async function GET(request: NextRequest) {
     // Verify the subscription belongs to this team
     const subscriptions = await getPoolSubscriptions(teamId);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sub = subscriptions.find((s: any) => String(s.id) === subscriptionId);
+    let sub = subscriptions.find((s: any) => String(s.id) === subscriptionId);
+
+    // Resolve pending-{poolId}-{timestamp} IDs to real subscription IDs.
+    // This happens when the subscribe API times out but the subscription was still created.
+    let resolvedSubscriptionId = subscriptionId;
+    if (!sub && subscriptionId.startsWith("pending-")) {
+      const pendingPoolId = subscriptionId.split("-")[1];
+      // Find the newest subscription on that pool for this team
+      const candidates = subscriptions
+        .filter((s: any) =>
+          String(s.pool_id) === pendingPoolId &&
+          ["subscribing", "subscribed", "active", "running"].includes(s.status)
+        )
+        .sort((a: any, b: any) => Number(b.id) - Number(a.id));
+
+      if (candidates.length > 0) {
+        sub = candidates[0];
+        resolvedSubscriptionId = String(sub.id);
+        console.log(`[HF Status] Resolved pending ID ${subscriptionId} -> real subscription ${resolvedSubscriptionId}`);
+
+        // Update the HF deployment record with the real subscription ID
+        try {
+          await prisma.huggingFaceDeployment.updateMany({
+            where: { subscriptionId },
+            data: { subscriptionId: resolvedSubscriptionId },
+          });
+          console.log(`[HF Status] Updated HF deployment record: ${subscriptionId} -> ${resolvedSubscriptionId}`);
+        } catch (updateErr) {
+          console.error(`[HF Status] Failed to update deployment record:`, updateErr);
+        }
+      }
+    }
 
     if (!sub) {
       console.log(`[HF Status] Subscription ${subscriptionId} not found for team ${teamId}`);
@@ -200,7 +300,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Get connection info
-    const connInfo = await getConnectionInfo(teamId, subscriptionId);
+    const connInfo = await getConnectionInfo(teamId, resolvedSubscriptionId);
 
     if (!connInfo || connInfo.length === 0) {
       return NextResponse.json<StatusResponse>({
@@ -210,7 +310,7 @@ export async function GET(request: NextRequest) {
     }
 
     const subscription = connInfo.find(
-      (s) => String(s.id) === String(subscriptionId)
+      (s) => String(s.id) === String(resolvedSubscriptionId)
     );
 
     if (!subscription || !subscription.pods || subscription.pods.length === 0) {
@@ -229,7 +329,7 @@ export async function GET(request: NextRequest) {
 
       // Update deployment record
       const deployment = await prisma.huggingFaceDeployment.findFirst({
-        where: { subscriptionId },
+        where: { subscriptionId: resolvedSubscriptionId },
         orderBy: { createdAt: "desc" },
       });
 
@@ -450,6 +550,71 @@ export async function GET(request: NextRequest) {
     const errorMatch = result.output.match(/ERROR:(\w+)/);
     const errorType = errorMatch?.[1];
 
+    // PRIMARY TRIGGER: If the pod is running and SSH works but install.log doesn't
+    // exist yet, this means the deploy script hasn't been executed. The deploy route
+    // only creates the subscription + DB record — this endpoint is responsible for
+    // triggering the actual script once the pod is ready (polled every ~10s by dashboard).
+    if (status === "not_started") {
+      const pendingDeployment = await prisma.huggingFaceDeployment.findFirst({
+        where: { subscriptionId: resolvedSubscriptionId, status: { in: ["pending", "failed"] } },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (pendingDeployment && !deployTriggersInFlight.has(resolvedSubscriptionId)) {
+        deployTriggersInFlight.add(resolvedSubscriptionId);
+        console.log(`[HF Status] Triggering deploy script for ${pendingDeployment.hfItemName} (deployment ${pendingDeployment.id}, status was ${pendingDeployment.status})`);
+
+        // Fire-and-forget: run deploy script in background
+        (async () => {
+          try {
+            const catalogItem = getCatalogItem(pendingDeployment.hfItemId);
+            const deployScriptType = pendingDeployment.deployScript as DeployScriptType;
+
+            const script = generateDeployScript(deployScriptType, {
+              modelId: pendingDeployment.hfItemType !== "docker" ? pendingDeployment.hfItemId : undefined,
+              dockerImage: catalogItem?.dockerImage,
+              port: pendingDeployment.servicePort || getDefaultPort(deployScriptType),
+              hfToken: pendingDeployment.hfToken || undefined,
+              gpuCount: sub.per_pod_info?.vgpu_count || 1,
+              openWebUI: pendingDeployment.openWebUI || false,
+              netdata: pendingDeployment.netdata || false,
+            });
+
+            await prisma.huggingFaceDeployment.update({
+              where: { id: pendingDeployment.id },
+              data: { status: "deploying", errorMessage: null },
+            });
+
+            const scriptResult = await executeRemoteScript(
+              host, port, username, pod.ssh_info!.pass, script,
+            );
+
+            if (scriptResult.success) {
+              console.log(`[HF Status] Deploy script started successfully for ${pendingDeployment.hfItemName}`);
+              await prisma.huggingFaceDeployment.update({
+                where: { id: pendingDeployment.id },
+                data: { status: "deploying", deployOutput: scriptResult.output.slice(-5000) },
+              });
+            } else {
+              console.error(`[HF Status] Deploy script failed (exit ${scriptResult.exitCode}): ${scriptResult.output.slice(-500)}`);
+              await prisma.huggingFaceDeployment.update({
+                where: { id: pendingDeployment.id },
+                data: {
+                  status: "failed",
+                  errorMessage: `Deploy script failed with exit code ${scriptResult.exitCode}`,
+                  deployOutput: scriptResult.output.slice(-5000),
+                },
+              });
+            }
+          } catch (triggerErr) {
+            console.error(`[HF Status] Deploy trigger error:`, triggerErr);
+          } finally {
+            deployTriggersInFlight.delete(resolvedSubscriptionId);
+          }
+        })();
+      }
+    }
+
     // Parse GPU info
     const gpuInfoStart = result.output.indexOf("---GPUINFO---");
     const gpuInfoEnd = result.output.indexOf("---MODELINFO---");
@@ -510,7 +675,7 @@ export async function GET(request: NextRequest) {
 
     // Get deployment record for additional info
     const deployment = await prisma.huggingFaceDeployment.findFirst({
-      where: { subscriptionId },
+      where: { subscriptionId: resolvedSubscriptionId },
       orderBy: { createdAt: "desc" },
     });
 
@@ -546,6 +711,24 @@ export async function GET(request: NextRequest) {
 
     if (status === "running") {
       response.advanced!.apiEndpoint = `http://localhost:8000/v1`;
+    }
+
+    // Auto-expose vLLM port 8000 when model is ready
+    if (status === "running" && deployment && deployment.status !== "running") {
+      try {
+        console.log(`[HF Status] Auto-exposing port 8000 (vLLM) on ${pod.pod_name}`);
+        await exposeService({
+          pod_name: pod.pod_name,
+          pool_subscription_id: parseInt(String(resolvedSubscriptionId), 10),
+          port: 8000,
+          service_name: "vllm",
+          protocol: "TCP",
+          service_type: "http",
+        });
+        console.log(`[HF Status] Port 8000 exposed for subscription ${resolvedSubscriptionId}`);
+      } catch (exposeErr) {
+        console.error(`[HF Status] Failed to auto-expose port 8000:`, exposeErr);
+      }
     }
 
     // Update database and send email if status has changed to final state

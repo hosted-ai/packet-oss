@@ -323,10 +323,7 @@ export default function HuggingFaceTab({
   const handleDeploy = async () => {
     if (!selectedItem) return;
 
-    if (deployMode === "new" && !selectedPool) {
-      setDeployError("Please select a GPU pool");
-      return;
-    }
+    // Pool is auto-selected by the backend — no need for frontend validation
     if (deployMode === "existing" && !selectedSubscription) {
       setDeployError("Please select an existing GPU");
       return;
@@ -387,7 +384,6 @@ export default function HuggingFaceTab({
       } else {
         const body: Record<string, unknown> = {
           hfItemId: selectedItem.id,
-          poolId: selectedPool,
           gpuCount,
           ephemeralStorageId: selectedStorage || undefined,
           openWebUI: addOpenWebUI,

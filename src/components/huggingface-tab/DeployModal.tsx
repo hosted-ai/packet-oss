@@ -193,44 +193,6 @@ export function DeployModal({
           {/* New GPU Options */}
           {(deployMode === "new" || existingSubscriptions.length === 0) && (
             <>
-              {/* GPU Pool Selection */}
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-[var(--ink)] mb-2">
-                  GPU Pool
-                </label>
-                <select
-                  value={selectedPool}
-                  onChange={(e) => setSelectedPool(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-[var(--line)] rounded-lg focus:ring-2 focus:ring-[var(--blue)] focus:border-transparent bg-white"
-                >
-                  {launchOptions?.pools.map((pool) => (
-                    <option
-                      key={pool.id}
-                      value={pool.id}
-                      disabled={pool.available_gpus === 0}
-                    >
-                      {pool.name} {pool.gpu_model ? `(${pool.gpu_model})` : ""}
-                      {pool.available_gpus !== undefined
-                        ? pool.available_gpus === 0
-                          ? " - No availability"
-                          : ` - ${pool.available_gpus} available`
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-                {launchOptions?.pools.every(
-                  (pool) =>
-                    pool.available_gpus !== undefined &&
-                    pool.available_gpus === 0
-                ) && (
-                  <p className="text-sm text-orange-600 mt-2">
-                    No GPUs are currently available. Please try again later.
-                  </p>
-                )}
-              </div>
-
-              {/* GPU Count - fixed at 1 */}
-
               {/* Storage Selection */}
               {launchOptions?.ephemeralStorageBlocks &&
                 launchOptions.ephemeralStorageBlocks.length > 0 && (
@@ -464,7 +426,6 @@ export function DeployModal({
                 disabled={
                   deploying ||
                   isPolling ||
-                  (deployMode === "new" && !selectedPool) ||
                   (deployMode === "existing" && !selectedSubscription)
                 }
                 className="flex-1 py-2.5 px-4 bg-[var(--blue)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity font-medium"

@@ -92,23 +92,7 @@ export function DeployModal({
             </div>
           </div>
 
-          {/* GPU Pool Selection */}
-          <div className="mb-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              GPU Pool
-            </label>
-            <select
-              value={selectedPool}
-              onChange={(e) => setSelectedPool(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-            >
-              {launchOptions?.pools.map((pool) => (
-                <option key={pool.id} value={pool.id}>
-                  {pool.name} {pool.gpu_model ? `(${pool.gpu_model})` : ""}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* GPU pool is auto-selected by the backend */}
 
           {/* GPU Count - fixed at 1 */}
 
@@ -179,7 +163,7 @@ export function DeployModal({
             </button>
             <button
               onClick={onDeploy}
-              disabled={deploying || !selectedPool}
+              disabled={deploying}
               className="flex-1 py-2 px-4 bg-teal-600 text-white rounded-md hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {deploying ? "Deploying..." : "Deploy"}

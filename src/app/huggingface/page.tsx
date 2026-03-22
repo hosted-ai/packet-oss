@@ -236,14 +236,13 @@ function HuggingFacePageContent() {
   };
 
   const handleDeploy = async () => {
-    if (!selectedItem || !selectedPool) return;
+    if (!selectedItem) return;
     setDeploying(true);
     setDeployError(null);
 
     try {
       const body: Record<string, unknown> = {
         hfItemId: selectedItem.id,
-        poolId: selectedPool,
         gpuCount,
         ephemeralStorageId: selectedStorage || undefined,
       };

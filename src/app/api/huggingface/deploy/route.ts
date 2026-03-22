@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
-import { subscribeToPool, getAllPools, getPoolEphemeralStorageBlocks, selectOptimalPool, subscribeWithFallback, getApiUrl, getApiKey } from "@/lib/hostedai";
+import { getAllPools, getPoolEphemeralStorageBlocks, selectOptimalPool, subscribeWithFallback, getPoolSubscriptions, clearCache, getPoolInstanceTypes } from "@/lib/hostedai";
 import { getWalletBalance, deductUsage, refundDeployment } from "@/lib/wallet";
 import { getProductByPoolId } from "@/lib/products";
 import { prisma } from "@/lib/prisma";
 import { getCatalogItem, HFCatalogItem, DeployScriptType } from "@/lib/huggingface-catalog";
 import {
-  generateDeployScript,
   validateDeployParams,
   getDefaultPort,
 } from "@/lib/huggingface-deploy-scripts";
 import { logActivity } from "@/lib/activity";
-import { sendHfDeploymentStartedEmail, sendGpuLaunchedEmail } from "@/lib/email";
 import { generateCustomerToken } from "@/lib/customer-auth";
 
 /**
@@ -62,12 +60,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!poolId) {
-      return NextResponse.json(
-        { error: "poolId is required" },
-        { status: 400 }
-      );
-    }
+    // poolId is optional — if not provided, selectOptimalPool will pick the best one
 
     // Get catalog item (or construct one for HF Hub items)
     const catalogItem: HFCatalogItem | undefined = getCatalogItem(hfItemId);
@@ -118,52 +111,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Get pool info to find region_id (needed for instance type + storage selection)
+    const pools = await getAllPools();
+    let selectedPoolId = poolId;
+    let selectedPool = pools.find(p => String(p.id) === String(poolId));
+    const regionId = selectedPool?.region_id || 2; // Default to region 2 if not found
+
     // Get instance type if not provided
     let selectedInstanceTypeId = instanceTypeId;
     if (!selectedInstanceTypeId) {
       try {
-        const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
-
-        const response = await fetch(`${apiUrl}/api/instance-type`, {
-          method: "GET",
-          headers: {
-            "X-API-Key": apiKey,
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (!response.ok) {
-          throw new Error("Failed to fetch instance types");
-        }
-
-        const instanceTypes = await response.json() as Array<{
-          id: string;
-          name: string;
-          memory_mb: number;
-          vcpus: number;
-          gpu_workload: boolean;
-          is_available: boolean;
-        }>;
-        const gpuTypes = instanceTypes.filter(
-          (t) => t.gpu_workload === true && t.is_available !== false
-        );
-
-        console.log("[HF Deploy] GPU-compatible instance types:", gpuTypes.map(t =>
-          `${t.name} (${t.memory_mb/1024}GB RAM, ${t.vcpus} vCPU)`
-        ));
-
-        if (gpuTypes.length > 0) {
-          // Sort by memory (ascending) to pick the smallest suitable type
-          gpuTypes.sort((a, b) => a.memory_mb - b.memory_mb);
-
-          // Pick Medium (8GB) if available (exact match like instances route)
-          const mediumType = gpuTypes.find((t) => t.name === "Medium");
-          selectedInstanceTypeId = mediumType ? mediumType.id : gpuTypes[0].id;
-
-          const selected = gpuTypes.find(t => t.id === selectedInstanceTypeId);
-          console.log(`[HF Deploy] Selected instance type: ${selected?.name} (${selected?.memory_mb!/1024}GB RAM, ${selected?.vcpus} vCPU)`);
-        } else {
-          selectedInstanceTypeId = instanceTypes[0]?.id;
+        const compatibleTypes = await getPoolInstanceTypes(String(regionId), teamId);
+        if (compatibleTypes.length > 0) {
+          selectedInstanceTypeId = compatibleTypes[0].id;
+          console.log(`[HF Deploy] Selected instance type: ${compatibleTypes[0].name} (${compatibleTypes[0].id})`);
         }
       } catch (error) {
         console.error("Error fetching instance types:", error);
@@ -176,12 +137,6 @@ export async function POST(request: NextRequest) {
         );
       }
     }
-
-    // Get pool info to find region_id
-    const pools = await getAllPools();
-    let selectedPoolId = poolId;
-    let selectedPool = pools.find(p => String(p.id) === String(poolId));
-    const regionId = selectedPool?.region_id || 2; // Default to region 2 if not found
 
     // Get ephemeral storage if not provided - use GPUaaS-specific endpoint
     let selectedEphemeralStorageId = ephemeralStorageId;
@@ -213,12 +168,30 @@ export async function POST(request: NextRequest) {
     // CRITICAL: Select the optimal pool using centralized logic
     // Enforces: 1) one pod per pool per user, 2) least-used pool first
     let fallbackPools: Awaited<ReturnType<typeof selectOptimalPool>>["fallbackPools"] = [];
+
+    // If no poolId was provided by the frontend, look up the hourly product's pool IDs
+    // so selectOptimalPool knows which pools to consider
+    let productPoolIds: number[] | undefined;
+    if (!selectedPoolId) {
+      const hourlyProduct = await prisma.gpuProduct.findFirst({
+        where: { active: true, billingType: "hourly" },
+        select: { poolIds: true },
+      });
+      if (hourlyProduct) {
+        productPoolIds = JSON.parse(hourlyProduct.poolIds) as number[];
+        // Use the first pool as a placeholder requestedPoolId
+        selectedPoolId = String(productPoolIds[0]);
+        selectedPool = pools.find(p => String(p.id) === selectedPoolId);
+      }
+    }
+
     try {
       const optimalResult = await selectOptimalPool({
         requestedPoolId: selectedPoolId,
         teamId,
         gpuCount,
         allPools: pools,
+        ...(productPoolIds ? { productPoolIds } : {}),
       });
       selectedPoolId = optimalResult.pool.id;
       selectedPool = optimalResult.pool;
@@ -316,10 +289,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const subscriptionId = subscriptionResult.subscription_id;
-    console.log(`[HF Deploy] Subscription created: ${subscriptionId}`);
+    let subscriptionId = subscriptionResult.subscription_id;
+    console.log(`[HF Deploy] Subscription result: ${subscriptionId}`);
+
+    // CRITICAL: Resolve pending subscription IDs before creating the deployment record.
+    // When the hosted.ai subscribe API times out, subscribeToPool returns "pending-{poolId}-{timestamp}".
+    // We must resolve this to a real subscription ID so the deploy-status route can find it.
+    if (subscriptionId.startsWith("pending-")) {
+      const pendingPoolId = subscriptionId.split("-")[1];
+      console.log(`[HF Deploy] Got pending ID, polling to resolve real subscription for pool ${pendingPoolId}...`);
+
+      let resolved = false;
+      // Poll up to 5 times over ~20 seconds to find the real subscription
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          await new Promise(resolve => setTimeout(resolve, 4000));
+        }
+        clearCache(`pool-subscriptions:${teamId}`);
+        const subs = await getPoolSubscriptions(teamId);
+        const candidate = subs
+          .filter((s: { pool_id: number | string; status: string }) =>
+            String(s.pool_id) === pendingPoolId &&
+            ["subscribing", "subscribed", "active", "running"].includes(s.status)
+          )
+          .sort((a: { id: number | string }, b: { id: number | string }) => Number(b.id) - Number(a.id));
+
+        if (candidate.length > 0) {
+          subscriptionId = String(candidate[0].id);
+          console.log(`[HF Deploy] Resolved pending -> real subscription ${subscriptionId} (attempt ${attempt + 1})`);
+          resolved = true;
+          break;
+        }
+        console.log(`[HF Deploy] Attempt ${attempt + 1}: subscription not yet visible, retrying...`);
+      }
+
+      if (!resolved) {
+        console.warn(`[HF Deploy] Could not resolve pending ID after 5 attempts. Using pending ID: ${subscriptionId}`);
+      }
+    }
+
+    console.log(`[HF Deploy] Final subscription ID: ${subscriptionId}`);
 
     // Create HuggingFace deployment record
+    // The deploy script will be triggered by the deploy-status endpoint
+    // when the dashboard polls and finds the pod is ready with SSH access.
     const deployment = await prisma.huggingFaceDeployment.create({
       data: {
         subscriptionId,
@@ -334,8 +347,11 @@ export async function POST(request: NextRequest) {
         webUiPort: openWebUI ? 3000 : null,
         netdata: netdata || false,
         netdataPort: netdata ? 19999 : null,
+        hfToken: hfToken || null,
       },
     });
+
+    console.log(`[HF Deploy] Created deployment ${deployment.id} for ${deployment.hfItemName} (sub ${subscriptionId}). Script will be triggered by deploy-status polling.`);
 
     // Log activity
     await logActivity(

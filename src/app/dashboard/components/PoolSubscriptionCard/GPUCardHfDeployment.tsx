@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import TokenMetricsGraph from "@/components/TokenMetricsGraph";
 import InferencePlayground from "@/components/InferencePlayground";
 import GPUMetricsCard from "@/components/GPUMetricsCard";
 import { HfDeploymentInfo } from "../types";
@@ -160,17 +159,6 @@ export function GPUCardHfDeployment({
           </div>
         )}
 
-        {/* Token Metrics Graph - show when model is running */}
-        {hfStatus?.status === "running" && (
-          <div className="mt-3 border-t border-zinc-100 pt-3">
-            <TokenMetricsGraph
-              subscriptionId={subscriptionId}
-              token={token}
-              isVisible={true}
-            />
-          </div>
-        )}
-
         {hfStatus?.logs && (
           <div className="mt-2">
             <div className="flex items-center gap-3">
@@ -240,6 +228,7 @@ export function GPUCardHfDeployment({
           <InferencePlayground
             subscriptionId={subscriptionId}
             modelName={hfDeployment.hfItemName}
+            token={token}
             onClose={() => setShowPlayground(false)}
           />
         )}
