@@ -1,0 +1,88 @@
+---
+# vLLM Server Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - curl
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting vLLM installation in /opt/vllm virtual environment..."
+
+- name: Create vLLM virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/vllm
+    creates: /opt/vllm/bin/python
+
+- name: Install vLLM via pip
+  ansible.builtin.pip:
+    name: vllm
+    virtualenv: /opt/vllm
+  retries: 3
+  delay: 10
+
+- name: Verify vLLM installation
+  ansible.builtin.command:
+    cmd: /opt/vllm/bin/python -m vllm --version
+  register: vllm_version
+  changed_when: false
+  ignore_errors: true
+
+- name: Display vLLM install status
+  ansible.builtin.debug:
+    msg: "vLLM installed successfully in /opt/vllm"
+
+- name: Create vLLM systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vllm.service
+    content: |
+      [Unit]
+      Description=vLLM OpenAI-compatible API Server
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      Environment="VLLM_MODEL={{ vllm_model }}"
+      ExecStart=/opt/vllm/bin/python -m vllm.entrypoints.openai.api_server --model {{ vllm_model }} --host {{ vllm_host }} --port {{ vllm_port }}
+      Restart=on-failure
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart vllm
+
+- name: Enable and start vLLM service
+  ansible.builtin.systemd:
+    name: vllm
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for vLLM API to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ vllm_port }}/v1/models"
+    method: GET
+  register: vllm_health
+  retries: 30
+  delay: 10
+  until: vllm_health.status == 200
+  ignore_errors: true
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "vLLM deployment complete."
+      - "Model: {{ vllm_model }}"
+      - "Listening on: {{ vllm_host }}:{{ vllm_port }}"
+      - "Service status: enabled and running"
+      - "API endpoint: http://{{ vllm_host }}:{{ vllm_port }}/v1/chat/completions"

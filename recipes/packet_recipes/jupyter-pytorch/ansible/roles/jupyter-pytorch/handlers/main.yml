@@ -1,0 +1,6 @@
+---
+- name: restart jupyter-pytorch
+  ansible.builtin.systemd:
+    name: jupyter-pytorch
+    state: restarted
+    daemon_reload: true

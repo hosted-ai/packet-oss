@@ -1,0 +1,87 @@
+---
+# Langflow Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - build-essential
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting Langflow installation..."
+
+- name: Create Langflow virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/langflow
+    creates: /opt/langflow/bin/python
+
+- name: Install Langflow
+  ansible.builtin.pip:
+    name: langflow
+    virtualenv: /opt/langflow
+  retries: 3
+  delay: 10
+
+- name: Verify Langflow installation
+  ansible.builtin.command:
+    cmd: /opt/langflow/bin/langflow --version
+  register: langflow_version
+  changed_when: false
+
+- name: Display Langflow version
+  ansible.builtin.debug:
+    msg: "Langflow installed successfully - version: {{ langflow_version.stdout }}"
+
+- name: Create systemd service for Langflow
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/langflow.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Langflow - Visual LLM Flow Builder
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      ExecStart=/opt/langflow/bin/langflow run --host {{ langflow_host }} --port {{ langflow_port }}
+      Restart=on-failure
+      RestartSec=10
+      Environment=PYTHONUNBUFFERED=1
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart langflow
+
+- name: Enable and start Langflow service
+  ansible.builtin.systemd:
+    name: langflow
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for Langflow web UI to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ langflow_port }}"
+    method: GET
+  register: langflow_health
+  retries: 3
+  delay: 10
+  until: langflow_health.status == 200
+  ignore_errors: true
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Langflow deployment complete."
+      - "Installed version: {{ langflow_version.stdout }}"
+      - "Listening on: {{ langflow_host }}:{{ langflow_port }}"
+      - "Service status: enabled and running"
+      - "Web UI: http://{{ langflow_host }}:{{ langflow_port }}"

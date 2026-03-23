@@ -1,0 +1,116 @@
+---
+# HuggingFace Text Generation Inference Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - curl
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting HuggingFace TGI installation in /opt/tgi virtual environment..."
+
+- name: Create TGI virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/tgi
+    creates: /opt/tgi/bin/python
+
+- name: Install Python dependencies
+  ansible.builtin.pip:
+    name:
+      - torch
+      - transformers
+      - accelerate
+      - fastapi
+      - uvicorn
+    virtualenv: /opt/tgi
+  retries: 3
+  delay: 10
+
+- name: Display install status
+  ansible.builtin.debug:
+    msg: "Python dependencies installed successfully in /opt/tgi"
+
+- name: Deploy TGI FastAPI server script
+  ansible.builtin.copy:
+    dest: /opt/tgi/server.py
+    content: |
+      import os, torch, uvicorn
+      from fastapi import FastAPI
+      from transformers import AutoModelForCausalLM, AutoTokenizer
+
+      app = FastAPI()
+      model_name = os.environ.get("TGI_MODEL", "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+      tokenizer = AutoTokenizer.from_pretrained(model_name)
+      model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, device_map="auto")
+
+      @app.post("/generate")
+      async def generate(prompt: str, max_new_tokens: int = 100):
+          inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+          outputs = model.generate(**inputs, max_new_tokens=max_new_tokens)
+          return {"generated_text": tokenizer.decode(outputs[0], skip_special_tokens=True)}
+
+      @app.get("/health")
+      async def health():
+          return {"status": "ok"}
+
+      if __name__ == "__main__":
+          uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("TGI_PORT", "8080")))
+    mode: "0755"
+  notify: restart huggingface-tgi
+
+- name: Create systemd service for HuggingFace TGI
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/huggingface-tgi.service
+    content: |
+      [Unit]
+      Description=HuggingFace Text Generation Inference Server
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      Environment="TGI_MODEL={{ tgi_model }}"
+      Environment="TGI_PORT={{ tgi_port }}"
+      ExecStart=/opt/tgi/bin/python /opt/tgi/server.py
+      Restart=on-failure
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart huggingface-tgi
+
+- name: Enable and start HuggingFace TGI service
+  ansible.builtin.systemd:
+    name: huggingface-tgi
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for TGI health endpoint to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ tgi_port }}/health"
+    method: GET
+  register: tgi_health
+  retries: 30
+  delay: 10
+  until: tgi_health.status == 200
+  ignore_errors: true
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "HuggingFace TGI deployment complete."
+      - "Model: {{ tgi_model }}"
+      - "Listening on: {{ tgi_host }}:{{ tgi_port }}"
+      - "Service status: enabled and running"
+      - "Health endpoint: http://{{ tgi_host }}:{{ tgi_port }}/health"
+      - "Generate endpoint: http://{{ tgi_host }}:{{ tgi_port }}/generate"

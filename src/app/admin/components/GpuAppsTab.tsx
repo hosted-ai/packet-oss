@@ -31,6 +31,9 @@ interface GpuApp {
 // Known recipe slugs that exist in recipes/packet_recipes/
 const AVAILABLE_RECIPES = new Set([
   "ollama", "code-server", "jupyter-pytorch", "vllm-v1-tinyllama", "comfyui",
+  "vllm-server", "text-generation-webui", "open-webui", "huggingface-tgi",
+  "triton-inference-server", "localai", "automatic1111", "fooocus",
+  "cogvideox", "axolotl-training", "kohya-ss", "langflow", "mlflow",
 ]);
 
 type SetupStep = "idle" | "uploading" | "creating" | "linking" | "done" | "error";

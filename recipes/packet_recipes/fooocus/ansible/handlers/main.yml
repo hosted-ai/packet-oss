@@ -1,0 +1,6 @@
+---
+- name: restart fooocus
+  ansible.builtin.systemd:
+    name: fooocus
+    state: restarted
+    daemon_reload: true

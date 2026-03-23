@@ -1,0 +1,103 @@
+---
+# oobabooga Text Generation WebUI Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - git
+      - curl
+      - build-essential
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting Text Generation WebUI installation..."
+
+- name: Clone text-generation-webui repository
+  ansible.builtin.git:
+    repo: https://github.com/oobabooga/text-generation-webui.git
+    dest: /opt/text-generation-webui
+    version: main
+    depth: 1
+  retries: 3
+  delay: 10
+
+- name: Create Python virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/text-generation-webui/venv
+    creates: /opt/text-generation-webui/venv/bin/python
+
+- name: Install PyTorch (nightly, CUDA 12.8)
+  ansible.builtin.pip:
+    name:
+      - torch
+      - torchvision
+      - torchaudio
+    virtualenv: /opt/text-generation-webui/venv
+    extra_args: "--index-url https://download.pytorch.org/whl/nightly/cu128"
+  retries: 3
+  delay: 10
+
+- name: Install text-generation-webui requirements
+  ansible.builtin.pip:
+    requirements: /opt/text-generation-webui/requirements.txt
+    virtualenv: /opt/text-generation-webui/venv
+  retries: 3
+  delay: 10
+
+- name: Display install status
+  ansible.builtin.debug:
+    msg: "Text Generation WebUI dependencies installed successfully."
+
+- name: Create systemd service for text-generation-webui
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/text-generation-webui.service
+    content: |
+      [Unit]
+      Description=oobabooga Text Generation WebUI
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      WorkingDirectory=/opt/text-generation-webui
+      ExecStart=/opt/text-generation-webui/venv/bin/python server.py --listen --listen-port {{ tgwebui_port }}
+      Restart=on-failure
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart text-generation-webui
+
+- name: Enable and start text-generation-webui service
+  ansible.builtin.systemd:
+    name: text-generation-webui
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for Text Generation WebUI to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ tgwebui_port }}"
+    method: GET
+  register: tgwebui_health
+  retries: 30
+  delay: 10
+  until: tgwebui_health.status == 200
+  ignore_errors: true
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Text Generation WebUI deployment complete."
+      - "Listening on: {{ tgwebui_host }}:{{ tgwebui_port }}"
+      - "Service status: enabled and running"
+      - "Web UI: http://{{ tgwebui_host }}:{{ tgwebui_port }}"
+      - "Load a model through the UI to start chatting."

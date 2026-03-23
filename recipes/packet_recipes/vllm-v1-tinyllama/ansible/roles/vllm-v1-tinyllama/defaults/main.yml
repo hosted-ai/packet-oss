@@ -1,0 +1,5 @@
+---
+vllm_port: 8000
+vllm_model: "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+vllm_max_model_len: 2048
+vllm_env_path: "/opt/vllm"

@@ -1,0 +1,140 @@
+---
+# ComfyUI Installation
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Installing ComfyUI - Node-based Stable Diffusion interface..."
+
+- name: Install system packages
+  ansible.builtin.apt:
+    name:
+      - git
+      - python3-pip
+      - python3-venv
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Clone ComfyUI repository
+  ansible.builtin.git:
+    repo: https://github.com/comfyanonymous/ComfyUI.git
+    dest: "{{ comfyui_install_path }}"
+    version: master
+  retries: 3
+  delay: 10
+  register: git_clone
+  until: git_clone is not failed
+
+- name: Set ownership of ComfyUI directory
+  ansible.builtin.file:
+    path: "{{ comfyui_install_path }}"
+    owner: ubuntu
+    group: ubuntu
+    recurse: yes
+
+- name: Detect real Python path (haishare/vllm-wrapper workaround)
+  ansible.builtin.shell: |
+    if [ -f /usr/bin/python.real.3.12 ]; then
+      echo "/usr/bin/python.real.3.12"
+    elif [ -f /usr/bin/python3.12 ] && [ ! -L /usr/bin/python3.12 ]; then
+      echo "/usr/bin/python3.12"
+    elif [ -f /usr/bin/python3.10 ] && [ ! -L /usr/bin/python3.10 ]; then
+      echo "/usr/bin/python3.10"
+    else
+      echo "python3"
+    fi
+  args:
+    executable: /bin/bash
+  register: real_python_path
+  changed_when: false
+
+- name: Display detected Python path
+  ansible.builtin.debug:
+    msg: "Using Python: {{ real_python_path.stdout }}"
+
+- name: Create Python virtual environment
+  ansible.builtin.command:
+    cmd: "{{ real_python_path.stdout }} -m venv {{ comfyui_install_path }}/venv"
+    creates: "{{ comfyui_install_path }}/venv/bin/activate"
+
+- name: Fix venv symlinks if haishare python detected
+  ansible.builtin.shell: |
+    rm -f {{ comfyui_install_path }}/venv/bin/python {{ comfyui_install_path }}/venv/bin/python3 2>/dev/null || true
+    ln -sf {{ real_python_path.stdout }} {{ comfyui_install_path }}/venv/bin/python
+    ln -sf {{ real_python_path.stdout }} {{ comfyui_install_path }}/venv/bin/python3
+  args:
+    executable: /bin/bash
+  when: "'/usr/bin/python.real' in real_python_path.stdout"
+
+- name: Install PyTorch with CUDA support
+  ansible.builtin.shell: |
+    source {{ comfyui_install_path }}/venv/bin/activate
+    pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+  args:
+    executable: /bin/bash
+  retries: 3
+  delay: 10
+  register: pytorch_install
+  until: pytorch_install.rc == 0
+
+- name: Install ComfyUI requirements
+  ansible.builtin.shell: |
+    source {{ comfyui_install_path }}/venv/bin/activate
+    pip install --quiet -r {{ comfyui_install_path }}/requirements.txt
+  args:
+    executable: /bin/bash
+  retries: 3
+  delay: 10
+  register: reqs_install
+  until: reqs_install.rc == 0
+
+- name: Create ComfyUI systemd service file
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/comfyui.service
+    content: |
+      [Unit]
+      Description=ComfyUI - Node-based Stable Diffusion Interface
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=ubuntu
+      WorkingDirectory={{ comfyui_install_path }}
+      ExecStart=/bin/bash -c 'source {{ comfyui_install_path }}/venv/bin/activate && exec python main.py --listen 0.0.0.0 --port {{ comfyui_port }}'
+      Restart=on-failure
+      RestartSec=10
+      Environment=PATH={{ comfyui_install_path }}/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart comfyui
+
+- name: Enable and start ComfyUI service
+  ansible.builtin.systemd:
+    name: comfyui
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for ComfyUI to start
+  ansible.builtin.uri:
+    url: "http://localhost:{{ comfyui_port }}"
+    method: GET
+  register: comfyui_check
+  retries: 6
+  delay: 10
+  until: comfyui_check.status == 200
+  ignore_errors: true
+
+- name: Display installation summary
+  ansible.builtin.debug:
+    msg:
+      - "ComfyUI deployment complete."
+      - "Install path: {{ comfyui_install_path }}"
+      - "Python: {{ real_python_path.stdout }}"
+      - "Listening on: 0.0.0.0:{{ comfyui_port }}"
+      - "Service status: enabled and running"
+      - "Web UI: http://<pod-ip>:{{ comfyui_port }}"
+      - "Models directory: {{ comfyui_install_path }}/models/"

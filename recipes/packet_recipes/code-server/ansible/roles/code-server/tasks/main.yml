@@ -1,0 +1,101 @@
+---
+- name: Install code-server via official install script
+  ansible.builtin.shell: |
+    curl -fsSL https://code-server.dev/install.sh | sh
+  args:
+    creates: /usr/bin/code-server
+  retries: 3
+  delay: 10
+  register: code_server_install
+  until: code_server_install.rc == 0
+
+- name: Verify code-server installation
+  ansible.builtin.debug:
+    msg: "code-server installed successfully"
+
+- name: Create code-server config directory
+  ansible.builtin.file:
+    path: "/home/{{ code_server_user }}/.config/code-server"
+    state: directory
+    owner: "{{ code_server_user }}"
+    group: "{{ code_server_user }}"
+    mode: "0755"
+
+- name: Write code-server config.yaml
+  ansible.builtin.copy:
+    dest: "/home/{{ code_server_user }}/.config/code-server/config.yaml"
+    owner: "{{ code_server_user }}"
+    group: "{{ code_server_user }}"
+    mode: "0644"
+    content: |
+      bind-addr: {{ code_server_bind_addr }}
+      auth: {{ code_server_auth }}
+      cert: false
+  notify: restart code-server
+
+- name: Configuration written
+  ansible.builtin.debug:
+    msg: "code-server config written — bind={{ code_server_bind_addr }}, auth={{ code_server_auth }}"
+
+- name: Create systemd service file for code-server
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/code-server.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=code-server (VS Code in the browser)
+      After=network.target
+
+      [Service]
+      Type=exec
+      User={{ code_server_user }}
+      ExecStart=/usr/bin/code-server --config /home/{{ code_server_user }}/.config/code-server/config.yaml
+      Restart=on-failure
+      RestartSec=5
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart code-server
+
+- name: Enable and start code-server service
+  ansible.builtin.systemd:
+    name: code-server
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: code-server service is running
+  ansible.builtin.debug:
+    msg: "code-server systemd service enabled and started on port {{ code_server_port }}"
+
+- name: Install Python extension
+  ansible.builtin.shell: |
+    code-server --install-extension ms-python.python
+  become: true
+  become_user: "{{ code_server_user }}"
+  retries: 3
+  delay: 10
+  register: python_ext
+  until: python_ext.rc == 0
+  ignore_errors: true
+
+- name: Install Jupyter extension
+  ansible.builtin.shell: |
+    code-server --install-extension ms-toolsai.jupyter
+  become: true
+  become_user: "{{ code_server_user }}"
+  retries: 3
+  delay: 10
+  register: jupyter_ext
+  until: jupyter_ext.rc == 0
+  ignore_errors: true
+
+- name: Extensions installation complete
+  ansible.builtin.debug:
+    msg: >
+      Extensions installed — Python: {{ 'OK' if python_ext.rc | default(1) == 0 else 'SKIPPED' }},
+      Jupyter: {{ 'OK' if jupyter_ext.rc | default(1) == 0 else 'SKIPPED' }}
+
+- name: Code Server recipe deployment complete
+  ansible.builtin.debug:
+    msg: "code-server is ready at http://0.0.0.0:{{ code_server_port }}"

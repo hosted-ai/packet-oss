@@ -1,0 +1,9 @@
+---
+- name: Hosted.ai Recipe Deployment Playbook - Fooocus
+  hosts: instances
+  gather_facts: true
+  become: true
+
+  roles:
+    - role: conn_check
+    - role: fooocus

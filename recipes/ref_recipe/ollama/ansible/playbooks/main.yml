@@ -1,0 +1,15 @@
+###
+#
+# - Hosted.ai Recipes
+# - Individual app deployments are specified in ./roles
+#
+###
+
+- name: Hosted.ai Recipe Deployment Playbook - Ollama
+  hosts: instances
+  gather_facts: true
+  become: true
+
+  roles:
+    - role: conn_check
+    - role: ollama

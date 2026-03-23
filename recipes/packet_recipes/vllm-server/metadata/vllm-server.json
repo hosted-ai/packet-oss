@@ -1,0 +1,93 @@
+{
+  "infrastructure": {
+    "cluster_type": "aws",
+    "nodes": [
+      {
+        "min_cores": 1,
+        "min_memory": 1
+      }
+    ],
+    "networks": [
+      {
+        "name": "Recipe SDN 1",
+        "start_ip": "192.168.5.2",
+        "end_ip": "192.168.5.252",
+        "nat_forwarding": true,
+        "gateway": "192.168.5.1",
+        "cidr": "192.168.5.0/24",
+        "has_dhcp_server": true,
+        "dhcp_server_ip": "192.168.5.253",
+        "routable_ip": "",
+        "is_physical": false
+      },
+      {
+        "name": "Physical NIC 0",
+        "start_ip": "",
+        "end_ip": "",
+        "nat_forwarding": false,
+        "gateway": "",
+        "cidr": "",
+        "has_dhcp_server": false,
+        "dhcp_server_ip": "",
+        "routable_ip": "",
+        "is_physical": true
+      }
+    ],
+    "datastores": [
+      {
+        "name": "Recipe DS 1",
+        "number_disks_per_node": [
+          1
+        ],
+        "number_replicas": 1,
+        "reserved": false
+      }
+    ],
+    "resource_group": {
+      "name": "Recipe RG",
+      "datastores": [
+        "Recipe DS 1"
+      ],
+      "networks": [
+        "Recipe SDN 1",
+        "Physical NIC 0"
+      ],
+      "number_cores_per_node": [
+        1
+      ],
+      "fault_tolerance": {
+        "is_enabled": false
+      },
+      "cpu_pinning": false,
+      "cpu_overcommit": false,
+      "cpu_overcommit_cores": null
+    },
+    "pcidevs": null
+  },
+  "configuration": {
+    "recipe_type": "vllm-server",
+    "instances": [
+      {
+        "instance_name": "vllm-server",
+        "resource_group": "Recipe RG",
+        "networks": [
+          "Physical NIC 0"
+        ],
+        "root_disk_size": 120,
+        "root_disk_datastore": "Recipe DS 1",
+        "extra_disk_1_size": 0,
+        "extra_disk_1_datastore": "",
+        "extra_disk_2_size": 0,
+        "extra_disk_2_datastore": "",
+        "cores": 4,
+        "memory": 8192,
+        "distro": "ubuntu",
+        "version": "22.04",
+        "vm_type": "hvm",
+        "ansible_host_vars": {},
+        "ansible_inventory_groups": [],
+        "nv_node": ""
+      }
+    ]
+  }
+}

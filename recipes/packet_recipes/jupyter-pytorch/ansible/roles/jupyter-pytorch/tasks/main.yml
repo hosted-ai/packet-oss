@@ -1,0 +1,153 @@
+---
+- name: Installing Jupyter + PyTorch environment
+  ansible.builtin.debug:
+    msg: "Installing Jupyter + PyTorch environment"
+
+- name: Install system packages
+  ansible.builtin.apt:
+    name:
+      - python3-pip
+      - python3-venv
+    state: present
+  retries: 3
+  delay: 10
+
+- name: Detect real Python 3.12 path (haishare/vllm-wrapper workaround)
+  ansible.builtin.shell: |
+    if [ -f /usr/bin/python.real.3.12 ]; then
+      echo "/usr/bin/python.real.3.12"
+    elif [ -f /usr/bin/python3.12 ] && [ ! -L /usr/bin/python3.12 ]; then
+      echo "/usr/bin/python3.12"
+    else
+      echo "python3"
+    fi
+  register: real_python_path
+  changed_when: false
+
+- name: Display detected Python path
+  ansible.builtin.debug:
+    msg: "Detected Python path: {{ real_python_path.stdout }}"
+
+- name: Create venv directory
+  ansible.builtin.file:
+    path: "{{ jupyter_env_path }}"
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0755'
+
+- name: Create virtual environment
+  ansible.builtin.command:
+    cmd: "{{ real_python_path.stdout }} -m venv {{ jupyter_env_path }}"
+    creates: "{{ jupyter_env_path }}/bin/activate"
+
+- name: Fix venv symlinks for real Python (haishare workaround)
+  ansible.builtin.shell: |
+    if [ -f /usr/bin/python.real.3.12 ]; then
+      rm -f {{ jupyter_env_path }}/bin/python {{ jupyter_env_path }}/bin/python3 {{ jupyter_env_path }}/bin/python3.12 2>/dev/null || true
+      ln -sf /usr/bin/python.real.3.12 {{ jupyter_env_path }}/bin/python
+      ln -sf /usr/bin/python.real.3.12 {{ jupyter_env_path }}/bin/python3
+      ln -sf /usr/bin/python.real.3.12 {{ jupyter_env_path }}/bin/python3.12
+    fi
+  when: real_python_path.stdout == "/usr/bin/python.real.3.12"
+
+- name: Install PyTorch with CUDA support
+  ansible.builtin.shell: |
+    source {{ jupyter_env_path }}/bin/activate
+    pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+  args:
+    executable: /bin/bash
+  retries: 3
+  delay: 10
+  register: pytorch_install
+  until: pytorch_install.rc == 0
+
+- name: PyTorch installation complete
+  ansible.builtin.debug:
+    msg: "PyTorch with CUDA support installed successfully"
+
+- name: Install JupyterLab and ML packages
+  ansible.builtin.shell: |
+    source {{ jupyter_env_path }}/bin/activate
+    pip install --quiet jupyterlab numpy pandas matplotlib plotly scipy scikit-learn
+    pip install --quiet transformers datasets accelerate tensorboard
+    pip install --quiet ipywidgets jupyterlab-git
+  args:
+    executable: /bin/bash
+  retries: 3
+  delay: 10
+  register: jupyter_install
+  until: jupyter_install.rc == 0
+
+- name: JupyterLab and ML packages installed
+  ansible.builtin.debug:
+    msg: "JupyterLab and ML packages installed successfully"
+
+- name: Create Jupyter config directory
+  ansible.builtin.file:
+    path: /home/ubuntu/.jupyter
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0755'
+
+- name: Write Jupyter configuration
+  ansible.builtin.copy:
+    dest: /home/ubuntu/.jupyter/jupyter_lab_config.py
+    owner: ubuntu
+    group: ubuntu
+    mode: '0644'
+    content: |
+      c.ServerApp.ip = '0.0.0.0'
+      c.ServerApp.port = {{ jupyter_port }}
+      c.ServerApp.open_browser = False
+      c.ServerApp.allow_root = True
+      c.ServerApp.token = ''
+      c.ServerApp.password = ''
+      c.ServerApp.allow_origin = '*'
+
+- name: Create JupyterLab systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/jupyter-pytorch.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=JupyterLab with PyTorch
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=ubuntu
+      WorkingDirectory=/home/ubuntu
+      ExecStart=/bin/bash -c 'source {{ jupyter_env_path }}/bin/activate && exec jupyter lab'
+      Restart=on-failure
+      RestartSec=10
+      Environment=PATH={{ jupyter_env_path }}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart jupyter-pytorch
+
+- name: Enable and start JupyterLab service
+  ansible.builtin.systemd:
+    name: jupyter-pytorch
+    state: started
+    enabled: true
+    daemon_reload: true
+
+- name: Verify JupyterLab is running
+  ansible.builtin.uri:
+    url: "http://localhost:{{ jupyter_port }}"
+    method: GET
+  register: jupyter_check
+  retries: 6
+  delay: 10
+  until: jupyter_check.status == 200
+  ignore_errors: true
+
+- name: Display installation summary
+  ansible.builtin.debug:
+    msg:
+      - "Jupyter + PyTorch has been successfully installed."
+      - "JupyterLab is available at http://0.0.0.0:{{ jupyter_port }}"
+      - "PyTorch with CUDA support is ready."

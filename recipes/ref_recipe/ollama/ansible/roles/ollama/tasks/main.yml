@@ -1,0 +1,28 @@
+# Ollama Installation
+
+- name: Update repositories cache and install curl
+  ansible.builtin.apt:
+    name: curl
+    update_cache: yes
+    state: present
+
+- name: Install Ollama using official script
+  ansible.builtin.shell: |
+    curl -fsSL https://ollama.com/install.sh | sh
+  args:
+    executable: /bin/bash
+
+- name: Verify Ollama installation
+  ansible.builtin.command:
+    cmd: ollama --version
+  register: ollama_version
+  changed_when: false
+
+- name: Display Ollama server details
+  ansible.builtin.debug:
+    msg:
+      - "Ollama has been successfully installed and started."
+      - "Installed Ollama version: {{ ollama_version.stdout }}"
+      - "Access Ollama from the CLI by running: ollama [flags] [commands]"
+      - " - For example, you can download a model by running: ollama pull llama2"
+

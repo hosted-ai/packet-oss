@@ -1,0 +1,22 @@
+---
+- name: Check HTTP connectivity
+  ansible.builtin.uri:
+    url: "{{ connectivity_check_url }}"
+    method: GET
+  register: connectivity_result
+  retries: "{{ connectivity_check_retries }}"
+  delay: "{{ connectivity_check_delay }}"
+  until: connectivity_result.status == 200
+  ignore_errors: true
+
+- name: Fail if unable to reach the specified URL
+  ansible.builtin.fail:
+    msg: >
+      Unable to reach {{ connectivity_check_url }}.
+      Ensure DNS and internet connectivity are working.
+      Last HTTP status: {{ connectivity_result.status | default('unknown') }}
+  when: connectivity_result.status != 200
+
+- name: Update APT package cache
+  ansible.builtin.apt:
+    update_cache: yes

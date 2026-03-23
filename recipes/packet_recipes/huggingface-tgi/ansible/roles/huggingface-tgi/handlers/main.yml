@@ -1,0 +1,6 @@
+---
+- name: restart huggingface-tgi
+  ansible.builtin.systemd:
+    name: huggingface-tgi
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,77 @@
+---
+# LocalAI Installation
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting LocalAI installation..."
+
+- name: Download LocalAI binary from GitHub
+  ansible.builtin.get_url:
+    url: "https://github.com/mudler/LocalAI/releases/latest/download/local-ai-Linux-x86_64"
+    dest: /usr/local/bin/local-ai
+    mode: "0755"
+  retries: 3
+  delay: 10
+
+- name: Verify LocalAI binary is executable
+  ansible.builtin.command:
+    cmd: /usr/local/bin/local-ai --help
+  register: localai_help
+  changed_when: false
+  failed_when: localai_help.rc not in [0, 1]
+
+- name: Display download success
+  ansible.builtin.debug:
+    msg: "LocalAI binary downloaded and installed at /usr/local/bin/local-ai."
+
+- name: Create LocalAI data directory
+  ansible.builtin.file:
+    path: /opt/localai/models
+    state: directory
+    mode: "0755"
+
+- name: Create systemd service for LocalAI
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/localai.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=LocalAI - OpenAI-compatible local inference
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/usr/local/bin/local-ai run --address {{ localai_host }}:{{ localai_port }}
+      Restart=on-failure
+      RestartSec=5
+      WorkingDirectory=/opt/localai
+      Environment=MODELS_PATH=/opt/localai/models
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart localai
+
+- name: Enable and start LocalAI service
+  ansible.builtin.systemd:
+    name: localai
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for LocalAI API to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ localai_port }}/readyz"
+    method: GET
+  register: localai_health
+  retries: 3
+  delay: 10
+  until: localai_health.status == 200
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "LocalAI deployment complete."
+      - "Listening on: {{ localai_host }}:{{ localai_port }}"
+      - "Service status: enabled and running"
+      - "Models directory: /opt/localai/models"
+      - "API endpoint: http://{{ localai_host }}:{{ localai_port }}/v1/chat/completions"

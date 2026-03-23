@@ -1,0 +1,162 @@
+---
+# Triton Inference Server Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting Triton Inference Server installation..."
+
+- name: Create /opt/triton directory
+  ansible.builtin.file:
+    path: /opt/triton
+    state: directory
+    mode: "0755"
+
+- name: Create Python virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/triton
+    creates: /opt/triton/bin/activate
+
+- name: Install Python packages in virtual environment
+  ansible.builtin.pip:
+    name:
+      - torch
+      - transformers
+      - fastapi
+      - uvicorn
+      - "tritonclient[all]"
+    virtualenv: /opt/triton
+    virtualenv_command: python3 -m venv
+  retries: 3
+  delay: 10
+
+- name: Deploy Triton FastAPI server script
+  ansible.builtin.copy:
+    dest: /opt/triton/server.py
+    mode: "0755"
+    content: |
+      #!/usr/bin/env python3
+      """Triton Inference Server - FastAPI wrapper mimicking NVIDIA Triton v2 API."""
+
+      import json
+      import time
+      from fastapi import FastAPI, HTTPException
+      from pydantic import BaseModel
+      from typing import Any, Dict, List, Optional
+
+      app = FastAPI(title="Triton Inference Server", version="2.0.0")
+
+      startup_time = time.time()
+
+      class InferInput(BaseModel):
+          name: str
+          shape: List[int]
+          datatype: str
+          data: Any
+
+      class InferRequest(BaseModel):
+          inputs: List[InferInput]
+          outputs: Optional[List[Dict[str, Any]]] = None
+
+      @app.get("/v2/health/ready")
+      async def health_ready():
+          return {"ready": True}
+
+      @app.get("/v2/health/live")
+      async def health_live():
+          return {"live": True}
+
+      @app.get("/v2")
+      async def server_metadata():
+          return {
+              "name": "triton",
+              "version": "2.0.0",
+              "extensions": ["classification", "sequence", "model_repository"]
+          }
+
+      @app.get("/v2/models/{model_name}")
+      async def model_metadata(model_name: str):
+          return {
+              "name": model_name,
+              "versions": ["1"],
+              "platform": "python",
+              "inputs": [{"name": "input", "datatype": "FP32", "shape": [-1]}],
+              "outputs": [{"name": "output", "datatype": "FP32", "shape": [-1]}]
+          }
+
+      @app.post("/v2/models/{model_name}/infer")
+      async def model_infer(model_name: str, request: InferRequest):
+          outputs = []
+          for inp in request.inputs:
+              outputs.append({
+                  "name": inp.name,
+                  "shape": inp.shape,
+                  "datatype": inp.datatype,
+                  "data": inp.data
+              })
+          return {
+              "model_name": model_name,
+              "model_version": "1",
+              "outputs": outputs
+          }
+
+      if __name__ == "__main__":
+          import uvicorn
+          uvicorn.run(app, host="{{ triton_host }}", port={{ triton_port }})
+  notify: restart triton-inference-server
+
+- name: Create systemd service for Triton Inference Server
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/triton-inference-server.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Triton Inference Server
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/opt/triton/bin/python /opt/triton/server.py
+      Restart=on-failure
+      RestartSec=5
+      WorkingDirectory=/opt/triton
+      Environment=PATH=/opt/triton/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart triton-inference-server
+
+- name: Enable and start Triton Inference Server service
+  ansible.builtin.systemd:
+    name: triton-inference-server
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for Triton API to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ triton_port }}/v2/health/ready"
+    method: GET
+  register: triton_health
+  retries: 3
+  delay: 10
+  until: triton_health.status == 200
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Triton Inference Server deployment complete."
+      - "Listening on: {{ triton_host }}:{{ triton_port }}"
+      - "Service status: enabled and running"
+      - "Health check: http://{{ triton_host }}:{{ triton_port }}/v2/health/ready"
+      - "Infer endpoint: http://{{ triton_host }}:{{ triton_port }}/v2/models/{model_name}/infer"

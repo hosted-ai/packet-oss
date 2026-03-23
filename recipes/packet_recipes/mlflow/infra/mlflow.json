@@ -1,0 +1,32 @@
+{
+  "infrastructure": {},
+  "configuration": {
+    "recipe_type": "fio",
+    "instances": [
+      {
+        "instance_name": "mlflow",
+        "resource_group": "Recipe RG",
+        "networks": [
+          {
+            "network_type": "public",
+            "network_name": "Physical NIC 0"
+          }
+        ],
+        "storage": [
+          {
+            "size": 120,
+            "datastore_name": ""
+          }
+        ],
+        "cores": 4,
+        "memory": 8192,
+        "distro": "ubuntu",
+        "version": "22.04",
+        "vm_type": "hvm",
+        "ansible_host_vars": {},
+        "ansible_inventory_groups": [],
+        "nv_node": ""
+      }
+    ]
+  }
+}

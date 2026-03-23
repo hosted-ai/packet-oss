@@ -1,0 +1,6 @@
+---
+# defaults/main.yml
+
+connectivity_check_url: "https://google.com"
+connectivity_check_retries: 6
+connectivity_check_delay: 10

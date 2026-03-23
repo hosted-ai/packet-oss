@@ -1,0 +1,3 @@
+---
+localai_port: 8080
+localai_host: "0.0.0.0"

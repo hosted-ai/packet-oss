@@ -112,3 +112,4 @@ packetdb-production-*
 # Recipe builds (compressed archives for HAI upload)
 recipes/builds/
 recipes/packet_recipes/creds
+ansible.log

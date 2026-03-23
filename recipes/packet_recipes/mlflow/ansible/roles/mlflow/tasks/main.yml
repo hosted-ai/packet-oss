@@ -1,0 +1,107 @@
+---
+# MLflow Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - build-essential
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting MLflow installation..."
+
+- name: Create MLflow virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/mlflow
+    creates: /opt/mlflow/bin/python
+
+- name: Install MLflow with extras and ML libraries
+  ansible.builtin.pip:
+    name:
+      - "mlflow[extras]"
+      - scikit-learn
+      - xgboost
+    virtualenv: /opt/mlflow
+  retries: 3
+  delay: 10
+
+- name: Verify MLflow installation
+  ansible.builtin.command:
+    cmd: /opt/mlflow/bin/mlflow --version
+  register: mlflow_version
+  changed_when: false
+
+- name: Display MLflow version
+  ansible.builtin.debug:
+    msg: "MLflow installed successfully - version: {{ mlflow_version.stdout }}"
+
+- name: Create MLflow database directory
+  ansible.builtin.file:
+    path: "{{ mlflow_data_dir }}/db"
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: Create MLflow artifacts directory
+  ansible.builtin.file:
+    path: "{{ mlflow_data_dir }}/artifacts"
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: Create systemd service for MLflow
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/mlflow.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=MLflow Tracking Server
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      ExecStart=/opt/mlflow/bin/mlflow server --host {{ mlflow_host }} --port {{ mlflow_port }} --backend-store-uri sqlite:///{{ mlflow_data_dir }}/db/mlflow.db --default-artifact-root {{ mlflow_data_dir }}/artifacts
+      Restart=on-failure
+      RestartSec=10
+      Environment=PYTHONUNBUFFERED=1
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart mlflow
+
+- name: Enable and start MLflow service
+  ansible.builtin.systemd:
+    name: mlflow
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for MLflow web UI to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ mlflow_port }}"
+    method: GET
+  register: mlflow_health
+  retries: 3
+  delay: 10
+  until: mlflow_health.status == 200
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "MLflow deployment complete."
+      - "Installed version: {{ mlflow_version.stdout }}"
+      - "Listening on: {{ mlflow_host }}:{{ mlflow_port }}"
+      - "Service status: enabled and running"
+      - "Web UI: http://{{ mlflow_host }}:{{ mlflow_port }}"
+      - "Backend store: sqlite:///{{ mlflow_data_dir }}/db/mlflow.db"
+      - "Artifact root: {{ mlflow_data_dir }}/artifacts"

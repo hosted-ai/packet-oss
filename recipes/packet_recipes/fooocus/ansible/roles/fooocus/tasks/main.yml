@@ -1,0 +1,102 @@
+---
+# Fooocus Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - git
+      - python3
+      - python3-venv
+      - python3-pip
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting Fooocus installation..."
+
+- name: Clone Fooocus repository
+  ansible.builtin.git:
+    repo: "https://github.com/lllyasviel/Fooocus.git"
+    dest: /opt/fooocus
+    version: main
+    force: false
+  retries: 3
+  delay: 10
+
+- name: Create Python virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/fooocus/venv
+    creates: /opt/fooocus/venv/bin/activate
+
+- name: Install PyTorch with CUDA support
+  ansible.builtin.pip:
+    name:
+      - torch
+      - torchvision
+      - torchaudio
+    virtualenv: /opt/fooocus/venv
+    virtualenv_command: python3 -m venv
+    extra_args: "--index-url https://download.pytorch.org/whl/nightly/cu128"
+  retries: 3
+  delay: 10
+
+- name: Install Fooocus Python requirements
+  ansible.builtin.pip:
+    requirements: /opt/fooocus/requirements_versions.txt
+    virtualenv: /opt/fooocus/venv
+    virtualenv_command: python3 -m venv
+  retries: 3
+  delay: 10
+
+- name: Display install success
+  ansible.builtin.debug:
+    msg: "Fooocus dependencies installed successfully."
+
+- name: Create systemd service for Fooocus
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/fooocus.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Fooocus - AI Image Generation
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/opt/fooocus/venv/bin/python entry_with_update.py --listen --port {{ fooocus_port }}
+      Restart=on-failure
+      RestartSec=5
+      WorkingDirectory=/opt/fooocus
+      Environment=PATH=/opt/fooocus/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart fooocus
+
+- name: Enable and start Fooocus service
+  ansible.builtin.systemd:
+    name: fooocus
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for Fooocus WebUI to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ fooocus_port }}"
+    method: GET
+    status_code: [200, 302]
+  register: fooocus_health
+  retries: 3
+  delay: 10
+  until: fooocus_health.status in [200, 302]
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Fooocus deployment complete."
+      - "Listening on: {{ fooocus_host }}:{{ fooocus_port }}"
+      - "Service status: enabled and running"
+      - "WebUI: http://{{ fooocus_host }}:{{ fooocus_port }}"

@@ -1,0 +1,123 @@
+---
+# Axolotl Training Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - git
+      - python3
+      - python3-venv
+      - python3-pip
+      - build-essential
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting Axolotl training framework installation..."
+
+- name: Clone Axolotl repository
+  ansible.builtin.git:
+    repo: https://github.com/OpenAccess-AI-Collective/axolotl.git
+    dest: /opt/axolotl
+    version: main
+    force: yes
+  retries: 3
+  delay: 10
+
+- name: Create Python virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/axolotl/venv
+    creates: /opt/axolotl/venv/bin/python
+
+- name: Install PyTorch nightly with CUDA 12.8
+  ansible.builtin.pip:
+    name:
+      - torch
+      - torchvision
+      - torchaudio
+    extra_args: "--index-url https://download.pytorch.org/whl/nightly/cu128"
+    virtualenv: /opt/axolotl/venv
+  retries: 3
+  delay: 10
+
+- name: Install packaging and build dependencies
+  ansible.builtin.pip:
+    name:
+      - packaging
+      - ninja
+      - wheel
+      - setuptools
+    virtualenv: /opt/axolotl/venv
+  retries: 3
+  delay: 10
+
+- name: Install Axolotl with flash-attn and deepspeed extras
+  ansible.builtin.pip:
+    name: "/opt/axolotl[flash-attn,deepspeed]"
+    extra_args: "-e"
+    virtualenv: /opt/axolotl/venv
+  retries: 3
+  delay: 10
+
+- name: Create example configs directory for ubuntu user
+  ansible.builtin.file:
+    path: /home/ubuntu/axolotl-configs
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: Copy example configs to user home
+  ansible.builtin.copy:
+    src: /opt/axolotl/examples/
+    dest: /home/ubuntu/axolotl-configs/
+    remote_src: yes
+    owner: ubuntu
+    group: ubuntu
+    mode: "0644"
+    directory_mode: "0755"
+
+- name: Create convenience wrapper script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/axolotl-train
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      # Convenience wrapper for Axolotl training
+      # Usage: axolotl-train <config.yml>
+      source /opt/axolotl/venv/bin/activate
+      exec accelerate launch -m axolotl.cli.train "$@"
+
+- name: Create convenience preprocess script
+  ansible.builtin.copy:
+    dest: /usr/local/bin/axolotl-preprocess
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      # Convenience wrapper for Axolotl dataset preprocessing
+      # Usage: axolotl-preprocess <config.yml>
+      source /opt/axolotl/venv/bin/activate
+      exec python -m axolotl.cli.preprocess "$@"
+
+- name: Verify Axolotl installation
+  ansible.builtin.command:
+    cmd: /opt/axolotl/venv/bin/python -c "import axolotl; print('Axolotl imported successfully')"
+  register: axolotl_verify
+  changed_when: false
+
+- name: Display Axolotl verification result
+  ansible.builtin.debug:
+    msg: "{{ axolotl_verify.stdout }}"
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Axolotl training framework deployment complete."
+      - "Installation path: /opt/axolotl"
+      - "Virtual environment: /opt/axolotl/venv"
+      - "Example configs copied to: /home/ubuntu/axolotl-configs/"
+      - "Quick start: axolotl-train /home/ubuntu/axolotl-configs/llama-2/lora.yml"
+      - "Preprocess: axolotl-preprocess <config.yml>"

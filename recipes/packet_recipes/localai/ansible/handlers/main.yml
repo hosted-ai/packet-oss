@@ -1,0 +1,6 @@
+---
+- name: restart localai
+  ansible.builtin.systemd:
+    name: localai
+    state: restarted
+    daemon_reload: true

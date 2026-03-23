@@ -1,0 +1,169 @@
+---
+# vLLM V1 + TinyLlama 1.1B Installation
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Installing vLLM V1 + TinyLlama 1.1B"
+
+- name: Kill any existing vLLM processes
+  ansible.builtin.shell: pkill -f "vllm.entrypoints" || true
+  args:
+    executable: /bin/bash
+  ignore_errors: true
+
+- name: Install system packages
+  ansible.builtin.apt:
+    name:
+      - python3-venv
+      - curl
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Detect real Python path (haishare workaround)
+  ansible.builtin.shell: |
+    # haishare may wrap python3 with a shell script that breaks venv creation.
+    # Find the real CPython binary by following symlinks and checking candidates.
+    for candidate in /usr/bin/python3.* /usr/bin/python3; do
+      if [ -x "$candidate" ] && file "$candidate" | grep -q "ELF\|executable"; then
+        echo "$candidate"
+        exit 0
+      fi
+    done
+    # Fallback: resolve python3 symlink chain
+    real_python="$(readlink -f "$(which python3)")"
+    if [ -x "$real_python" ]; then
+      echo "$real_python"
+      exit 0
+    fi
+    echo "/usr/bin/python3"
+  args:
+    executable: /bin/bash
+  register: real_python_result
+  changed_when: false
+
+- name: Display detected Python path
+  ansible.builtin.debug:
+    msg: "Detected real Python binary: {{ real_python_result.stdout }}"
+
+- name: Create vLLM directory
+  ansible.builtin.file:
+    path: "{{ vllm_env_path }}"
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+
+- name: Create virtual environment using detected Python
+  ansible.builtin.command:
+    cmd: "{{ real_python_result.stdout }} -m venv {{ vllm_env_path }}/venv"
+    creates: "{{ vllm_env_path }}/venv/bin/activate"
+  become_user: ubuntu
+
+- name: Fix venv symlinks if haishare Python detected
+  ansible.builtin.shell: |
+    # If the venv python is a wrapper script instead of a real binary,
+    # replace it with a symlink to the real Python.
+    VENV_PYTHON="{{ vllm_env_path }}/venv/bin/python3"
+    REAL_PYTHON="{{ real_python_result.stdout }}"
+    if [ -f "$VENV_PYTHON" ] && ! file "$VENV_PYTHON" | grep -q "ELF\|executable"; then
+      rm -f "$VENV_PYTHON"
+      ln -s "$REAL_PYTHON" "$VENV_PYTHON"
+      rm -f "{{ vllm_env_path }}/venv/bin/python"
+      ln -s "$REAL_PYTHON" "{{ vllm_env_path }}/venv/bin/python"
+    fi
+  args:
+    executable: /bin/bash
+  changed_when: false
+
+- name: Install vLLM via pip
+  ansible.builtin.shell: |
+    source {{ vllm_env_path }}/venv/bin/activate
+    pip install --upgrade pip
+    pip install vllm
+  args:
+    executable: /bin/bash
+  retries: 3
+  delay: 10
+  register: vllm_pip_result
+  until: vllm_pip_result.rc == 0
+
+- name: Display pip install result
+  ansible.builtin.debug:
+    msg: "vLLM pip install completed successfully."
+
+- name: Create systemd service file for vLLM V1 + TinyLlama
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vllm-v1-tinyllama.service
+    content: |
+      [Unit]
+      Description=vLLM V1 with TinyLlama 1.1B
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=ubuntu
+      Environment=VLLM_USE_V1=1
+      Environment=PATH={{ vllm_env_path }}/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      ExecStart=/bin/bash -c 'source {{ vllm_env_path }}/venv/bin/activate && exec python -m vllm.entrypoints.openai.api_server --model {{ vllm_model }} --host 0.0.0.0 --port {{ vllm_port }} --max-model-len {{ vllm_max_model_len }} --enforce-eager'
+      Restart=on-failure
+      RestartSec=10
+      WorkingDirectory={{ vllm_env_path }}
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart vllm-v1-tinyllama
+
+- name: Create test script
+  ansible.builtin.copy:
+    dest: /opt/test-vllm.sh
+    content: |
+      #!/bin/bash
+      set -e
+
+      echo "=== vLLM V1 + TinyLlama Test ==="
+      echo ""
+
+      echo "1. Checking service status..."
+      systemctl is-active --quiet vllm-v1-tinyllama && echo "   Service: RUNNING" || echo "   Service: NOT RUNNING"
+      echo ""
+
+      echo "2. Listing models..."
+      curl -s http://localhost:{{ vllm_port }}/v1/models | python3 -m json.tool 2>/dev/null || echo "   Failed to reach API (model may still be loading)"
+      echo ""
+
+      echo "3. Sending chat completion request..."
+      curl -s http://localhost:{{ vllm_port }}/v1/chat/completions \
+        -H "Content-Type: application/json" \
+        -d '{
+          "model": "{{ vllm_model }}",
+          "messages": [{"role": "user", "content": "Hello! What are you?"}],
+          "max_tokens": 50
+        }' | python3 -m json.tool 2>/dev/null || echo "   Failed to get completion (model may still be loading)"
+      echo ""
+
+      echo "=== Test complete ==="
+    mode: "0755"
+    owner: ubuntu
+    group: ubuntu
+
+- name: Enable and start vLLM service
+  ansible.builtin.systemd:
+    name: vllm-v1-tinyllama
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Display installation summary
+  ansible.builtin.debug:
+    msg:
+      - "vLLM V1 + TinyLlama 1.1B deployment complete."
+      - "Model: {{ vllm_model }}"
+      - "API URL: http://0.0.0.0:{{ vllm_port }}"
+      - "V1 Engine: enabled (VLLM_USE_V1=1)"
+      - "Max model length: {{ vllm_max_model_len }}"
+      - "Service: vllm-v1-tinyllama (enabled, started)"
+      - "Test: /opt/test-vllm.sh"
+      - "Note: The model will download on first start (~2 GB). Check logs with: journalctl -u vllm-v1-tinyllama -f"

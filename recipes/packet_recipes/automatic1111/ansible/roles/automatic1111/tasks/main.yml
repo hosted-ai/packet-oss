@@ -1,0 +1,104 @@
+---
+# AUTOMATIC1111 Stable Diffusion WebUI Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - git
+      - python3
+      - python3-venv
+      - python3-pip
+      - libgl1
+      - libglib2.0-0
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting AUTOMATIC1111 Stable Diffusion WebUI installation..."
+
+- name: Clone AUTOMATIC1111 stable-diffusion-webui repository
+  ansible.builtin.git:
+    repo: "https://github.com/AUTOMATIC1111/stable-diffusion-webui.git"
+    dest: /opt/automatic1111
+    version: master
+    force: false
+  retries: 3
+  delay: 10
+
+- name: Create Python virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/automatic1111/venv
+    creates: /opt/automatic1111/venv/bin/activate
+
+- name: Install PyTorch with CUDA support
+  ansible.builtin.pip:
+    name:
+      - torch
+      - torchvision
+      - torchaudio
+    virtualenv: /opt/automatic1111/venv
+    virtualenv_command: python3 -m venv
+    extra_args: "--index-url https://download.pytorch.org/whl/nightly/cu128"
+  retries: 3
+  delay: 10
+
+- name: Install AUTOMATIC1111 Python requirements
+  ansible.builtin.pip:
+    requirements: /opt/automatic1111/requirements_versions.txt
+    virtualenv: /opt/automatic1111/venv
+    virtualenv_command: python3 -m venv
+  retries: 3
+  delay: 10
+
+- name: Display install success
+  ansible.builtin.debug:
+    msg: "AUTOMATIC1111 dependencies installed successfully."
+
+- name: Create systemd service for AUTOMATIC1111
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/automatic1111.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=AUTOMATIC1111 Stable Diffusion WebUI
+      After=network.target
+
+      [Service]
+      Type=simple
+      ExecStart=/opt/automatic1111/venv/bin/python launch.py --listen --port {{ a1111_port }} --api --skip-torch-cuda-test
+      Restart=on-failure
+      RestartSec=5
+      WorkingDirectory=/opt/automatic1111
+      Environment=PATH=/opt/automatic1111/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart automatic1111
+
+- name: Enable and start AUTOMATIC1111 service
+  ansible.builtin.systemd:
+    name: automatic1111
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for AUTOMATIC1111 WebUI to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ a1111_port }}/sdapi/v1/options"
+    method: GET
+  register: a1111_health
+  retries: 3
+  delay: 10
+  until: a1111_health.status == 200
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "AUTOMATIC1111 Stable Diffusion WebUI deployment complete."
+      - "Listening on: {{ a1111_host }}:{{ a1111_port }}"
+      - "Service status: enabled and running"
+      - "WebUI: http://{{ a1111_host }}:{{ a1111_port }}"
+      - "API endpoint: http://{{ a1111_host }}:{{ a1111_port }}/sdapi/v1/txt2img"

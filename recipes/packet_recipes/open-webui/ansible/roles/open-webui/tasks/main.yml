@@ -1,0 +1,87 @@
+---
+# Open WebUI Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - python3
+      - python3-venv
+      - python3-pip
+      - curl
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting Open WebUI installation in /opt/open-webui virtual environment..."
+
+- name: Create Open WebUI virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/open-webui
+    creates: /opt/open-webui/bin/python
+
+- name: Install Open WebUI via pip
+  ansible.builtin.pip:
+    name: open-webui
+    virtualenv: /opt/open-webui
+  retries: 3
+  delay: 10
+
+- name: Verify Open WebUI installation
+  ansible.builtin.command:
+    cmd: /opt/open-webui/bin/open-webui --help
+  register: openwebui_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Display install status
+  ansible.builtin.debug:
+    msg: "Open WebUI installed successfully in /opt/open-webui"
+
+- name: Create systemd service for Open WebUI
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/open-webui.service
+    content: |
+      [Unit]
+      Description=Open WebUI - ChatGPT-like Interface
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      ExecStart=/opt/open-webui/bin/open-webui serve --host {{ openwebui_host }} --port {{ openwebui_port }}
+      Restart=on-failure
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify: restart open-webui
+
+- name: Enable and start Open WebUI service
+  ansible.builtin.systemd:
+    name: open-webui
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for Open WebUI to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ openwebui_port }}"
+    method: GET
+  register: openwebui_health
+  retries: 30
+  delay: 10
+  until: openwebui_health.status == 200
+  ignore_errors: true
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Open WebUI deployment complete."
+      - "Listening on: {{ openwebui_host }}:{{ openwebui_port }}"
+      - "Service status: enabled and running"
+      - "Web UI: http://{{ openwebui_host }}:{{ openwebui_port }}"
+      - "Connect to Ollama or any OpenAI-compatible API through the UI settings."

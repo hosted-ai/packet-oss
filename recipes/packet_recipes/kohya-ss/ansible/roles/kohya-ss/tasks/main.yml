@@ -1,0 +1,112 @@
+---
+# Kohya SS Installation
+
+- name: Install system dependencies
+  ansible.builtin.apt:
+    name:
+      - git
+      - python3
+      - python3-venv
+      - python3-pip
+      - python3-tk
+      - build-essential
+      - libgl1-mesa-glx
+      - libglib2.0-0
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting Kohya SS installation..."
+
+- name: Clone Kohya SS repository
+  ansible.builtin.git:
+    repo: https://github.com/bmaltais/kohya_ss.git
+    dest: /opt/kohya-ss
+    version: master
+    force: yes
+  retries: 3
+  delay: 10
+
+- name: Create Python virtual environment
+  ansible.builtin.command:
+    cmd: python3 -m venv /opt/kohya-ss/venv
+    creates: /opt/kohya-ss/venv/bin/python
+
+- name: Install PyTorch nightly with CUDA 12.8
+  ansible.builtin.pip:
+    name:
+      - torch
+      - torchvision
+      - torchaudio
+    extra_args: "--index-url https://download.pytorch.org/whl/nightly/cu128"
+    virtualenv: /opt/kohya-ss/venv
+  retries: 3
+  delay: 10
+
+- name: Install requirements from repository
+  ansible.builtin.pip:
+    requirements: /opt/kohya-ss/requirements.txt
+    virtualenv: /opt/kohya-ss/venv
+  retries: 3
+  delay: 10
+
+- name: Install additional ML dependencies
+  ansible.builtin.pip:
+    name:
+      - xformers
+      - bitsandbytes
+      - accelerate
+    virtualenv: /opt/kohya-ss/venv
+  retries: 3
+  delay: 10
+
+- name: Create systemd service for Kohya SS
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/kohya-ss.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Kohya SS Training GUI
+      After=network.target
+
+      [Service]
+      Type=simple
+      User=root
+      WorkingDirectory=/opt/kohya-ss
+      ExecStart=/opt/kohya-ss/venv/bin/python kohya_gui.py --listen {{ kohya_host }} --server_port {{ kohya_port }} --headless
+      Restart=on-failure
+      RestartSec=10
+      Environment=PYTHONUNBUFFERED=1
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: restart kohya-ss
+
+- name: Enable and start Kohya SS service
+  ansible.builtin.systemd:
+    name: kohya-ss
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for Kohya SS web UI to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ kohya_port }}"
+    method: GET
+  register: kohya_health
+  retries: 3
+  delay: 10
+  until: kohya_health.status == 200
+  ignore_errors: true
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Kohya SS deployment complete."
+      - "Listening on: {{ kohya_host }}:{{ kohya_port }}"
+      - "Service status: enabled and running"
+      - "Web UI: http://{{ kohya_host }}:{{ kohya_port }}"
+      - "Supports: LoRA, DreamBooth, fine-tuning for Stable Diffusion models"

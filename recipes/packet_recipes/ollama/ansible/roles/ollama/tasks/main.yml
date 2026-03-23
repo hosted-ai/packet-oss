@@ -1,0 +1,78 @@
+---
+# Ollama Installation
+
+- name: Install curl
+  ansible.builtin.apt:
+    name: curl
+    state: present
+    update_cache: yes
+  retries: 3
+  delay: 10
+
+- name: Display pre-install message
+  ansible.builtin.debug:
+    msg: "Starting Ollama installation via official install script..."
+
+- name: Download and run Ollama install script
+  ansible.builtin.shell: |
+    curl -fsSL https://ollama.com/install.sh | sh
+  args:
+    executable: /bin/bash
+  retries: 3
+  delay: 10
+  register: ollama_install_result
+
+- name: Display install script output
+  ansible.builtin.debug:
+    msg: "Ollama install script completed successfully."
+
+- name: Verify Ollama installation
+  ansible.builtin.command:
+    cmd: ollama --version
+  register: ollama_version
+  changed_when: false
+
+- name: Display Ollama version
+  ansible.builtin.debug:
+    msg: "Ollama installed successfully - version: {{ ollama_version.stdout }}"
+
+- name: Create systemd override directory for Ollama
+  ansible.builtin.file:
+    path: /etc/systemd/system/ollama.service.d
+    state: directory
+    mode: "0755"
+
+- name: Configure Ollama to listen on all interfaces
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ollama.service.d/override.conf
+    content: |
+      [Service]
+      Environment="OLLAMA_HOST={{ ollama_host }}:{{ ollama_port }}"
+    mode: "0644"
+  notify: restart ollama
+
+- name: Enable and start Ollama service
+  ansible.builtin.systemd:
+    name: ollama
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Wait for Ollama API to become available
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ ollama_port }}/api/tags"
+    method: GET
+  register: ollama_health
+  retries: 3
+  delay: 10
+  until: ollama_health.status == 200
+
+- name: Display deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "Ollama deployment complete."
+      - "Installed version: {{ ollama_version.stdout }}"
+      - "Listening on: {{ ollama_host }}:{{ ollama_port }}"
+      - "Service status: enabled and running"
+      - "Pull a model: ollama pull llama3.2"
+      - "API endpoint: http://{{ ollama_host }}:{{ ollama_port }}/api/generate"
