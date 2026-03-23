@@ -5,6 +5,7 @@ import {
   updateExposedService,
   deleteExposedService,
   getConnectionInfo,
+  getExposedServices,
 } from "@/lib/hostedai";
 import { clearCache } from "@/lib/hostedai/client";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
@@ -30,12 +31,28 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "No team associated" }, { status: 400 });
     }
 
+    // HAI 2.2: Unified instance — use dedicated exposed-services endpoint
+    if (instanceId.startsWith("i-")) {
+      const services = await getExposedServices(instanceId);
+      const formattedServices = services.map((s) => ({
+        id: s.id,
+        service_name: s.service_name,
+        ip: s.ip,
+        internal_port: s.internal_port,
+        external_port: s.external_port,
+        protocol: s.protocol,
+        type: s.type,
+        status: s.status,
+      }));
+      return NextResponse.json({ services: formattedServices });
+    }
+
+    // Legacy: Pool subscription — get services from connection-info
     // Always bypass cache for service queries to avoid stale empty results.
     for (const tid of allTeamIds) {
       clearCache(`connection-info:${tid}`);
     }
 
-    // Try all teams to find connection info for this instance
     let connInfo: Awaited<ReturnType<typeof getConnectionInfo>> = [];
     for (const tid of allTeamIds) {
       const info = await getConnectionInfo(tid, instanceId);

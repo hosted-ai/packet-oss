@@ -774,6 +774,8 @@ model GpuProduct {
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
+  deployableApps     GpuApp[]
+
   @@index([active])
   @@index([displayOrder])
   @@index([billingType])
@@ -806,9 +808,17 @@ model GpuApp {
   updatedAt           DateTime       @updatedAt @map("updated_at")
   installations       InstalledApp[]
 
+  // Deploy with Recipe capability (HAI 2.2)
+  serviceId           String?        @map("service_id")       // HAI service UUID (with recipe attached)
+  productId           String?        @map("product_id")       // GpuProduct ID (for pricing/billing)
+  product             GpuProduct?    @relation(fields: [productId], references: [id])
+  deployable          Boolean        @default(false)           // Admin toggle: show Deploy button
+  recipeSlug          String?        @map("recipe_slug")       // Matches recipes/packet_recipes/{slug}
+
   @@index([category])
   @@index([active])
   @@index([displayOrder])
+  @@index([deployable])
   @@map("gpu_app")
 }
 

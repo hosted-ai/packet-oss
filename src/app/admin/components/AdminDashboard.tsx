@@ -29,6 +29,7 @@ import {
   UptimeTab,
   PlatformSettingsTab,
 } from "./index";
+import { GpuAppsTab } from "./GpuAppsTab";
 import { OssAdminSupportTab } from "./OssAdminSupportTab";
 import { AdminSidebar } from "./AdminSidebar";
 
@@ -417,6 +418,7 @@ export function AdminDashboard() {
       uptime: "Pod Uptime",
       payouts: "Investor Payouts",
       "platform-settings": "Platform Settings",
+      "gpu-apps": "GPU Apps",
     };
     return labels[tab];
   };
@@ -619,6 +621,8 @@ export function AdminDashboard() {
         {activeTab === "game" && <GameStatsTab />}
 
         {activeTab === "products" && <ProductsTab />}
+
+        {activeTab === "gpu-apps" && <GpuAppsTab />}
 
         {activeTab === "pods" && (
           <>

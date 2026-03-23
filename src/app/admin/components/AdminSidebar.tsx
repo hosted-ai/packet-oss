@@ -42,6 +42,7 @@ import {
   Clock,
   Wallet,
   Wrench,
+  Boxes,
 } from "lucide-react";
 
 interface AdminSidebarProps {
@@ -101,6 +102,7 @@ const navGroups: NavGroup[] = [
       { id: "marketing", label: "Marketing", icon: BarChart3 },
       { id: "business", label: "Business Metrics", icon: TrendingUp },
       { id: "products", label: "Products", icon: Package },
+      { id: "gpu-apps", label: "GPU Apps", icon: Boxes },
       { id: "landing", label: "Landing Page", icon: LayoutDashboard },
       { id: "clusters", label: "Clusters", icon: Server },
       { id: "demand", label: "Demand", icon: ShoppingCart },

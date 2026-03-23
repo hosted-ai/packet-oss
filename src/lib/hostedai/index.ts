@@ -68,7 +68,19 @@ export {
   factoryResetInstance,
   getAddDiskPricing,
   addDisksToInstance,
+  createScenario,
+  assignServiceToScenario,
+  unassignServiceFromScenario,
+  getScenarioCompatibleServices,
+  getServiceCompatibleRegions,
+  getServiceCompatibleGPUPools,
+  getServiceProvisioningInfo,
+  updateHAIService,
+  getTeamWorkspaces,
+  getUnifiedInstances,
 } from "./instances";
+
+export type { UnifiedInstance } from "./instances";
 
 export type { AddDiskParams, AddDiskPricing } from "./instances";
 
@@ -165,3 +177,13 @@ export {
   ROLES,
   FALLBACK_ROLES,
 } from "./default-roles";
+
+// Re-export recipe functions
+export {
+  listRecipes,
+  findRecipeByName,
+  compressRecipe,
+  uploadRecipe,
+  createAppService,
+  deleteAppService,
+} from "./recipes";

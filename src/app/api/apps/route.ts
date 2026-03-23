@@ -6,9 +6,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { GPU_APPS } from "@/lib/gpu-apps";
 import { prisma } from "@/lib/prisma";
 import { verifyCustomerToken } from "@/lib/auth";
+import { getStripe } from "@/lib/stripe";
+import { getAppsScenarioId } from "@/lib/scenarios";
+import { getScenarioCompatibleServices } from "@/lib/hostedai";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -52,9 +54,57 @@ export async function GET(request: NextRequest) {
     }));
   }
 
-  // Map apps with installation status
-  const apps = GPU_APPS.map(app => {
+  // Fetch apps from the database instead of the hardcoded array
+  const dbApps = await prisma.gpuApp.findMany({
+    where: { active: true },
+    orderBy: { displayOrder: "asc" },
+    include: {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          pricePerHourCents: true,
+          pricePerMonthCents: true,
+          billingType: true,
+        },
+      },
+    },
+  });
+
+  // Check which app services are deployable via HAI scenario compatibility
+  let deployableServiceIds = new Set<string>();
+  try {
+    const stripe = getStripe();
+    const customer = await stripe.customers.retrieve(payload.customerId);
+    if (customer && !customer.deleted) {
+      const teamId = (customer as { metadata?: Record<string, string> }).metadata?.hostedai_team_id;
+      if (teamId) {
+        const appsScenarioId = await getAppsScenarioId();
+        const compatible = await getScenarioCompatibleServices(appsScenarioId, teamId);
+        const services = Array.isArray(compatible) ? compatible : compatible?.services;
+        if (Array.isArray(services)) {
+          for (const svc of services) {
+            deployableServiceIds.add(svc.id);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // If scenario check fails, fall back to deployable boolean
+    console.error("[Apps] Scenario compatibility check failed, using fallback:", err);
+  }
+
+  // Map DB records with installation status
+  const apps = dbApps.map(app => {
     const installed = installedApps.find(i => i.appSlug === app.slug);
+
+    let parsedTags: string[] = [];
+    try {
+      parsedTags = JSON.parse(app.tags);
+    } catch {
+      parsedTags = [];
+    }
+
     return {
       slug: app.slug,
       name: app.name,
@@ -71,8 +121,22 @@ export async function GET(request: NextRequest) {
       icon: app.icon,
       badgeText: app.badgeText,
       displayOrder: app.displayOrder,
-      tags: app.tags,
+      tags: parsedTags,
       docsUrl: app.docsUrl,
+      // Deploy with Recipe capability
+      // canDeploy = HAI says this service is compatible for the team
+      // Falls back to app.deployable if scenario check failed
+      canDeploy: app.serviceId
+        ? (deployableServiceIds.size > 0
+            ? deployableServiceIds.has(app.serviceId)
+            : app.deployable)
+        : false,
+      deployable: app.deployable,
+      serviceId: app.serviceId,
+      productId: app.productId,
+      productName: app.product?.name ?? null,
+      pricePerHourCents: app.product?.pricePerHourCents ?? null,
+      billingType: app.product?.billingType ?? null,
       // Installation status
       installed: !!installed,
       installStatus: installed?.status || null,
@@ -82,9 +146,6 @@ export async function GET(request: NextRequest) {
       webUiUrl: installed?.webUiUrl || null,
     };
   });
-
-  // Sort by displayOrder
-  apps.sort((a, b) => a.displayOrder - b.displayOrder);
 
   return NextResponse.json({ apps });
 }

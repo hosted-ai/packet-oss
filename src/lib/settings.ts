@@ -192,9 +192,9 @@ export const SERVICE_GROUPS = {
   },
   hostedai: {
     label: "GPU Backend (hosted.ai)",
-    keys: ["HOSTEDAI_API_URL", "HOSTEDAI_API_KEY"],
+    keys: ["HOSTEDAI_API_URL", "HOSTEDAI_API_KEY", "HOSTEDAI_ADMIN_URL", "HOSTEDAI_ADMIN_USERNAME", "HOSTEDAI_ADMIN_PASSWORD"],
     required: ["HOSTEDAI_API_URL", "HOSTEDAI_API_KEY"],
-    sensitive: ["HOSTEDAI_API_KEY"],
+    sensitive: ["HOSTEDAI_API_KEY", "HOSTEDAI_ADMIN_PASSWORD"],
   },
   stripe: {
     label: "Stripe Billing",

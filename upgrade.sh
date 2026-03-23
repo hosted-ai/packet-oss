@@ -140,6 +140,9 @@ log "Pushing database schema..."
 sudo -u "$APP_USER" env DATABASE_URL="${DB_URL}" npx prisma db push --skip-generate
 success "Database schema applied"
 
+log "Seeding database..."
+sudo -u "$APP_USER" env DATABASE_URL="${DB_URL}" npx prisma db seed 2>/dev/null && success "Database seeded" || warn "Seed skipped (no seed script or already up to date)"
+
 # ── Step 6: Build ───────────────────────────────────────────────────────────
 
 log "Building application..."

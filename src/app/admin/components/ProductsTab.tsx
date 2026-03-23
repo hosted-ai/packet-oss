@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Plus, Pencil, Trash2, Check, X, GripVertical, Loader2, HardDrive, RefreshCw } from "lucide-react";
 import type { GpuProduct } from "../types";
 import { isPro } from "@/lib/edition";
+import { ServicePickerDialog } from "./ServicePickerDialog";
 import dynamic from "next/dynamic";
 
 // Token Factory pricing is a premium feature — excluded in OSS build
@@ -72,7 +73,9 @@ export function ProductsTab() {
     badgeText: "",
     vramGb: "",
     cudaCores: "",
+    serviceId: "" as string,
   });
+  const [servicePickerOpen, setServicePickerOpen] = useState(false);
 
   // Load products, pools, and storage pricing
   const loadData = async () => {
@@ -143,6 +146,7 @@ export function ProductsTab() {
       badgeText: "",
       vramGb: "",
       cudaCores: "",
+      serviceId: "",
     });
   };
 
@@ -162,6 +166,7 @@ export function ProductsTab() {
       badgeText: product.badgeText || "",
       vramGb: product.vramGb?.toString() || "",
       cudaCores: product.cudaCores?.toString() || "",
+      serviceId: product.serviceId || "",
     });
     setEditingId(product.id);
     setShowCreateModal(true);
@@ -205,6 +210,7 @@ export function ProductsTab() {
         badgeText: formData.badgeText || null,
         vramGb: formData.vramGb ? parseInt(formData.vramGb) : null,
         cudaCores: formData.cudaCores ? parseInt(formData.cudaCores) : null,
+        serviceId: formData.serviceId || null,
       };
 
       const res = await fetch("/api/admin/gpu-products", {
@@ -860,6 +866,41 @@ export function ProductsTab() {
                   )}
                 </div>
               </div>
+
+              {/* HAI Service (unified instance) */}
+              <div>
+                <label className="block text-sm font-medium text-[#0b0f1c] mb-2">
+                  HAI Service (optional)
+                </label>
+                <p className="text-xs text-[#5b6476] mb-3">
+                  Link to a HAI 2.2 service for unified instance creation. Products with a service use the new deployment path.
+                </p>
+                <div className="flex items-center gap-2">
+                  {formData.serviceId ? (
+                    <span className="text-xs font-mono bg-zinc-50 px-2 py-1 rounded border border-zinc-200 truncate max-w-[200px]" title={formData.serviceId}>
+                      {formData.serviceId.slice(0, 20)}...
+                    </span>
+                  ) : (
+                    <span className="text-xs text-zinc-400">No service linked</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setServicePickerOpen(true)}
+                    className="px-3 py-1.5 text-xs bg-teal-50 text-teal-700 rounded-lg hover:bg-teal-100 transition-colors"
+                  >
+                    {formData.serviceId ? "Change" : "Select Service"}
+                  </button>
+                  {formData.serviceId && (
+                    <button
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, serviceId: "" }))}
+                      className="px-2 py-1.5 text-xs text-zinc-400 hover:text-zinc-600"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Footer */}
@@ -888,6 +929,16 @@ export function ProductsTab() {
           </div>
         </div>
       )}
+
+      <ServicePickerDialog
+        open={servicePickerOpen}
+        onClose={() => setServicePickerOpen(false)}
+        onSelect={(id) => {
+          setFormData(prev => ({ ...prev, serviceId: id }));
+          setServicePickerOpen(false);
+        }}
+        currentServiceId={formData.serviceId || undefined}
+      />
     </div>
   );
 }

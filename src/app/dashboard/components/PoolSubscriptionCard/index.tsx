@@ -142,19 +142,19 @@ export function PoolSubscriptionCard({
     }
   }, [hfDeployment, subscription.id, token, pollingHfStatus, shouldPoll]);
 
-  // Fetch connection info
+  // Fetch connection info (all instances are unified in HAI 2.2)
   useEffect(() => {
     async function fetchConnectionInfo() {
-      if (subscription.status !== "subscribed" && subscription.status !== "active") return;
+      const s = subscription.status;
+      if (s !== "subscribed" && s !== "active" && s !== "running") return;
       setLoadingConnection(true);
       try {
-        const response = await fetch(`/api/instances/connection-info?subscription_id=${subscription.id}`, {
+        const response = await fetch(`/api/instances/connection-info?instance_id=${subscription.id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (response.ok) {
           const data = await response.json();
-          const info = data.connectionInfo?.find((c: ConnectionInfo) => c.id === Number(subscription.id));
-          setConnectionInfo(info || null);
+          setConnectionInfo(data.connectionInfo?.[0] || null);
         }
       } catch (error) {
         console.error("Failed to fetch connection info:", error);
@@ -168,7 +168,7 @@ export function PoolSubscriptionCard({
   // Fetch exposed services when card is expanded
   useEffect(() => {
     async function fetchExposedServices() {
-      if (!expanded || (subscription.status !== "subscribed" && subscription.status !== "active")) return;
+      if (!expanded || (subscription.status !== "subscribed" && subscription.status !== "active" && subscription.status !== "running")) return;
       setLoadingServices(true);
       try {
         const response = await fetch(`/api/services?instanceId=${subscription.id}`, {
@@ -388,7 +388,7 @@ export function PoolSubscriptionCard({
   };
 
   // Computed values
-  const isActive = subscription.status === "subscribed" || subscription.status === "active";
+  const isActive = subscription.status === "subscribed" || subscription.status === "active" || subscription.status === "running";
   const isPending = subscription.status === "subscribing" || subscription.status === "un_subscribing";
   // Terminating state - either from local loading state OR from API status
   const isTerminating = loading === "unsubscribe" || subscription.status === "un_subscribing";

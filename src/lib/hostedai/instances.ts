@@ -87,6 +87,58 @@ export async function getInstance(instanceId: string): Promise<Instance> {
   return hostedaiRequest<Instance>("GET", `/instance/${instanceId}`);
 }
 
+// HAI 2.2 unified instance shape (from GET /instances/unified)
+export interface UnifiedInstance {
+  id: string;
+  name: string;
+  created_at: string;
+  status: string;
+  nature: string;
+  ip: string[];
+  service?: { id: string; name: string; type: string };
+  team?: { id: string; name: string };
+  region?: {
+    id: number;
+    region_name: string;
+    city?: string;
+    country?: string;
+    country_code?: string;
+  };
+  workspace?: { id: string; name: string };
+  pod_info?: {
+    model?: string;
+    vendor?: string;
+    pool_name?: string;
+    pool_display_mode?: string;
+    provisioned_service_name?: string;
+    exposed_count?: number;
+  };
+}
+
+// Get unified instances for a team (HAI 2.2)
+export async function getUnifiedInstances(
+  teamId: string,
+  page = 0,
+  perPage = 100
+): Promise<{ items: UnifiedInstance[]; total_items: number }> {
+  return hostedaiRequest<{ items: UnifiedInstance[]; total_items: number }>(
+    "GET",
+    `/instances/unified?page=${page}&per_page=${perPage}&team_id=${teamId}`,
+    undefined,
+    60000
+  );
+}
+
+// Get workspaces for a team (every team has at least one default workspace)
+export async function getTeamWorkspaces(
+  teamId: string
+): Promise<Array<{ id: string; name: string }>> {
+  const res = await hostedaiRequest<{
+    workspaces: Array<{ id: string; name: string }>;
+  }>("GET", `/workspace?page=0&itemsPerPage=10&teamId=${teamId}`);
+  return res.workspaces || [];
+}
+
 // Create a new instance
 export async function createInstance(
   params: CreateInstanceParams
@@ -199,4 +251,141 @@ export async function addDisksToInstance(
   await hostedaiRequest("POST", `/instance/${instanceId}/add-disks`, {
     disks,
   });
+}
+
+// ============================================
+// Scenario Management
+// ============================================
+
+// Create a scenario in HAI
+export async function createScenario(opts: {
+  name: string;
+  description: string;
+}): Promise<{ id: string }> {
+  return hostedaiRequest<{ id: string }>("POST", "/scenario", opts as unknown as Record<string, unknown>);
+}
+
+// Assign a service to a scenario
+export async function assignServiceToScenario(
+  serviceId: string,
+  scenarioId: string
+): Promise<void> {
+  await hostedaiRequest("POST", "/scenario/assign-service", {
+    service_id: serviceId,
+    scenario_id: scenarioId,
+  });
+}
+
+// Unassign a service from a scenario
+export async function unassignServiceFromScenario(
+  serviceId: string,
+  scenarioId: string
+): Promise<void> {
+  await hostedaiRequest("POST", "/scenario/unassign-service", {
+    service_id: serviceId,
+    scenario_id: scenarioId,
+  });
+}
+
+export type CompatibleService = {
+  id: string;
+  name: string;
+  description: string;
+  service_type: string;
+  regions: Array<{ id: number; name: string }>;
+  tags?: string[];
+};
+
+// Get compatible services under a scenario for a team
+// HAI may return { services: [...] } or a bare array depending on version
+export async function getScenarioCompatibleServices(
+  scenarioId: string,
+  teamId: string,
+  limit = 50,
+  offset = 0
+): Promise<
+  | { services: CompatibleService[]; has_more_batches: boolean; next_offset: number }
+  | CompatibleService[]
+> {
+  return hostedaiRequest(
+    "GET",
+    `/service/i/scenario-compatible-services?scenario_id=${scenarioId}&team_id=${teamId}&limit=${limit}&offset=${offset}`
+  );
+}
+
+// ============================================
+// Service Provisioning APIs
+// ============================================
+
+// Get compatible regions for a service
+export async function getServiceCompatibleRegions(
+  serviceId: string,
+  teamId: string
+): Promise<Array<{ id: number; region_name: string; name?: string; country?: string; city?: string }>> {
+  return hostedaiRequest(
+    "GET",
+    `/service/i/compatible-regions?service_id=${serviceId}&team_id=${teamId}`
+  );
+}
+
+// Get compatible GPU pools for a service in a region
+export async function getServiceCompatibleGPUPools(
+  serviceId: string,
+  teamId: string,
+  regionId: number
+): Promise<Array<{
+  id: number;
+  name: string;
+  gpu_model?: string;
+  available_vgpus?: number;
+  total_vgpus?: number;
+}>> {
+  return hostedaiRequest(
+    "GET",
+    `/service/i/compatible-gpu-pools?service_id=${serviceId}&team_id=${teamId}&region_id=${regionId}`
+  );
+}
+
+// Get provisioning info for a service (returns locked defaults)
+export async function getServiceProvisioningInfo(
+  serviceId: string,
+  teamId: string,
+  regionId: number
+): Promise<Record<string, unknown>> {
+  return hostedaiRequest(
+    "GET",
+    `/service/i/provisioning-info?service_id=${serviceId}&team_id=${teamId}&region_id=${regionId}`
+  );
+}
+
+// Update a HAI service (read-modify-write since PUT requires full body)
+export async function updateHAIService(
+  serviceId: string,
+  opts: Record<string, unknown>
+): Promise<void> {
+  // GET current service to get the full object
+  const current = await hostedaiRequest<Record<string, unknown>>(
+    "GET",
+    `/service/${serviceId}`
+  );
+
+  // Deep-merge opts into current — supports nested objects like gpu_config
+  const merged = { ...current };
+  for (const [key, value] of Object.entries(opts)) {
+    if (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      merged[key] &&
+      typeof merged[key] === "object" &&
+      !Array.isArray(merged[key])
+    ) {
+      // Merge nested object (e.g., gpu_config)
+      merged[key] = { ...(merged[key] as Record<string, unknown>), ...(value as Record<string, unknown>) };
+    } else {
+      merged[key] = value;
+    }
+  }
+
+  await hostedaiRequest("PUT", `/service/${serviceId}`, merged);
 }

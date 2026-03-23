@@ -170,6 +170,7 @@ export interface Instance {
 export interface CreateInstanceParams {
   name: string;
   service_id: string;
+  region_id?: number;
   instance_type_id: string;
   image_hash_id: string;
   storage_block_id: string;
@@ -177,6 +178,7 @@ export interface CreateInstanceParams {
   workspace_id?: string;
   network_assignment?: string;
   additional_disks?: Array<{ storage_block_id: string; disk_position: number }>;
+  pod_opts?: { pool_id?: number; vgpus?: number; shared_volumes?: number[] };
 }
 
 export interface InstanceCredentials {

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 
 interface App {
   slug: string;
+  id: string;
   name: string;
   description: string;
   longDescription?: string;
@@ -17,6 +18,14 @@ interface App {
   badgeText?: string;
   tags: string[];
   docsUrl?: string;
+  // Deploy with Recipe fields
+  canDeploy?: boolean;
+  deployable?: boolean;
+  serviceId?: string | null;
+  productId?: string | null;
+  productName?: string | null;
+  pricePerHourCents?: number | null;
+  billingType?: string | null;
 }
 
 interface InstalledApp {
@@ -55,6 +64,8 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedSubscription, setSelectedSubscription] = useState<string>("all");
+  const [confirmDeploy, setConfirmDeploy] = useState<string | null>(null); // app ID being confirmed
+  const [deploying, setDeploying] = useState(false);
 
   // Filter active subscriptions with running pods
   const activeSubscriptions = subscriptions.filter(
@@ -134,6 +145,40 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
       }));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove app");
+    }
+  };
+
+  const handleDeploy = async (appId: string) => {
+    setDeploying(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/apps/deploy", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ appId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.needsFunding) {
+          throw new Error(`Insufficient balance. Need $${(data.requiredCents / 100).toFixed(2)}, have $${(data.availableCents / 100).toFixed(2)}. Please fund your wallet.`);
+        }
+        throw new Error(data.error || "Failed to deploy app");
+      }
+
+      // Success — redirect to dashboard to see the new pod
+      setConfirmDeploy(null);
+      onRefresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to deploy app");
+    } finally {
+      setDeploying(false);
+      setConfirmDeploy(null);
     }
   };
 
@@ -223,7 +268,9 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
     );
   }
 
-  if (activeSubscriptions.length === 0) {
+  const hasDeployableApps = apps.some(a => a.canDeploy && a.serviceId && a.productId);
+
+  if (activeSubscriptions.length === 0 && !hasDeployableApps) {
     return (
       <div className="text-center py-16">
         <div className="text-4xl mb-4">📦</div>
@@ -408,7 +455,66 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
                 )}
               </div>
 
-              {/* Install buttons for each GPU */}
+              {/* Deploy with Recipe button (primary action) */}
+              {app.canDeploy && app.serviceId && app.productId && (
+                <div className="mb-3">
+                  {confirmDeploy === app.id ? (
+                    <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl">
+                      <p className="text-sm font-medium text-teal-900 mb-1">
+                        Deploy {app.name}?
+                      </p>
+                      <p className="text-xs text-teal-700 mb-3">
+                        {app.productName} &mdash; ${((app.pricePerHourCents || 0) / 100).toFixed(2)}/hr from wallet
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleDeploy(app.id)}
+                          disabled={deploying}
+                          className="flex-1 py-1.5 px-3 text-sm font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                        >
+                          {deploying ? (
+                            <span className="flex items-center justify-center gap-2">
+                              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                              Deploying...
+                            </span>
+                          ) : "Confirm Deploy"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeploy(null)}
+                          disabled={deploying}
+                          className="py-1.5 px-3 text-sm rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => { setConfirmDeploy(app.id); setError(null); }}
+                      className="w-full py-2.5 px-3 text-sm font-medium rounded-xl bg-teal-600 text-white hover:bg-teal-700 transition-colors"
+                    >
+                      <span className="flex items-center justify-center gap-2">
+                        <span>Deploy on New GPU</span>
+                      </span>
+                      <span className="block text-xs font-normal text-teal-200 mt-0.5">
+                        {app.productName} &mdash; ${((app.pricePerHourCents || 0) / 100).toFixed(2)}/hr
+                      </span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Install buttons for each GPU (existing flow) */}
+              {activeSubscriptions.length > 0 && (
+                <div className="space-y-2">
+                  {app.deployable && activeSubscriptions.length > 0 && (
+                    <p className="text-xs text-zinc-400 text-center">or install on existing GPU</p>
+                  )}
+              </div>
+              )}
               <div className="space-y-2">
                 {targetSubs.map(sub => {
                   const installed = installedBySubscription[String(sub.id)]?.find(a => a.appSlug === app.slug);
