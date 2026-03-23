@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
       const teamId = (customer as { metadata?: Record<string, string> }).metadata?.hostedai_team_id;
       if (teamId) {
         const appsScenarioId = await getAppsScenarioId();
-        const compatible = await getScenarioCompatibleServices(appsScenarioId, teamId);
+        const compatible = await getScenarioCompatibleServices(appsScenarioId, teamId, 100);
         const services = Array.isArray(compatible) ? compatible : compatible?.services;
         if (Array.isArray(services)) {
           for (const svc of services) {
@@ -106,6 +106,7 @@ export async function GET(request: NextRequest) {
     }
 
     return {
+      id: app.id,
       slug: app.slug,
       name: app.name,
       description: app.description,

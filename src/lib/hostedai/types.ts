@@ -172,8 +172,8 @@ export interface CreateInstanceParams {
   service_id: string;
   region_id?: number;
   instance_type_id: string;
-  image_hash_id: string;
-  storage_block_id: string;
+  image_hash: string;
+  root_storage_type_id: string;
   team_id: string;
   workspace_id?: string;
   network_assignment?: string;

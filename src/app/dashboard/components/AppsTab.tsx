@@ -28,6 +28,16 @@ interface App {
   billingType?: string | null;
 }
 
+interface AvailableProduct {
+  id: string;
+  name: string;
+  pricePerHourCents: number;
+  vramGb: number | null;
+  cudaCores: number | null;
+  available: boolean;
+  regions: Array<{ id: number; region_name: string }>;
+}
+
 interface InstalledApp {
   id: string;
   appSlug: string;
@@ -64,8 +74,15 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedSubscription, setSelectedSubscription] = useState<string>("all");
-  const [confirmDeploy, setConfirmDeploy] = useState<string | null>(null); // app ID being confirmed
+  // Deploy modal state
+  const [deployApp, setDeployApp] = useState<App | null>(null);
+  const [availableProducts, setAvailableProducts] = useState<AvailableProduct[]>([]);
+  const [walletBalanceCents, setWalletBalanceCents] = useState<number>(0);
+  const [loadingProducts, setLoadingProducts] = useState(false);
+  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [selectedRegionId, setSelectedRegionId] = useState<number | null>(null);
   const [deploying, setDeploying] = useState(false);
+  const [deployError, setDeployError] = useState<string | null>(null);
 
   // Filter active subscriptions with running pods
   const activeSubscriptions = subscriptions.filter(
@@ -148,9 +165,62 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
     }
   };
 
-  const handleDeploy = async (appId: string) => {
+  const openDeployModal = async (app: App) => {
+    setDeployApp(app);
+    setSelectedProductId(null);
+    setSelectedRegionId(null);
+    setDeployError(null);
+    setDeploying(false);
+    setAvailableProducts([]);
+    setLoadingProducts(true);
+
+    try {
+      const res = await fetch("/api/apps/deploy-options", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const products: AvailableProduct[] = data.products || [];
+        setAvailableProducts(products);
+        setWalletBalanceCents(data.walletBalanceCents || 0);
+        // Auto-select first available product
+        const firstAvailable = products.find(p => p.available);
+        if (firstAvailable) {
+          setSelectedProductId(firstAvailable.id);
+          if (firstAvailable.regions.length > 0) {
+            setSelectedRegionId(firstAvailable.regions[0].id);
+          }
+        }
+      } else {
+        setDeployError("Failed to load GPU options");
+      }
+    } catch {
+      setDeployError("Failed to load GPU options");
+    } finally {
+      setLoadingProducts(false);
+    }
+  };
+
+  const closeDeployModal = () => {
+    setDeployApp(null);
+    setDeployError(null);
+  };
+
+  // When product selection changes, auto-select first region
+  const selectProduct = (productId: string) => {
+    setSelectedProductId(productId);
+    const product = availableProducts.find(p => p.id === productId);
+    if (product && product.regions.length > 0) {
+      setSelectedRegionId(product.regions[0].id);
+    } else {
+      setSelectedRegionId(null);
+    }
+  };
+
+  const handleDeploy = async () => {
+    if (!deployApp || !selectedProductId) return;
     setDeploying(true);
-    setError(null);
+    setDeployError(null);
 
     try {
       const response = await fetch("/api/apps/deploy", {
@@ -159,7 +229,11 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
           Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ appId }),
+        body: JSON.stringify({
+          appId: deployApp.id,
+          product_id: selectedProductId,
+          region_id: selectedRegionId,
+        }),
       });
 
       const data = await response.json();
@@ -171,14 +245,13 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
         throw new Error(data.error || "Failed to deploy app");
       }
 
-      // Success — redirect to dashboard to see the new pod
-      setConfirmDeploy(null);
+      // Success — close modal and refresh to see the new pod
+      closeDeployModal();
       onRefresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to deploy app");
+      setDeployError(err instanceof Error ? err.message : "Failed to deploy app");
     } finally {
       setDeploying(false);
-      setConfirmDeploy(null);
     }
   };
 
@@ -268,19 +341,8 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
     );
   }
 
-  const hasDeployableApps = apps.some(a => a.canDeploy && a.serviceId && a.productId);
-
-  if (activeSubscriptions.length === 0 && !hasDeployableApps) {
-    return (
-      <div className="text-center py-16">
-        <div className="text-4xl mb-4">📦</div>
-        <h3 className="text-lg font-semibold text-zinc-800 mb-2">No Active GPUs</h3>
-        <p className="text-zinc-500 max-w-md mx-auto">
-          Launch a GPU to start installing one-click apps like Jupyter, Ollama, ComfyUI, and more.
-        </p>
-      </div>
-    );
-  }
+  // Apps tab always shows all apps. Deploy button visibility is per-app based on scenario check.
+  // Install buttons only shown if there are active GPUs.
 
   return (
     <div>
@@ -455,55 +517,15 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
                 )}
               </div>
 
-              {/* Deploy with Recipe button (primary action) */}
-              {app.canDeploy && app.serviceId && app.productId && (
+              {/* Deploy with Recipe button (opens modal) */}
+              {app.canDeploy && app.serviceId && (
                 <div className="mb-3">
-                  {confirmDeploy === app.id ? (
-                    <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl">
-                      <p className="text-sm font-medium text-teal-900 mb-1">
-                        Deploy {app.name}?
-                      </p>
-                      <p className="text-xs text-teal-700 mb-3">
-                        {app.productName} &mdash; ${((app.pricePerHourCents || 0) / 100).toFixed(2)}/hr from wallet
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => handleDeploy(app.id)}
-                          disabled={deploying}
-                          className="flex-1 py-1.5 px-3 text-sm font-medium rounded-lg bg-teal-600 text-white hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-wait"
-                        >
-                          {deploying ? (
-                            <span className="flex items-center justify-center gap-2">
-                              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                              </svg>
-                              Deploying...
-                            </span>
-                          ) : "Confirm Deploy"}
-                        </button>
-                        <button
-                          onClick={() => setConfirmDeploy(null)}
-                          disabled={deploying}
-                          className="py-1.5 px-3 text-sm rounded-lg text-zinc-600 hover:bg-zinc-100 transition-colors"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => { setConfirmDeploy(app.id); setError(null); }}
-                      className="w-full py-2.5 px-3 text-sm font-medium rounded-xl bg-teal-600 text-white hover:bg-teal-700 transition-colors"
-                    >
-                      <span className="flex items-center justify-center gap-2">
-                        <span>Deploy on New GPU</span>
-                      </span>
-                      <span className="block text-xs font-normal text-teal-200 mt-0.5">
-                        {app.productName} &mdash; ${((app.pricePerHourCents || 0) / 100).toFixed(2)}/hr
-                      </span>
-                    </button>
-                  )}
+                  <button
+                    onClick={() => openDeployModal(app)}
+                    className="w-full py-2.5 px-3 text-sm font-medium rounded-xl bg-teal-600 text-white hover:bg-teal-700 transition-colors"
+                  >
+                    Deploy on New GPU
+                  </button>
                 </div>
               )}
 
@@ -583,6 +605,142 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
       {filteredApps.length === 0 && (
         <div className="text-center py-12 text-zinc-500">
           No apps found in this category
+        </div>
+      )}
+
+      {/* Deploy Modal — Product Picker */}
+      {deployApp && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">{deployApp.icon}</span>
+                <h3 className="text-lg font-semibold">Deploy {deployApp.name}</h3>
+              </div>
+              <button onClick={closeDeployModal} className="text-zinc-400 hover:text-zinc-600 text-xl leading-none">&times;</button>
+            </div>
+
+            {loadingProducts ? (
+              <div className="flex items-center justify-center py-8 text-zinc-500 gap-2">
+                <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                <span>Loading GPU options...</span>
+              </div>
+            ) : availableProducts.length === 0 ? (
+              <div className="text-center py-8 text-zinc-500">
+                <p className="mb-2">No GPUs available right now.</p>
+                <p className="text-xs">Check back later or contact support.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-sm text-zinc-500 mb-4">Select a GPU to deploy {deployApp.name} on:</p>
+
+                {/* Product cards */}
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  {availableProducts.map(product => (
+                    <button
+                      key={product.id}
+                      onClick={() => product.available ? selectProduct(product.id) : undefined}
+                      disabled={!product.available}
+                      className={`text-left p-3 rounded-xl border-2 transition-colors ${
+                        selectedProductId === product.id
+                          ? "border-teal-500 bg-teal-50"
+                          : product.available
+                            ? "border-zinc-200 hover:border-teal-300"
+                            : "border-zinc-100 opacity-50 cursor-not-allowed"
+                      }`}
+                    >
+                      <div className="font-semibold text-sm text-zinc-900">{product.name}</div>
+                      {product.vramGb && (
+                        <div className="text-xs text-zinc-500 mt-0.5">{product.vramGb} GB VRAM</div>
+                      )}
+                      <div className="text-sm font-medium text-zinc-700 mt-1">
+                        ${(product.pricePerHourCents / 100).toFixed(2)}/hr
+                      </div>
+                      {product.available ? (
+                        <div className="flex items-center gap-1 mt-1">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                          <span className="text-xs text-emerald-600">Available</span>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-zinc-400 mt-1">No GPUs in stock</div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Region picker */}
+                {selectedProductId && (() => {
+                  const product = availableProducts.find(p => p.id === selectedProductId);
+                  if (!product || product.regions.length === 0) return null;
+                  return (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-zinc-700 mb-1">Region</label>
+                      <select
+                        value={selectedRegionId || ""}
+                        onChange={e => setSelectedRegionId(Number(e.target.value))}
+                        className="w-full px-3 py-2 text-sm border border-zinc-300 rounded-lg"
+                      >
+                        {product.regions.map(r => (
+                          <option key={r.id} value={r.id}>{r.region_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  );
+                })()}
+
+                {/* Pricing summary */}
+                {selectedProductId && (() => {
+                  const product = availableProducts.find(p => p.id === selectedProductId);
+                  if (!product) return null;
+                  const prepaidCents = Math.round((30 / 60) * product.pricePerHourCents);
+                  return (
+                    <div className="text-xs text-zinc-500 mb-4 p-3 bg-zinc-50 rounded-lg space-y-1">
+                      <div>Wallet: <span className="font-medium text-zinc-700">${(walletBalanceCents / 100).toFixed(2)}</span></div>
+                      <div>First 30 min prepaid: <span className="font-medium text-zinc-700">${(prepaidCents / 100).toFixed(2)}</span></div>
+                      <div>Then billed hourly at ${(product.pricePerHourCents / 100).toFixed(2)}/hr</div>
+                    </div>
+                  );
+                })()}
+
+                {/* Error */}
+                {deployError && (
+                  <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-sm text-rose-700">
+                    {deployError}
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={closeDeployModal}
+                    className="flex-1 px-3 py-2 text-sm text-zinc-600 border border-zinc-300 rounded-lg hover:bg-zinc-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleDeploy}
+                    disabled={!selectedProductId || !selectedRegionId || deploying}
+                    className="flex-1 px-3 py-2 text-sm text-white bg-teal-600 rounded-lg hover:bg-teal-700 disabled:opacity-50"
+                  >
+                    {deploying ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                        Deploying...
+                      </span>
+                    ) : selectedProductId ? (
+                      `Deploy — $${(availableProducts.find(p => p.id === selectedProductId)?.pricePerHourCents || 0) / 100}/hr`
+                    ) : "Select a GPU"}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>

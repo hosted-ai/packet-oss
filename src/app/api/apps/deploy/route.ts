@@ -27,25 +27,31 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { appId, region_id } = body;
+    const { appId, product_id, region_id } = body;
 
     if (!appId) {
       return NextResponse.json({ error: "appId is required" }, { status: 400 });
     }
 
-    // Look up the app with its linked product
-    const app = await prisma.gpuApp.findUnique({
-      where: { id: appId },
-      include: { product: true },
-    });
+    // Look up the app
+    const app = await prisma.gpuApp.findUnique({ where: { id: appId } });
 
     if (!app) {
       return NextResponse.json({ error: "App not found" }, { status: 404 });
     }
 
-    if (!app.deployable || !app.serviceId || !app.productId || !app.product) {
+    if (!app.deployable || !app.serviceId) {
       return NextResponse.json(
         { error: "This app is not available for deployment. An admin needs to enable it first." },
+        { status: 400 }
+      );
+    }
+
+    // Resolve the GPU product — either from request (product picker) or app's default
+    const resolvedProductId = product_id || app.productId;
+    if (!resolvedProductId) {
+      return NextResponse.json(
+        { error: "No GPU product selected. Choose a GPU to deploy on." },
         { status: 400 }
       );
     }
@@ -54,9 +60,10 @@ export async function POST(request: NextRequest) {
     const randomSuffix = randomBytes(2).toString("hex");
     const podName = `${app.slug}-${randomSuffix}`;
 
-    // Delegate to the unified instance creation endpoint
-    // The instances route handles: wallet check, deploy lock, provisioning-info,
-    // pool selection, create-instance, metadata, metrics, email — everything.
+    // Delegate to the unified instance creation endpoint.
+    // - product_id: drives provisioning-info (instance type, image, storage, pools)
+    // - app_service_id: the app's thin service (carries the recipe + ports)
+    // The instances route uses product's service for infra, app's service for create-instance.
     const instancesUrl = new URL("/api/instances", request.url);
     const instancesResp = await fetch(instancesUrl.toString(), {
       method: "POST",
@@ -66,13 +73,10 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({
         name: podName,
-        product_id: app.product.id,
+        product_id: resolvedProductId,
         region_id: region_id || undefined,
+        app_service_id: app.serviceId, // App's service carries the recipe
         billingType: "hourly",
-        // The product's serviceId drives provisioning-info and pool selection.
-        // The app's serviceId carries the recipe — but for now, the instances
-        // route uses the product's service. Recipe is applied via the app's
-        // HAI service which is in the packet-apps scenario.
       }),
     });
 

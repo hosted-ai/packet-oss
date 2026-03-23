@@ -337,9 +337,13 @@ async function handleUnifiedInstanceCreate({
     startup_script_preset_id,
     billingType: requestedBillingType,
     stripeSubscriptionId,
+    app_service_id, // Optional: app's service (carries recipe). If set, used for create-instance instead of product's service.
   } = body as Record<string, string | number | boolean | undefined>;
 
+  // Product's service — used for provisioning-info, compatible-pools, region checks
   const serviceId = gpuProduct.serviceId!;
+  // Instance creation service — either the app's service (recipe) or the product's service (bare GPU)
+  const createServiceId = (app_service_id as string) || serviceId;
   const gpuCount = 1; // Unified instances are single-GPU
   const resolvedRegionId = typeof region_id === "number" ? region_id : Number(region_id) || 0;
   if (!resolvedRegionId) {
@@ -607,12 +611,13 @@ async function handleUnifiedInstanceCreate({
     // === DEPLOY via create-instance ===
     console.log("[HAI 2.2] Creating instance:", {
       name: name as string,
-      service_id: serviceId,
+      service_id: createServiceId,
+      infra_service_id: serviceId !== createServiceId ? serviceId : undefined,
       region_id: resolvedRegionId,
       region_id_raw: region_id,
       instance_type_id: selectedInstanceType,
-      image_hash_id: selectedImage,
-      storage_block_id: selectedStorage,
+      image_hash: selectedImage,
+      root_storage_type_id: selectedStorage,
       team_id: teamId,
       workspace_id: workspaceId,
       additional_disks: additionalDisks.length > 0 ? additionalDisks : undefined,
@@ -623,11 +628,11 @@ async function handleUnifiedInstanceCreate({
     try {
       instance = await createInstance({
         name: name as string,
-        service_id: serviceId,
+        service_id: createServiceId,
         region_id: resolvedRegionId,
         instance_type_id: selectedInstanceType,
-        image_hash_id: selectedImage,
-        storage_block_id: selectedStorage,
+        image_hash: selectedImage,
+        root_storage_type_id: selectedStorage,
         team_id: teamId,
         workspace_id: workspaceId,
         additional_disks: additionalDisks.length > 0 ? additionalDisks : undefined,
