@@ -153,6 +153,7 @@ export async function getAvailablePools(
     return pools.map((p: {
       id: number | string;
       pool_name?: string;
+      pool_label?: string;
       name?: string;
       gpu_model_type?: string;
       gpu_model?: string;
@@ -162,7 +163,7 @@ export async function getAvailablePools(
       price_per_hour?: number;
     }) => ({
       id: String(p.id),
-      name: p.pool_name || p.name || "",
+      name: p.pool_label || p.pool_name || p.name || "",
       gpu_model: p.gpu_model_type || p.gpu_model,
       available_gpus: p.available_vgpus ?? p.available_gpus,
       price_per_hour: p.pricing_hourly ? parseFloat(p.pricing_hourly) : p.price_per_hour,
@@ -201,10 +202,14 @@ export async function getPoolSubscriptions(
 
   // CRITICAL: Filter to only this team's subscriptions - API may return items from other teams!
   // Same pattern as getSharedVolumes() - the hosted.ai API doesn't reliably filter by team_id
+  // Also resolve pool_label → pool_name so downstream code can just use pool_name
   const items = allItems.filter(item => {
     if (!item.team_id) return true; // If no team_id on item, can't filter (keep it)
     return String(item.team_id) === String(teamId);
-  });
+  }).map(item => ({
+    ...item,
+    pool_name: item.pool_label || item.pool_name,
+  }));
 
   if (allItems.length !== items.length) {
     console.warn(`[getPoolSubscriptions] SECURITY: Filtered ${allItems.length - items.length} subscriptions from other teams for team ${teamId}`);
@@ -466,8 +471,8 @@ export async function getAllPools(): Promise<GPUPoolExtended[]> {
   // Transform to expected format, keeping gpuaas_id and region_id
   return rawPools.map(pool => ({
     id: String(pool.pool_id),
-    name: pool.pool_name,
-    gpu_model: pool.pool_name, // Use pool name as GPU model for display
+    name: pool.pool_label || pool.pool_name,
+    gpu_model: pool.pool_label || pool.pool_name, // Use pool name as GPU model for display
     gpuaas_id: pool.gpuaas_id,
     region_id: pool.region_id,
   }));
@@ -495,7 +500,11 @@ export async function getConnectionInfo(
   const result = await hostedaiRequest<SubscriptionConnectionInfo[] | { items?: SubscriptionConnectionInfo[] }>("GET", endpoint);
 
   // Normalize: API might return array or { items: [...] } or null
-  const allItems = Array.isArray(result) ? result : (result?.items || []);
+  // Resolve pool_label → pool_name so downstream code can just use pool_name
+  const allItems = (Array.isArray(result) ? result : (result?.items || [])).map(item => ({
+    ...item,
+    pool_name: item.pool_label || item.pool_name,
+  }));
 
   // CRITICAL: If we fetched subscriptions for this team, only return connection info
   // for subscriptions that belong to this team (prevents cross-team data leakage)

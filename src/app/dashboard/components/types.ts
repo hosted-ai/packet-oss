@@ -105,6 +105,7 @@ export interface PoolSubscription {
   id: string;
   pool_id?: number;
   pool_name?: string;
+  pool_label?: string;
   status: string;
   region?: {
     region_name?: string;
@@ -251,6 +252,7 @@ export interface ChartDataPoint {
 export interface ConnectionInfo {
   id: number;
   pool_name: string;
+  pool_label?: string;
   pods: Array<{
     pod_name: string;
     pod_status: string;
@@ -279,6 +281,7 @@ export interface GPUMetric {
   id?: string;
   subscription_id?: number;
   pool_name?: string;
+  pool_label?: string;
   gpu_count?: number;
   hours_used?: number;
   cost?: number;

@@ -17,8 +17,8 @@ import type { GPUaaSPool, CreatePoolInput, AddGPUToPoolInput, PoolGPU } from "./
 function normalizePool(raw: any): GPUaaSPool {
   return {
     ...raw,
-    // API returns pool_name, we use name
-    name: raw.name || raw.pool_name || "",
+    // API returns pool_name (and optionally pool_label for marketplace pools), we use name
+    name: raw.pool_label || raw.name || raw.pool_name || "",
     // API returns sharing_ratio, we use overcommit_ratio
     overcommit_ratio: raw.overcommit_ratio ?? raw.sharing_ratio ?? 1,
     // API returns gpuaas_id for cluster, we use region_id
@@ -272,6 +272,7 @@ interface RawPoolGPU {
   gpuaas_node_id?: number;
   pool_id?: number;
   pool_name?: string;
+  pool_label?: string;
 }
 
 /**
@@ -309,7 +310,7 @@ export async function getAllPoolGPUs(clusterId: number): Promise<ClusterPoolGPU[
     memory_in_mb: gpu.memory_in_mb || 0,
     gpuaas_node_id: gpu.node_details?.id || gpu.gpuaas_node_id || 0,
     pool_id: gpu.pool_details?.id || gpu.pool_id || 0,
-    pool_name: gpu.pool_details?.name || gpu.pool_name,
+    pool_name: gpu.pool_details?.name || gpu.pool_label || gpu.pool_name,
     assignment_status: gpu.assignment_status?.toLowerCase() || "unknown",
   }));
 }
@@ -397,6 +398,7 @@ interface AdminPoolDetail {
   id: number;
   gpuaas_id: number;
   pool_name: string;
+  pool_label?: string; // Marketplace display label — prefer over pool_name when present
   sharing_ratio: number;
   time_quantum_in_sec: number;
   status: string;
@@ -443,7 +445,7 @@ export async function getPoolCapacityMap(
           const physicalGpuCount = Math.round(vgpuEntries / sharingRatio);
           capacityMap.set(pool.id, {
             poolId: pool.id,
-            poolName: pool.pool_name,
+            poolName: pool.pool_label || pool.pool_name,
             gpuaasId: pool.gpuaas_id,
             gpuCount: physicalGpuCount,
             sharingRatio,

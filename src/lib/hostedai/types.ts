@@ -60,6 +60,7 @@ export interface TeamBillingData {
 
 export interface GPUaaSSummaryItem {
   pool_name?: string;
+  pool_label?: string;
   gpu_card_name?: string;
   pool_hours?: number;
   total?: string | number;
@@ -228,6 +229,7 @@ export interface PoolSubscription {
   pool_id: string;
   team_id?: string;
   pool_name?: string;
+  pool_label?: string; // Marketplace display label — prefer over pool_name when present
   gpu_count?: number;
   status: string;
   region?: {
@@ -331,6 +333,7 @@ export interface SharedVolume {
 export interface RawGPUPool {
   pool_id: number;
   pool_name: string;
+  pool_label?: string; // Marketplace display label — use instead of pool_name when present
   gpuaas_id?: number;
   cluster_id?: number;
   city?: string;
@@ -360,6 +363,7 @@ export interface PodConnectionInfo {
 export interface SubscriptionConnectionInfo {
   id: number;
   pool_name: string;
+  pool_label?: string; // Marketplace display label — prefer over pool_name when present
   region_id: number;
   pods: PodConnectionInfo[];
 }
@@ -374,6 +378,7 @@ export interface GPUaaSMetric {
   id?: string;
   subscription_id?: number;
   pool_name?: string;
+  pool_label?: string;
   gpu_count?: number;
   hours_used?: number;
   cost?: number;

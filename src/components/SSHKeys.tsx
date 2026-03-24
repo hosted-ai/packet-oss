@@ -18,6 +18,7 @@ interface Pod {
 interface PoolSubscription {
   id: string;
   pool_name?: string;
+  pool_label?: string;
   status: string;
   pods?: Pod[];
 }
@@ -274,7 +275,7 @@ export default function SSHKeys({ token, subscriptions = [] }: SSHKeysProps) {
             <option value="">Choose a running GPU...</option>
             {runningSubscriptions.map((sub) => (
               <option key={sub.id} value={sub.id}>
-                {sub.pool_name || `GPU ${sub.id}`}
+                {sub.pool_label || sub.pool_name || `GPU ${sub.id}`}
               </option>
             ))}
           </select>

@@ -109,6 +109,7 @@ export interface UnifiedInstance {
     model?: string;
     vendor?: string;
     pool_name?: string;
+    pool_label?: string;
     pool_display_mode?: string;
     provisioned_service_name?: string;
     exposed_count?: number;

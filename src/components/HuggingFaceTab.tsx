@@ -275,11 +275,12 @@ export default function HuggingFaceTab({
             (sub: {
               id: string;
               pool_name?: string;
+              pool_label?: string;
               per_pod_info?: { vgpu_count?: number };
               status?: string;
             }) => ({
               id: sub.id,
-              pool_name: sub.pool_name || "Unknown Pool",
+              pool_name: sub.pool_label || sub.pool_name || "Unknown Pool",
               gpu_model: undefined,
               vgpus: sub.per_pod_info?.vgpu_count || 1,
               status: sub.status || "unknown",

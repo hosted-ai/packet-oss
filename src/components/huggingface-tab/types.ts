@@ -92,6 +92,7 @@ export interface LaunchOptions {
 export interface ExistingSubscription {
   id: string;
   pool_name: string;
+  pool_label?: string;
   gpu_model?: string;
   vgpus: number;
   status: string;

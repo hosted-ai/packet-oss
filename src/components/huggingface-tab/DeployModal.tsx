@@ -177,7 +177,7 @@ export function DeployModal({
               >
                 {existingSubscriptions.map((sub) => (
                   <option key={sub.id} value={sub.id}>
-                    {sub.pool_name}{" "}
+                    {sub.pool_label || sub.pool_name}{" "}
                     {sub.gpu_model ? `(${sub.gpu_model})` : ""} - {sub.vgpus}{" "}
                     GPU{sub.vgpus > 1 ? "s" : ""}
                   </option>
