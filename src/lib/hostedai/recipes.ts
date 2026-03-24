@@ -286,11 +286,51 @@ interface CreateAppServiceOpts {
 }
 
 /**
+ * Find an existing HAI service by name.
+ * Returns the service id and name if found, null otherwise.
+ */
+async function findServiceByName(name: string): Promise<{ id: string; name: string } | null> {
+  try {
+    // HAI filter format: field[operation_type]=value (e.g. name[eq_str]=packet-app-comfyui)
+    const result = await hostedaiRequest<
+      Array<{ id: string; name: string }> | { items?: Array<{ id: string; name: string }> }
+    >("GET", `/service?name[eqstr]=${encodeURIComponent(name)}&itemsPerPage=1&page=0`);
+
+    const items = Array.isArray(result) ? result : result?.items;
+    if (items?.length && items[0].name === name) {
+      return items[0];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Create a HAI service for an app with recipe, ports, and scenario.
+ * If a service with the same name already exists (orphaned from a previous
+ * setup), it is deleted first to avoid name conflicts.
  * Returns the created service.
  */
 export async function createAppService(opts: CreateAppServiceOpts): Promise<{ id: string; name: string }> {
   const serviceName = `packet-app-${opts.slug}`;
+
+  // Clean up orphaned service with the same name (e.g. from failed teardown)
+  const existing = await findServiceByName(serviceName);
+  if (existing) {
+    console.log(`[Recipes] Found orphaned service "${serviceName}" (${existing.id}), deleting before recreate...`);
+    try {
+      await hostedaiRequest("DELETE", `/service/${existing.id}`);
+      console.log(`[Recipes] Deleted orphaned service ${existing.id}`);
+    } catch (err) {
+      console.warn(`[Recipes] Failed to delete orphaned service ${existing.id}:`, err);
+      // If delete fails (e.g. has active instances), throw so admin sees the real error
+      throw new Error(
+        `Service "${serviceName}" already exists (${existing.id}) and could not be removed. ` +
+        `It may have active instances — remove them first, then retry.`
+      );
+    }
+  }
 
   const payload = {
     name: serviceName,
@@ -347,6 +387,45 @@ export async function createAppService(opts: CreateAppServiceOpts): Promise<{ id
   const result = await hostedaiRequest<{ id: string; name: string }>("POST", "/service", payload);
   console.log(`[Recipes] Service created: ${result.id} (${result.name})`);
   return result;
+}
+
+/**
+ * Add a service to the default service policy so all teams can deploy it.
+ * Calls POST /policy/service/add-object with the default service policy ID.
+ */
+export async function addServiceToDefaultPolicy(serviceId: string): Promise<void> {
+  const { getDefaultPolicies } = await import("./default-policies");
+  const policies = await getDefaultPolicies();
+  const servicePolicyId = policies.service;
+
+  console.log(`[Recipes] Adding service ${serviceId} to default service policy ${servicePolicyId}`);
+  await hostedaiRequest("POST", "/policy/service/add-object", {
+    policy_id: servicePolicyId,
+    object_id: serviceId,
+  });
+  console.log(`[Recipes] Service ${serviceId} added to default service policy`);
+}
+
+/**
+ * Remove a service from the default service policy.
+ * Called during teardown before deleting the service.
+ */
+export async function removeServiceFromDefaultPolicy(serviceId: string): Promise<void> {
+  const { getDefaultPolicies } = await import("./default-policies");
+  const policies = await getDefaultPolicies();
+  const servicePolicyId = policies.service;
+
+  console.log(`[Recipes] Removing service ${serviceId} from default service policy ${servicePolicyId}`);
+  try {
+    await hostedaiRequest("POST", "/policy/service/remove-object", {
+      policy_id: servicePolicyId,
+      object_id: serviceId,
+    });
+    console.log(`[Recipes] Service ${serviceId} removed from default service policy`);
+  } catch (err) {
+    // Non-fatal: service may not have been in the policy
+    console.warn(`[Recipes] Failed to remove service ${serviceId} from policy (may not exist):`, err);
+  }
 }
 
 /**

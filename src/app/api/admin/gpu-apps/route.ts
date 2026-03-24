@@ -244,7 +244,11 @@ export async function POST(request: NextRequest) {
           execTiming: execTiming as "on_every_boot" | "on_first_boot" | "manual",
         });
 
-        // Step 6: Link service to app
+        // Step 6: Add service to default service policy so teams can deploy it
+        const { addServiceToDefaultPolicy } = await import("@/lib/hostedai/recipes");
+        await addServiceToDefaultPolicy(service.id);
+
+        // Step 7: Link service to app
         await prisma.gpuApp.update({
           where: { id },
           data: {
@@ -256,16 +260,10 @@ export async function POST(request: NextRequest) {
 
         console.log(`[Setup] App "${app.name}" enabled by ${session.email}: service=${service.id}`);
 
-        // Build HAI policy page URL for admin reference
-        const { getSetting } = await import("@/lib/settings");
-        const adminUrl = await getSetting("HOSTEDAI_ADMIN_URL");
-        const policyUrl = adminUrl ? `${adminUrl}/service-policies` : null;
-
         return NextResponse.json({
           success: true,
           service: { id: service.id, name: service.name },
           recipeId,
-          policyUrl,
           message: `${app.name} is now enabled for deployment.`,
         });
       } catch (err) {
@@ -303,7 +301,15 @@ export async function POST(request: NextRequest) {
           console.error(`[Teardown] Failed to unassign from scenario:`, e);
         }
 
-        // Step 2: Delete HAI service
+        // Step 2: Remove from default service policy (best-effort)
+        try {
+          const { removeServiceFromDefaultPolicy } = await import("@/lib/hostedai/recipes");
+          await removeServiceFromDefaultPolicy(app.serviceId);
+        } catch (e) {
+          console.error(`[Teardown] Failed to remove from service policy:`, e);
+        }
+
+        // Step 3: Delete HAI service
         try {
           const { deleteAppService } = await import("@/lib/hostedai/recipes");
           await deleteAppService(app.serviceId);
@@ -318,7 +324,7 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Step 3: Unlink app
+        // Step 4: Unlink app
         await prisma.gpuApp.update({
           where: { id },
           data: {

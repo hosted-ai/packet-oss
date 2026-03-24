@@ -48,7 +48,7 @@ export function GpuAppsTab() {
   const [execTiming, setExecTiming] = useState<"on_every_boot" | "on_first_boot">("on_every_boot");
   const [setupStep, setSetupStep] = useState<SetupStep>("idle");
   const [setupError, setSetupError] = useState<string | null>(null);
-  const [setupResult, setSetupResult] = useState<{ serviceId: string; serviceName: string; policyUrl: string | null } | null>(null);
+  const [setupResult, setSetupResult] = useState<{ serviceId: string; serviceName: string } | null>(null);
 
   // Teardown state
   const [teardownId, setTeardownId] = useState<string | null>(null);
@@ -132,7 +132,6 @@ export function GpuAppsTab() {
       setSetupResult({
         serviceId: data.service?.id,
         serviceName: data.service?.name,
-        policyUrl: data.policyUrl,
       });
       setSetupStep("done");
     } catch (err) {
@@ -339,7 +338,7 @@ export function GpuAppsTab() {
             {(setupStep === "uploading" || setupStep === "creating" || setupStep === "linking") && (
               <div className="space-y-3 py-4">
                 <StepIndicator label="Uploading recipe" status={setupStep === "uploading" ? "active" : "done"} />
-                <StepIndicator label="Creating HAI service" status={setupStep === "creating" ? "active" : setupStep === "uploading" ? "waiting" : "done"} />
+                <StepIndicator label="Creating HAI service & assigning policy" status={setupStep === "creating" ? "active" : setupStep === "uploading" ? "waiting" : "done"} />
                 <StepIndicator label="Linking to app" status={setupStep === "linking" ? "active" : (setupStep === "uploading" || setupStep === "creating") ? "waiting" : "done"} />
                 <p className="text-xs text-zinc-400 text-center pt-2">
                   This can take up to 90 seconds while the recipe syncs with HAI.
@@ -373,20 +372,6 @@ export function GpuAppsTab() {
                     Service: <span className="font-mono">{setupResult.serviceName}</span>
                   </div>
                 </div>
-
-                {setupResult.policyUrl && (
-                  <div className="p-3 bg-zinc-50 rounded-lg text-sm mb-4">
-                    <div className="text-zinc-600 mb-1">Add to team policies in HAI:</div>
-                    <a
-                      href={setupResult.policyUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-teal-600 hover:text-teal-700 text-xs underline break-all"
-                    >
-                      {setupResult.policyUrl}
-                    </a>
-                  </div>
-                )}
 
                 <button onClick={closeSetup} className="w-full px-3 py-2 text-sm text-white bg-teal-600 rounded-lg hover:bg-teal-700">
                   Done
