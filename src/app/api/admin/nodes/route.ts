@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
 import { prisma } from "@/lib/prisma";
-import { readPoolOverviewCache, type PoolDetails } from "@/lib/pool-overview";
+import { readPoolOverviewCache, computePoolOverview, writePoolOverviewCache, type PoolDetails } from "@/lib/pool-overview";
 
 export interface NodePod {
   subscriptionId: string;
@@ -157,12 +157,12 @@ export async function GET(request: NextRequest) {
 
   try {
     // Read from pool overview cache (refreshed every 2 min by cron)
-    const cached = readPoolOverviewCache();
+    // Falls back to live computation if cache is missing or expired
+    let cached = readPoolOverviewCache();
     if (!cached) {
-      return NextResponse.json(
-        { success: false, error: "Pool overview cache not available. Wait for cron refresh." },
-        { status: 503 }
-      );
+      console.log("[Admin Nodes] Cache miss — computing pool overview on demand...");
+      cached = await computePoolOverview();
+      writePoolOverviewCache(cached);
     }
 
     // Get provider nodes from database (fast local DB query)

@@ -76,7 +76,26 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const stripe = getStripe();
+    let stripe: ReturnType<typeof getStripe> | null = null;
+    try {
+      stripe = getStripe();
+    } catch {
+      // Stripe not configured — return empty metrics
+      const emptyResponse: Record<string, unknown> = {
+        success: true,
+        period,
+        periodDays: 30,
+        revenue: { total: 0, previous: 0, change: 0, refunds: 0, daily: [] },
+        customers: { total: 0, new: 0, previousNew: 0, change: 0, active: 0, hourly: 0, monthly: 0, avgValue: 0, dailySignups: [] },
+        wallet: { totalBalance: 0, avgBalance: 0 },
+        gpu: { activeGPUs: 0, activePods: 0, totalHoursUsed: 0, totalUsageCost: 0, avgUtilization: 0 },
+        providers: { total: 0, active: 0, totalNodes: 0, activeNodes: 0, payouts: 0, revenue: 0, earnings: 0, margin: 0 },
+        marketing: { voucherRedemptions: 0, voucherCreditsGiven: 0, referralClaims: 0, referralConversions: 0, activeVouchers: 0, activeReferralCodes: 0 },
+        topCustomers: { byBalance: [], bySpending: [] },
+        notice: "Stripe is not configured. Configure STRIPE_SECRET_KEY in Platform Settings to see business metrics.",
+      };
+      return NextResponse.json(emptyResponse);
+    }
     const now = new Date();
 
     // Calculate period boundaries

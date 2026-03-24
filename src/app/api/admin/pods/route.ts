@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
 import { getConnectionInfo } from "@/lib/hostedai";
 import { getStripeTeamMap } from "@/lib/admin-cache";
-import { readPoolOverviewCache } from "@/lib/pool-overview";
+import { readPoolOverviewCache, computePoolOverview, writePoolOverviewCache } from "@/lib/pool-overview";
 import { prisma } from "@/lib/prisma";
 
 export interface AdminPod {
@@ -85,9 +85,12 @@ export async function GET(request: NextRequest) {
 
 async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<string, number> }> {
   // Read pool overview cache for pod data (refreshed every 2 min by cron)
-  const cached = readPoolOverviewCache();
+  // Falls back to live computation if cache is missing or expired
+  let cached = readPoolOverviewCache();
   if (!cached) {
-    throw new Error("Pool overview cache not available. Wait for cron refresh.");
+    console.log("[Admin Pods] Cache miss — computing pool overview on demand...");
+    cached = await computePoolOverview();
+    writePoolOverviewCache(cached);
   }
 
   // Get Stripe team map for owner info (in-memory cached, fast)
