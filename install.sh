@@ -123,8 +123,8 @@ if ! command -v node &>/dev/null; then
   NEED_NODE=true
 else
   NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
-  if [[ "$NODE_VERSION" -lt 18 ]]; then
-    warn "Node.js 18+ required (found v${NODE_VERSION}), upgrading..."
+  if [[ "$NODE_VERSION" -lt 20 ]]; then
+    warn "Node.js 20+ required (found v${NODE_VERSION}), upgrading..."
     NEED_NODE=true
   fi
 fi
