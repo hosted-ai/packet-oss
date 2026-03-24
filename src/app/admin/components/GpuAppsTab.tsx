@@ -45,7 +45,7 @@ export function GpuAppsTab() {
 
   // Setup modal state
   const [setupApp, setSetupApp] = useState<GpuApp | null>(null);
-  const [execTiming, setExecTiming] = useState<"on_every_boot" | "on_first_boot_only">("on_every_boot");
+  const [execTiming, setExecTiming] = useState<"on_every_boot" | "on_first_boot">("on_every_boot");
   const [setupStep, setSetupStep] = useState<SetupStep>("idle");
   const [setupError, setSetupError] = useState<string | null>(null);
   const [setupResult, setSetupResult] = useState<{ serviceId: string; serviceName: string; policyUrl: string | null } | null>(null);
@@ -312,7 +312,7 @@ export function GpuAppsTab() {
                     className="w-full px-3 py-2 text-sm border border-zinc-300 rounded-lg"
                   >
                     <option value="on_every_boot">Run on every boot</option>
-                    <option value="on_first_boot_only">Run on first boot only</option>
+                    <option value="on_first_boot">Run on first boot only</option>
                   </select>
                   <p className="text-xs text-zinc-400 mt-1">
                     &quot;Every boot&quot; ensures latest config. &quot;First boot only&quot; is faster on restart.
@@ -341,6 +341,9 @@ export function GpuAppsTab() {
                 <StepIndicator label="Uploading recipe" status={setupStep === "uploading" ? "active" : "done"} />
                 <StepIndicator label="Creating HAI service" status={setupStep === "creating" ? "active" : setupStep === "uploading" ? "waiting" : "done"} />
                 <StepIndicator label="Linking to app" status={setupStep === "linking" ? "active" : (setupStep === "uploading" || setupStep === "creating") ? "waiting" : "done"} />
+                <p className="text-xs text-zinc-400 text-center pt-2">
+                  This can take up to 90 seconds while the recipe syncs with HAI.
+                </p>
               </div>
             )}
 

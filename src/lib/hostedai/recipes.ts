@@ -257,8 +257,8 @@ export async function uploadRecipe(slug: string): Promise<number> {
   console.log(`[Recipes] Recipe ${slug} uploaded, admin ID: ${recipeId}. Waiting for user panel sync...`);
 
   // Poll user panel until recipe is visible there (required for service creation)
-  const MAX_POLL_ATTEMPTS = 10;
-  const POLL_INTERVAL_MS = 2000;
+  const MAX_POLL_ATTEMPTS = 30;
+  const POLL_INTERVAL_MS = 3000;
   for (let attempt = 1; attempt <= MAX_POLL_ATTEMPTS; attempt++) {
     const found = await findRecipeByName(slug);
     if (found) {
@@ -270,7 +270,7 @@ export async function uploadRecipe(slug: string): Promise<number> {
   }
 
   // If it never synced, return the admin ID anyway — service creation may still work
-  console.warn(`[Recipes] Recipe ${slug} not yet visible on user panel after ${MAX_POLL_ATTEMPTS} attempts. Proceeding with admin ID.`);
+  console.warn(`[Recipes] Recipe ${slug} not yet visible on user panel after ${MAX_POLL_ATTEMPTS} attempts (~${(MAX_POLL_ATTEMPTS * POLL_INTERVAL_MS / 1000)}s). Proceeding with admin ID.`);
   return recipeId;
 }
 
@@ -282,7 +282,7 @@ interface CreateAppServiceOpts {
   recipeId: number;
   ports: Array<{ service_name: string; port: number; protocol: string; service_type: string }>;
   scenarioId: string;
-  execTiming: "on_every_boot" | "on_first_boot_only" | "manual";
+  execTiming: "on_every_boot" | "on_first_boot" | "manual";
 }
 
 /**

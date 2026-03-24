@@ -241,7 +241,7 @@ export async function POST(request: NextRequest) {
           recipeId,
           ports,
           scenarioId,
-          execTiming: execTiming as "on_every_boot" | "on_first_boot_only" | "manual",
+          execTiming: execTiming as "on_every_boot" | "on_first_boot" | "manual",
         });
 
         // Step 6: Link service to app
