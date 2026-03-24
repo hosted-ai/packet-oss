@@ -389,6 +389,10 @@ chown "${APP_USER}:${APP_USER}" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 success "Configuration written to .env.local"
 
+# Symlink .env → .env.local so Prisma (which only auto-loads .env) works
+ln -sf .env.local "${INSTALL_DIR}/.env"
+chown -h "${APP_USER}:${APP_USER}" "${INSTALL_DIR}/.env"
+
 # ── Step 5: Install dependencies & build ─────────────────────────────────────
 
 cd "$INSTALL_DIR"
@@ -397,6 +401,14 @@ run_with_progress "Installing dependencies" sudo -u "$APP_USER" bash -c "cd ${IN
 run_with_progress "Generating Prisma client" sudo -u "$APP_USER" node node_modules/prisma/build/index.js generate
 
 run_with_progress "Pushing database schema" sudo -u "$APP_USER" env DATABASE_URL="${DB_URL_FINAL}" npx prisma db push --accept-data-loss
+
+# Seed is optional — don't abort install if it fails
+if sudo -u "$APP_USER" bash -c "cd ${INSTALL_DIR} && npx prisma db seed" > /tmp/packet-oss-seed-$$.log 2>&1; then
+  success "Database seeded"
+else
+  warn "Seed skipped (no seed script or already seeded)"
+fi
+rm -f /tmp/packet-oss-seed-$$.log
 
 run_with_progress "Building application" sudo -u "$APP_USER" bash -c "cd ${INSTALL_DIR} && env \$(grep -v '^#' .env.local | xargs) pnpm build"
 

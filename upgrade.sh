@@ -56,6 +56,9 @@ if [[ ! -f "${INSTALL_DIR}/.env.local" ]]; then
   fail ".env.local not found. Installation may be corrupted."
 fi
 
+# Ensure .env symlink exists so Prisma (which only auto-loads .env) works
+ln -sf .env.local "${INSTALL_DIR}/.env"
+
 cd "$INSTALL_DIR"
 
 # Mark repo as safe for git (owner is APP_USER, script runs as root)
