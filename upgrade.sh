@@ -277,9 +277,10 @@ success "Service stopped"
 # ── Step 3: Pull latest code ────────────────────────────────────────────────
 
 log "Pulling latest code..."
-sudo -u "$APP_USER" git fetch origin "$BRANCH"
+# Fetch with explicit refspec so origin/BRANCH tracking ref is created
+sudo -u "$APP_USER" git fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}"
 sudo -u "$APP_USER" git checkout "$BRANCH" 2>/dev/null || sudo -u "$APP_USER" git checkout -b "$BRANCH" "origin/$BRANCH"
-sudo -u "$APP_USER" git pull origin "$BRANCH"
+sudo -u "$APP_USER" git reset --hard "origin/$BRANCH"
 
 NEW_VERSION=$(cat VERSION 2>/dev/null || node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "unknown")
 success "Code updated (${CURRENT_VERSION} → ${NEW_VERSION})"
