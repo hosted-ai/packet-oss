@@ -130,7 +130,7 @@ else
 fi
 
 if $NEED_NODE; then
-  run_with_progress "Installing Node.js 20" bash -c "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y -qq nodejs"
+  run_with_progress "Installing Node.js 20" bash -c "export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y -qq nodejs"
 fi
 success "Node.js $(node -v)"
 
@@ -456,8 +456,8 @@ if ! $SKIP_APACHE; then
   # Install Apache2 if not present
   if ! command -v apache2 &>/dev/null; then
     log "Installing Apache2..."
-    apt-get update -qq
-    apt-get install -y -qq apache2
+    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq apache2
   fi
   success "Apache2 installed"
 
@@ -555,7 +555,7 @@ APACHE
 
     if ! command -v certbot &>/dev/null; then
       log "Installing certbot..."
-      apt-get install -y -qq certbot python3-certbot-apache
+      DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq certbot python3-certbot-apache
     fi
 
     CERTBOT_EMAIL_FLAG=""
