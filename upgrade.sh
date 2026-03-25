@@ -127,6 +127,34 @@ sudo -u "$APP_USER" git pull origin "$BRANCH"
 NEW_VERSION=$(cat VERSION 2>/dev/null || node -e "console.log(require('./package.json').version)" 2>/dev/null || echo "unknown")
 success "Code updated (${CURRENT_VERSION} → ${NEW_VERSION})"
 
+# ── Step 3b: Migrate legacy env var names ─────────────────────────────────
+# GPUAAS_ADMIN_* → HOSTEDAI_ADMIN_* (renamed for consistency)
+
+ENV_FILE="${INSTALL_DIR}/.env.local"
+MIGRATED=false
+
+migrate_env_var() {
+  local old_name="$1" new_name="$2"
+  if grep -q "^${old_name}=" "$ENV_FILE" 2>/dev/null && ! grep -q "^${new_name}=" "$ENV_FILE" 2>/dev/null; then
+    local value
+    value=$(grep "^${old_name}=" "$ENV_FILE" | sed "s/^${old_name}=//")
+    sed -i "s/^${old_name}=.*/${new_name}=${value}/" "$ENV_FILE"
+    MIGRATED=true
+  fi
+}
+
+migrate_env_var "GPUAAS_ADMIN_URL"      "HOSTEDAI_ADMIN_URL"
+migrate_env_var "GPUAAS_ADMIN_USER"     "HOSTEDAI_ADMIN_USERNAME"
+migrate_env_var "GPUAAS_ADMIN_PASSWORD" "HOSTEDAI_ADMIN_PASSWORD"
+
+if $MIGRATED; then
+  # Also update the comment line if present
+  sed -i 's/# HostedAI Admin Panel.*cookie-based.*/# HostedAI Admin Panel (port 8999) — cookie-based login auth/' "$ENV_FILE" 2>/dev/null || true
+  success "Migrated legacy env vars (GPUAAS_ADMIN_* → HOSTEDAI_ADMIN_*)"
+  # Reload env vars after migration
+  ENV_VARS=$(grep -v '^#' "${ENV_FILE}" | grep '=' | xargs)
+fi
+
 # ── Step 4: Install dependencies ────────────────────────────────────────────
 
 log "Installing dependencies..."

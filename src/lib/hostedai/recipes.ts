@@ -17,30 +17,20 @@
 import { execSync } from "child_process";
 import { existsSync, statSync, readFileSync, mkdirSync } from "fs";
 import path from "path";
-import { getSetting } from "@/lib/settings";
+import { getAdminCredentials } from "@/lib/gpuaas-admin/client";
 import { hostedaiRequest } from "./client";
 
 // --- HAI Admin Panel Auth ---
+// Uses the shared gpuaas-admin client for credential resolution (DB → env → legacy env).
+// Login is done per-call with Bearer token (TUS protocol needs Authorization header,
+// not the session cookie used by gpuaasAdminRequest).
 
 interface AdminLoginResponse {
   token: string;
 }
 
-async function getAdminCredentials(): Promise<{ url: string; username: string; password: string }> {
-  const url = await getSetting("HOSTEDAI_ADMIN_URL");
-  const username = await getSetting("HOSTEDAI_ADMIN_USERNAME");
-  const password = await getSetting("HOSTEDAI_ADMIN_PASSWORD");
-
-  if (!url || !username || !password) {
-    throw new Error(
-      "HAI admin panel credentials not configured. Set HOSTEDAI_ADMIN_URL, HOSTEDAI_ADMIN_USERNAME, HOSTEDAI_ADMIN_PASSWORD in Platform Settings."
-    );
-  }
-
-  return { url: url.replace(/\/+$/, ""), username, password };
-}
-
-async function loginToAdmin(creds: { url: string; username: string; password: string }): Promise<string> {
+async function loginToAdmin(): Promise<{ token: string; url: string }> {
+  const creds = await getAdminCredentials();
   const resp = await fetch(`${creds.url}/api/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -55,7 +45,7 @@ async function loginToAdmin(creds: { url: string; username: string; password: st
   if (!data.token) {
     throw new Error("HAI admin login returned no token");
   }
-  return data.token;
+  return { token: data.token, url: creds.url };
 }
 
 // --- Recipe Listing (User Panel API) ---
@@ -154,14 +144,13 @@ export function compressRecipe(slug: string): { archivePath: string; fileSize: n
  * 5. List recipes → find newly uploaded recipe_id
  */
 export async function uploadRecipe(slug: string): Promise<number> {
-  const creds = await getAdminCredentials();
-  const token = await loginToAdmin(creds);
+  const { token, url: adminUrl } = await loginToAdmin();
 
   // Compress recipe
   const { archivePath, fileSize } = compressRecipe(slug);
 
   // Check for existing template and delete if found
-  const templatesResp = await fetch(`${creds.url}/api/recipes/templates`, {
+  const templatesResp = await fetch(`${adminUrl}/api/recipes/templates`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (templatesResp.ok) {
@@ -169,7 +158,7 @@ export async function uploadRecipe(slug: string): Promise<number> {
     const existing = templates.find((t) => t.name === slug);
     if (existing) {
       console.log(`[Recipes] Found existing template ${slug} (ID: ${existing.id}), deleting...`);
-      const delResp = await fetch(`${creds.url}/api/recipes/templates/${existing.id}`, {
+      const delResp = await fetch(`${adminUrl}/api/recipes/templates/${existing.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       });
@@ -198,7 +187,7 @@ export async function uploadRecipe(slug: string): Promise<number> {
   ].join(",");
 
   console.log(`[Recipes] TUS init: uploading ${fileSize} bytes...`);
-  const initResp = await fetch(`${creds.url}/api/recipes/templates/upload/`, {
+  const initResp = await fetch(`${adminUrl}/api/recipes/templates/upload/`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -217,7 +206,7 @@ export async function uploadRecipe(slug: string): Promise<number> {
     throw new Error("TUS init did not return a Location header");
   }
   if (!location.startsWith("http")) {
-    location = `${creds.url}${location}`;
+    location = `${adminUrl}${location}`;
   }
 
   // TUS upload: send data
@@ -241,7 +230,7 @@ export async function uploadRecipe(slug: string): Promise<number> {
 
   // Find the newly uploaded recipe ID from admin panel templates list
   // (user panel /service/recipes may lag behind the admin panel)
-  const postUploadResp = await fetch(`${creds.url}/api/recipes/templates`, {
+  const postUploadResp = await fetch(`${adminUrl}/api/recipes/templates`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!postUploadResp.ok) {

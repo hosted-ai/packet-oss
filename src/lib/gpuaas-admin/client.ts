@@ -1,18 +1,19 @@
 /**
- * GPUaaS Admin API Client
+ * HAI Admin Panel API Client
  *
- * Cookie-based authentication client for the GPUaaS admin API.
+ * Cookie-based authentication client for the HAI admin API (formerly "GPUaaS admin").
  * This client manages session cookies internally and re-authenticates as needed.
+ *
+ * Credentials are resolved via getSetting() which checks:
+ *   1. DB (SystemSetting table — set via Platform Settings UI)
+ *   2. process.env HOSTEDAI_ADMIN_* (canonical)
+ *   3. process.env GPUAAS_ADMIN_* (legacy alias for existing installs)
  *
  * @module gpuaas-admin/client
  */
 
+import { getSetting } from "@/lib/settings";
 import type { LoginResponse, APIError } from "./types";
-
-const GPUAAS_ADMIN_URL =
-  process.env.GPUAAS_ADMIN_URL || "http://localhost:3001";
-const GPUAAS_ADMIN_USER = process.env.GPUAAS_ADMIN_USER!;
-const GPUAAS_ADMIN_PASSWORD = process.env.GPUAAS_ADMIN_PASSWORD!;
 
 // Session management
 let sessionCookie: string | null = null;
@@ -20,25 +21,49 @@ let sessionExpiry: number | null = null;
 const SESSION_BUFFER_MS = 5 * 60 * 1000; // Refresh 5 min before expiry
 
 /**
+ * Resolve HAI admin credentials from DB → env → legacy env.
+ */
+export async function getAdminCredentials(): Promise<{
+  url: string;
+  username: string;
+  password: string;
+}> {
+  const url = await getSetting("HOSTEDAI_ADMIN_URL");
+  const username = await getSetting("HOSTEDAI_ADMIN_USERNAME");
+  const password = await getSetting("HOSTEDAI_ADMIN_PASSWORD");
+
+  if (!url || !username || !password) {
+    throw new Error(
+      "HAI admin panel credentials not configured. " +
+        "Set HOSTEDAI_ADMIN_URL, HOSTEDAI_ADMIN_USERNAME, HOSTEDAI_ADMIN_PASSWORD " +
+        "in Platform Settings or .env.local."
+    );
+  }
+
+  return { url: url.replace(/\/+$/, ""), username, password };
+}
+
+/**
  * Login to get session cookie
  */
 async function login(): Promise<string> {
-  console.log(`[GPUaaS Admin] Logging in as ${GPUAAS_ADMIN_USER}`);
+  const creds = await getAdminCredentials();
+  console.log(`[HAI Admin] Logging in as ${creds.username}`);
 
-  const response = await fetch(`${GPUAAS_ADMIN_URL}/api/login`, {
+  const response = await fetch(`${creds.url}/api/login`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      username: GPUAAS_ADMIN_USER,
-      password: GPUAAS_ADMIN_PASSWORD,
+      username: creds.username,
+      password: creds.password,
     }),
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`GPUaaS Admin login failed (${response.status}): ${text}`);
+    throw new Error(`HAI Admin login failed (${response.status}): ${text}`);
   }
 
   const data: LoginResponse = await response.json();
@@ -61,7 +86,7 @@ async function login(): Promise<string> {
   // Set expiry (default 1 hour if not specified)
   sessionExpiry = Date.now() + 60 * 60 * 1000;
 
-  console.log(`[GPUaaS Admin] Login successful, session established`);
+  console.log(`[HAI Admin] Login successful, session established`);
   return sessionCookie!;
 }
 
@@ -83,7 +108,7 @@ async function ensureSession(): Promise<string> {
 }
 
 /**
- * Make an authenticated request to the GPUaaS Admin API
+ * Make an authenticated request to the HAI Admin API
  */
 export async function gpuaasAdminRequest<T>(
   method: string,
@@ -91,11 +116,12 @@ export async function gpuaasAdminRequest<T>(
   data?: Record<string, unknown>
 ): Promise<T> {
   const cookie = await ensureSession();
-  const url = `${GPUAAS_ADMIN_URL}/api${endpoint}`;
+  const creds = await getAdminCredentials();
+  const url = `${creds.url}/api${endpoint}`;
 
-  console.log(`[GPUaaS Admin] ${method} ${url}`);
+  console.log(`[HAI Admin] ${method} ${url}`);
   if (data) {
-    console.log(`[GPUaaS Admin] Request body:`, JSON.stringify(data, null, 2));
+    console.log(`[HAI Admin] Request body:`, JSON.stringify(data, null, 2));
   }
 
   const response = await fetch(url, {
@@ -110,11 +136,11 @@ export async function gpuaasAdminRequest<T>(
   const text = await response.text();
 
   if (!response.ok) {
-    console.error(`[GPUaaS Admin] API error ${response.status}:`, text);
+    console.error(`[HAI Admin] API error ${response.status}:`, text);
 
     // Check if it's an auth error - re-login and retry once
     if (response.status === 401) {
-      console.log(`[GPUaaS Admin] Session expired, re-authenticating...`);
+      console.log(`[HAI Admin] Session expired, re-authenticating...`);
       sessionCookie = null;
       sessionExpiry = null;
 
@@ -131,7 +157,7 @@ export async function gpuaasAdminRequest<T>(
       const retryText = await retryResponse.text();
       if (!retryResponse.ok) {
         throw new Error(
-          `GPUaaS Admin API error (${retryResponse.status}): ${retryText}`
+          `HAI Admin API error (${retryResponse.status}): ${retryText}`
         );
       }
 
@@ -153,20 +179,20 @@ export async function gpuaasAdminRequest<T>(
       // Text is not JSON
     }
 
-    throw new Error(`GPUaaS Admin API error (${response.status}): ${errorMessage}`);
+    throw new Error(`HAI Admin API error (${response.status}): ${errorMessage}`);
   }
 
   if (!text) {
-    console.log(`[GPUaaS Admin] Empty response for: ${endpoint}`);
+    console.log(`[HAI Admin] Empty response for: ${endpoint}`);
     return {} as T;
   }
 
   try {
     const parsed = JSON.parse(text);
-    console.log(`[GPUaaS Admin] Response:`, JSON.stringify(parsed, null, 2));
+    console.log(`[HAI Admin] Response:`, JSON.stringify(parsed, null, 2));
     return parsed;
   } catch {
-    console.log(`[GPUaaS Admin] Non-JSON response:`, text);
+    console.log(`[HAI Admin] Non-JSON response:`, text);
     return { success: true } as T;
   }
 }
@@ -182,6 +208,7 @@ export function clearSession(): void {
 /**
  * Get the API base URL
  */
-export function getApiUrl(): string {
-  return GPUAAS_ADMIN_URL;
+export async function getApiUrl(): Promise<string> {
+  const creds = await getAdminCredentials();
+  return creds.url;
 }

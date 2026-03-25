@@ -57,10 +57,21 @@ function decrypt(ciphertext: string): string {
   return decipher.update(encryptedHex, "hex", "utf8") + decipher.final("utf8");
 }
 
+// ── Legacy env var aliases ───────────────────────────────────────────────────
+// Existing OSS installs wrote GPUAAS_ADMIN_* to .env.local.  We now use
+// HOSTEDAI_ADMIN_* everywhere, but fall back to the old names so upgrades
+// don't break until upgrade.sh migrates them.
+const LEGACY_ENV_ALIASES: Record<string, string> = {
+  HOSTEDAI_ADMIN_URL: "GPUAAS_ADMIN_URL",
+  HOSTEDAI_ADMIN_USERNAME: "GPUAAS_ADMIN_USER",
+  HOSTEDAI_ADMIN_PASSWORD: "GPUAAS_ADMIN_PASSWORD",
+};
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 /**
  * Get a setting value. Checks DB first, then falls back to process.env.
+ * For renamed keys, also checks legacy env var aliases.
  */
 export async function getSetting(key: string): Promise<string | null> {
   const cached = cache.get(key);
@@ -79,9 +90,17 @@ export async function getSetting(key: string): Promise<string | null> {
     // DB might not be initialized yet, fall through to env
   }
 
+  // Check canonical env var, then legacy alias
   const envValue = process.env[key] || null;
-  cache.set(key, { value: envValue, expiresAt: Date.now() + CACHE_TTL_MS });
-  return envValue;
+  if (envValue) {
+    cache.set(key, { value: envValue, expiresAt: Date.now() + CACHE_TTL_MS });
+    return envValue;
+  }
+
+  const legacyKey = LEGACY_ENV_ALIASES[key];
+  const legacyValue = legacyKey ? process.env[legacyKey] || null : null;
+  cache.set(key, { value: legacyValue, expiresAt: Date.now() + CACHE_TTL_MS });
+  return legacyValue;
 }
 
 /**
@@ -93,7 +112,10 @@ export function getSettingSync(key: string): string | null {
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
-  return process.env[key] || null;
+  const envValue = process.env[key] || null;
+  if (envValue) return envValue;
+  const legacyKey = LEGACY_ENV_ALIASES[key];
+  return legacyKey ? process.env[legacyKey] || null : null;
 }
 
 /**

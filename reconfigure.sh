@@ -246,7 +246,7 @@ show_config() {
   ws_port=$(get_current_ws_port)
   app_url=$(get_env NEXT_PUBLIC_APP_URL)
   hai_url=$(get_env HOSTEDAI_API_URL)
-  hai_admin_url=$(get_env GPUAAS_ADMIN_URL)
+  hai_admin_url=$(get_env HOSTEDAI_ADMIN_URL)
 
   if is_ssl_active; then
     ssl_status="${GREEN}Active${NC}"
@@ -447,7 +447,7 @@ run_check() {
   fi
 
   local hai_admin_url
-  hai_admin_url=$(get_env GPUAAS_ADMIN_URL)
+  hai_admin_url=$(get_env HOSTEDAI_ADMIN_URL)
   if [[ -n "$hai_admin_url" ]]; then
     total=$((total + 1))
     local hai_admin_code
@@ -683,7 +683,7 @@ change_hai_url() {
 change_hai_admin_url() {
   local new_url="$1"
   local current_url
-  current_url=$(get_env GPUAAS_ADMIN_URL)
+  current_url=$(get_env HOSTEDAI_ADMIN_URL)
 
   if [[ "$new_url" == "$current_url" ]]; then
     success "HAI Admin Panel URL is already '${new_url}'"
@@ -694,14 +694,14 @@ change_hai_admin_url() {
 
   if $ARG_DRY_RUN; then
     echo -e "  ${CYAN}.env.local:${NC}"
-    echo "    GPUAAS_ADMIN_URL: ${current_url:-not set} → ${new_url}"
+    echo "    HOSTEDAI_ADMIN_URL: ${current_url:-not set} → ${new_url}"
     echo ""
     return 0
   fi
 
   create_backup
-  set_env "GPUAAS_ADMIN_URL" "$new_url"
-  success "Updated GPUAAS_ADMIN_URL"
+  set_env "HOSTEDAI_ADMIN_URL" "$new_url"
+  success "Updated HOSTEDAI_ADMIN_URL"
   restart_service
 }
 
@@ -1033,7 +1033,7 @@ interactive_menu() {
       local current_hai
       current_hai=$(get_env HOSTEDAI_API_URL)
       local current_hai_admin
-      current_hai_admin=$(get_env GPUAAS_ADMIN_URL)
+      current_hai_admin=$(get_env HOSTEDAI_ADMIN_URL)
       echo "  Current HAI User Panel URL:  ${current_hai:-not set}"
       echo "  Current HAI Admin Panel URL: ${current_hai_admin:-not set}"
       echo ""
