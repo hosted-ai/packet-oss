@@ -294,9 +294,8 @@ MIGRATED=false
 migrate_env_var() {
   local old_name="$1" new_name="$2"
   if grep -q "^${old_name}=" "$ENV_FILE" 2>/dev/null && ! grep -q "^${new_name}=" "$ENV_FILE" 2>/dev/null; then
-    local value
-    value=$(grep "^${old_name}=" "$ENV_FILE" | sed "s/^${old_name}=//")
-    sed -i "s/^${old_name}=.*/${new_name}=${value}/" "$ENV_FILE"
+    # Use | as sed delimiter — values may contain / (e.g. URLs)
+    sed -i "s|^${old_name}=|${new_name}=|" "$ENV_FILE"
     MIGRATED=true
   fi
 }
