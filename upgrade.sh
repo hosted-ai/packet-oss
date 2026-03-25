@@ -69,6 +69,10 @@ cd "$INSTALL_DIR"
 # Mark repo as safe for git (owner is APP_USER, script runs as root)
 git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
 
+# Fix ownership — a prior root operation (manual git pull, failed upgrade) can leave
+# .git/objects owned by root, which blocks git fetch/pull as APP_USER.
+chown -R "${APP_USER}:${APP_USER}" "${INSTALL_DIR}/.git" 2>/dev/null || true
+
 # Load env vars for prisma and build steps
 ENV_VARS=$(grep -v '^#' "${INSTALL_DIR}/.env.local" | grep '=' | xargs)
 
