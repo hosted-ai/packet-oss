@@ -654,7 +654,8 @@ async function handleUnifiedInstanceCreate({
 
     await clearDeployLock();
 
-    const instanceId = instance.id;
+    // create-instance may return the instance ID as a plain string or as { id: "..." }
+    const instanceId = typeof instance === "string" ? instance : instance.id;
     const metricsToken = randomBytes(32).toString("hex");
 
     // Save PodMetadata with instanceId

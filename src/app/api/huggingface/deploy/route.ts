@@ -204,7 +204,8 @@ export async function POST(request: NextRequest) {
           vgpus: gpuCount,
         },
       });
-      instanceId = result.id || (result as unknown as Record<string, string>).instance_id;
+      // create-instance returns the instance ID as a plain string
+      instanceId = typeof result === "string" ? result : (result.id || (result as unknown as Record<string, string>).instance_id);
       if (!instanceId) throw new Error("No instance ID returned");
     } catch (deployError) {
       const errMsg = deployError instanceof Error ? deployError.message : "Unknown error";
