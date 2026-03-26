@@ -326,7 +326,7 @@ export async function GET(request: NextRequest) {
     console.log(`[GPU Metrics] Found ${teams.length} teams in resource policy`);
 
     // Step 2: Build a map of teamId -> customer info from Stripe
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const teamToCustomer: Map<string, string> = new Map();
 
     let hasMore = true;

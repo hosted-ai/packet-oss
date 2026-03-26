@@ -47,7 +47,7 @@ const LEGACY_SENDERS: Record<string, (params: { to: string; customerName: string
  */
 async function applyDripCredit(stripeCustomerId: string, email: string): Promise<boolean> {
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     // Check if we've already given this customer drip credit (idempotency)
     const recentTxns = await stripe.customers.listBalanceTransactions(stripeCustomerId, { limit: 20 });
@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
 
         // Check if user has converted (upgraded from free) — skip if so
         try {
-          const stripe = getStripe();
+          const stripe = await getStripe();
           const customer = await stripe.customers.retrieve(enrollment.stripeCustomerId);
           if (!("deleted" in customer)) {
             cacheCustomer(customer).catch(() => {});

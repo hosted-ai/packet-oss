@@ -174,6 +174,22 @@ export async function initializeRoles(): Promise<void> {
   console.log("[DefaultRoles] Initialization complete");
 }
 
+/**
+ * Ensures roles are fetched from the API (not just fallback).
+ *
+ * Unlike the sync Proxy (`ROLES`), this awaits the API call
+ * when the cache is empty. Use this in critical paths like team creation
+ * where stale fallback UUIDs could cause failures.
+ */
+export async function ensureRoles(): Promise<Roles> {
+  // Fast path: cache is warm
+  if (cachedRoles && (Date.now() - lastFetchTime < CACHE_DURATION_MS)) {
+    return cachedRoles;
+  }
+  // Slow path: fetch from API (returns fallback only if API is truly down)
+  return getRoles();
+}
+
 // Backward compatibility: export as ROLES for existing code
 // This uses the sync getter which will return cached or fallback immediately
 export const ROLES = new Proxy({} as Roles, {

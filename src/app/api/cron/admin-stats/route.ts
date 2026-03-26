@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     );
 
     // Recent charges still need Stripe (no local cache for charges)
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const sevenDaysAgoUnix = Math.floor(sevenDaysAgo.getTime() / 1000);
     const charges = await stripe.charges.list({
       limit: 100,

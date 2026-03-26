@@ -105,17 +105,43 @@ export async function getSetting(key: string): Promise<string | null> {
 
 /**
  * Get a setting value synchronously from cache or env (no DB call).
- * Use this in contexts where async is not possible.
+ *
+ * Stale-while-revalidate: if the cache entry has expired, return the stale
+ * value immediately and kick off a background DB fetch so the next call
+ * gets fresh data.  If there is no cache entry at all, fire-and-forget a
+ * DB load so the value is available on the next call.
  */
 export function getSettingSync(key: string): string | null {
   const cached = cache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.value;
   }
+
+  // Cache miss or stale — trigger background refresh from DB
+  refreshSettingInBackground(key);
+
+  // Return env var if available
   const envValue = process.env[key] || null;
   if (envValue) return envValue;
   const legacyKey = LEGACY_ENV_ALIASES[key];
-  return legacyKey ? process.env[legacyKey] || null : null;
+  const legacyValue = legacyKey ? process.env[legacyKey] || null : null;
+  if (legacyValue) return legacyValue;
+
+  // Return stale cache value while the background refresh runs
+  if (cached) return cached.value;
+  return null;
+}
+
+/** Set of keys currently being refreshed — prevents duplicate concurrent fetches. */
+const refreshingKeys = new Set<string>();
+
+/** Fire-and-forget DB fetch to repopulate the cache for a key. */
+function refreshSettingInBackground(key: string): void {
+  if (refreshingKeys.has(key)) return;
+  refreshingKeys.add(key);
+  getSetting(key)
+    .catch(() => {})
+    .finally(() => refreshingKeys.delete(key));
 }
 
 /**

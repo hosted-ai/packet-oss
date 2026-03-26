@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
-import { getConnectionInfo, getPoolSubscriptions } from "@/lib/hostedai";
-import { exposeService } from "@/lib/hostedai/services";
+import { getUnifiedInstances, getInstanceCredentials } from "@/lib/hostedai";
+// import { exposeService } from "@/lib/hostedai/services"; // TODO: need HAI 2.2 expose API
 import { spawn } from "child_process";
 import { prisma } from "@/lib/prisma";
 import { sendHfDeploymentEmail } from "@/lib/email";
@@ -167,20 +167,6 @@ async function executeRemoteScript(
 // Track in-flight deploy triggers to prevent duplicate script executions
 const deployTriggersInFlight = new Set<string>();
 
-/**
- * Parse SSH command to extract connection details
- */
-function parseSSHCommand(cmd: string): { host: string; port: number; username: string } {
-  const userHostMatch = cmd.match(/(\w+)@([^\s]+)/);
-  const username = userHostMatch ? userHostMatch[1] : "ubuntu";
-  const host = userHostMatch ? userHostMatch[2] : "localhost";
-
-  const portMatch = cmd.match(/-p\s+(\d+)/);
-  const port = portMatch ? parseInt(portMatch[1], 10) : 22;
-
-  return { host, port, username };
-}
-
 export type DeploymentStatus =
   | "not_started"
   | "installing"
@@ -255,79 +241,22 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Verify the subscription belongs to this team
-    const subscriptions = await getPoolSubscriptions(teamId);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let sub = subscriptions.find((s: any) => String(s.id) === subscriptionId);
+    // HAI 2.2: Verify instance belongs to this team via unified instances
+    const resolvedSubscriptionId = subscriptionId;
+    const unifiedResult = await getUnifiedInstances(teamId);
+    const instance = unifiedResult.items?.find(i => i.id === subscriptionId);
 
-    // Resolve pending-{poolId}-{timestamp} IDs to real subscription IDs.
-    // This happens when the subscribe API times out but the subscription was still created.
-    let resolvedSubscriptionId = subscriptionId;
-    if (!sub && subscriptionId.startsWith("pending-")) {
-      const pendingPoolId = subscriptionId.split("-")[1];
-      // Find the newest subscription on that pool for this team
-      const candidates = subscriptions
-        .filter((s: any) =>
-          String(s.pool_id) === pendingPoolId &&
-          ["subscribing", "subscribed", "active", "running"].includes(s.status)
-        )
-        .sort((a: any, b: any) => Number(b.id) - Number(a.id));
-
-      if (candidates.length > 0) {
-        sub = candidates[0];
-        resolvedSubscriptionId = String(sub.id);
-        console.log(`[HF Status] Resolved pending ID ${subscriptionId} -> real subscription ${resolvedSubscriptionId}`);
-
-        // Update the HF deployment record with the real subscription ID
-        try {
-          await prisma.huggingFaceDeployment.updateMany({
-            where: { subscriptionId },
-            data: { subscriptionId: resolvedSubscriptionId },
-          });
-          console.log(`[HF Status] Updated HF deployment record: ${subscriptionId} -> ${resolvedSubscriptionId}`);
-        } catch (updateErr) {
-          console.error(`[HF Status] Failed to update deployment record:`, updateErr);
-        }
-      }
+    if (!instance) {
+      console.log(`[HF Status] Instance ${subscriptionId} not found for team ${teamId}`);
+      return NextResponse.json({ error: "Instance not found" }, { status: 404 });
     }
 
-    if (!sub) {
-      console.log(`[HF Status] Subscription ${subscriptionId} not found for team ${teamId}`);
-      return NextResponse.json(
-        { error: "Subscription not found" },
-        { status: 404 }
-      );
-    }
+    const instanceStatus = instance.status?.toLowerCase() || "";
 
-    // Get connection info
-    const connInfo = await getConnectionInfo(teamId, resolvedSubscriptionId);
+    // Instance has terminated
+    if (["succeeded", "failed", "terminated", "error", "crashloopbackoff"].includes(instanceStatus)) {
+      console.log(`[HF Status] Instance ${subscriptionId} terminated with status: ${instance.status}`);
 
-    if (!connInfo || connInfo.length === 0) {
-      return NextResponse.json<StatusResponse>({
-        status: "not_started",
-        message: "GPU is being provisioned. This usually takes 30-60 seconds.",
-      });
-    }
-
-    const subscription = connInfo.find(
-      (s) => String(s.id) === String(resolvedSubscriptionId)
-    );
-
-    if (!subscription || !subscription.pods || subscription.pods.length === 0) {
-      return NextResponse.json<StatusResponse>({
-        status: "not_started",
-        message: "Waiting for GPU pod to be scheduled...",
-      });
-    }
-
-    const pod = subscription.pods[0];
-    const podStatusLower = pod.pod_status?.toLowerCase() || "";
-
-    // Pod has terminated - "Succeeded" means it exited cleanly, "Failed" means it crashed
-    if (["succeeded", "failed", "terminated", "error", "crashloopbackoff"].includes(podStatusLower)) {
-      console.log(`[HF Status] Pod ${pod.pod_name} terminated with status: ${pod.pod_status}`);
-
-      // Update deployment record
       const deployment = await prisma.huggingFaceDeployment.findFirst({
         where: { subscriptionId: resolvedSubscriptionId },
         orderBy: { createdAt: "desc" },
@@ -338,7 +267,7 @@ export async function GET(request: NextRequest) {
           where: { id: deployment.id },
           data: {
             status: "failed",
-            errorMessage: `Pod terminated unexpectedly (${pod.pod_status}). Please terminate this GPU and launch a new one.`,
+            errorMessage: `Pod terminated unexpectedly (${instance.status}). Please terminate this GPU and launch a new one.`,
           },
         });
 
@@ -346,39 +275,45 @@ export async function GET(request: NextRequest) {
           payload.customerId,
           "hf_deployment_pod_terminated",
           `HuggingFace deployment pod terminated: ${deployment.hfItemName}`,
-          {
-            deploymentId: deployment.id,
-            podStatus: pod.pod_status,
-          }
+          { deploymentId: deployment.id, podStatus: instance.status }
         );
       }
 
       return NextResponse.json<StatusResponse>({
         status: "failed",
-        message: `Pod terminated unexpectedly (${pod.pod_status}). Please terminate this GPU and launch a new one.`,
+        message: `Pod terminated unexpectedly (${instance.status}). Please terminate this GPU and launch a new one.`,
         error: "POD_TERMINATED",
       });
     }
 
-    // Pod is not running yet
-    if (podStatusLower !== "running") {
+    // Instance is not running yet
+    if (instanceStatus !== "running") {
       return NextResponse.json<StatusResponse>({
         status: "not_started",
-        message: `Pod status: ${pod.pod_status}. Waiting for it to start...`,
+        message: `Pod status: ${instance.status}. Waiting for it to start...`,
       });
     }
 
-    // Check SSH info availability
-    if (!pod.ssh_info || !pod.ssh_info.cmd || !pod.ssh_info.pass) {
+    // Get SSH credentials via HAI 2.2 credentials API
+    let host: string, port: number, username: string, password: string;
+    try {
+      const creds = await getInstanceCredentials(subscriptionId);
+      if (!creds.ip || !creds.port || !creds.username || !creds.password) {
+        return NextResponse.json<StatusResponse>({
+          status: "not_started",
+          message: "Pod is running, waiting for SSH access...",
+        });
+      }
+      host = creds.ip;
+      port = creds.port;
+      username = creds.username;
+      password = creds.password;
+    } catch {
       return NextResponse.json<StatusResponse>({
         status: "not_started",
         message: "Pod is running, waiting for SSH access...",
       });
     }
-
-    // Parse SSH command
-    const sshDetails = parseSSHCommand(pod.ssh_info.cmd);
-    const { host, port, username } = sshDetails;
 
     // Check status by examining install.log and server status
     // Also gather GPU info and model loading progress for advanced view
@@ -527,12 +462,12 @@ export async function GET(request: NextRequest) {
       host,
       port,
       username,
-      pod.ssh_info.pass,
+      password,
       statusCommand
     );
 
     if (!result.success) {
-      console.log(`[HF Status] SSH command failed for ${pod.pod_name}: ${result.output.slice(-200)}`);
+      console.log(`[HF Status] SSH command failed for ${instance.name}: ${result.output.slice(-200)}`);
       return NextResponse.json<StatusResponse>({
         status: "not_started",
         message: "Connecting to GPU... (SSH may still be starting)",
@@ -575,7 +510,7 @@ export async function GET(request: NextRequest) {
               dockerImage: catalogItem?.dockerImage,
               port: pendingDeployment.servicePort || getDefaultPort(deployScriptType),
               hfToken: pendingDeployment.hfToken || undefined,
-              gpuCount: sub.per_pod_info?.vgpu_count || 1,
+              gpuCount: 1,
               openWebUI: pendingDeployment.openWebUI || false,
               netdata: pendingDeployment.netdata || false,
             });
@@ -586,7 +521,7 @@ export async function GET(request: NextRequest) {
             });
 
             const scriptResult = await executeRemoteScript(
-              host, port, username, pod.ssh_info!.pass, script,
+              host, port, username, password, script,
             );
 
             if (scriptResult.success) {
@@ -696,8 +631,8 @@ export async function GET(request: NextRequest) {
       advanced: {
         logs: logs.slice(-3000), // Last 3000 chars of logs
         sshCommand: `ssh ${username}@${host} -p ${port}`,
-        podName: pod.pod_name,
-        podStatus: pod.pod_status,
+        podName: instance.name,
+        podStatus: instance.status,
         startedAt: deployment?.createdAt?.toISOString(),
         elapsedSeconds,
         errorCode: errorType,
@@ -713,23 +648,9 @@ export async function GET(request: NextRequest) {
       response.advanced!.apiEndpoint = `http://localhost:8000/v1`;
     }
 
-    // Auto-expose vLLM port 8000 when model is ready
-    if (status === "running" && deployment && deployment.status !== "running") {
-      try {
-        console.log(`[HF Status] Auto-exposing port 8000 (vLLM) on ${pod.pod_name}`);
-        await exposeService({
-          pod_name: pod.pod_name,
-          pool_subscription_id: parseInt(String(resolvedSubscriptionId), 10),
-          port: 8000,
-          service_name: "vllm",
-          protocol: "TCP",
-          service_type: "http",
-        });
-        console.log(`[HF Status] Port 8000 exposed for subscription ${resolvedSubscriptionId}`);
-      } catch (exposeErr) {
-        console.error(`[HF Status] Failed to auto-expose port 8000:`, exposeErr);
-      }
-    }
+    // TODO: Auto-expose vLLM port 8000 when model is ready
+    // The legacy exposeService uses pool_subscription_id which doesn't work for unified instances.
+    // Need HAI 2.2 expose API for instance-based port exposure.
 
     // Update database and send email if status has changed to final state
     if ((status === "running" || status === "failed") && deployment) {

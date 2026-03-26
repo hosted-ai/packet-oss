@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStripeAsync, getStripeWebhookSecret } from "@/lib/stripe";
+import { getStripe, getStripeWebhookSecret } from "@/lib/stripe";
 import {
   createTeam,
   createOneTimeLogin,
@@ -8,8 +8,8 @@ import {
   changeTeamPackage,
   syncTeamsToDefaultPolicy,
   unsubscribeFromPool,
-  DEFAULT_POLICIES,
-  ROLES,
+  ensureDefaultPolicies,
+  ensureRoles,
 } from "@/lib/hostedai";
 import { sendWelcomeEmail } from "@/lib/email";
 import { generateCustomerToken } from "@/lib/customer-auth";
@@ -153,7 +153,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No signature" }, { status: 400 });
   }
 
-  const [stripe, webhookSecret] = await Promise.all([getStripeAsync(), getStripeWebhookSecret()]);
+  const [stripe, webhookSecret] = await Promise.all([getStripe(), getStripeWebhookSecret()]);
   let event: Stripe.Event;
 
   try {
@@ -505,7 +505,7 @@ async function handleCheckoutCompleted(
   }
 
   console.log(`✅ Product: ${productName} (${billingType})`);
-  console.log(`Policy IDs: Using DEFAULT_POLICIES`);
+  console.log(`Policy IDs: Using ensureDefaultPolicies()`);
 
   // Get customer name from Stripe checkout session (billing details)
   // Fall back to email prefix if name not provided
@@ -624,11 +624,12 @@ async function handleCheckoutCompleted(
 
         // Create OTL for the existing team
         try {
+          const monthlyRoles = await ensureRoles();
           await createOneTimeLogin({
             email: customerEmail,
             send_email_invite: false,
             teamId: existingTeamId,
-            roleId: ROLES.teamAdmin,
+            roleId: monthlyRoles.teamAdmin,
           });
           console.log(`Created OTL for ${customerEmail} on existing team ${existingTeamId}`);
         } catch (otlError) {
@@ -782,6 +783,13 @@ async function handleCheckoutCompleted(
   console.log("=== CREATING HOSTED.AI TEAM ===");
   let team: { id: string; name: string };
 
+  // Await policies and roles from the API (not sync fallback) so team
+  // creation never uses stale staging UUIDs on cold start.
+  const [whPolicies, whRoles] = await Promise.all([
+    ensureDefaultPolicies(),
+    ensureRoles(),
+  ]);
+
   try {
     team = await createTeam({
       name: teamName,
@@ -791,17 +799,17 @@ async function handleCheckoutCompleted(
         {
           email: customerEmail,
           name: customerName,
-          role: ROLES.teamAdmin, // API uses 'role' not 'role_id'
+          role: whRoles.teamAdmin, // API uses 'role' not 'role_id'
           send_email_invite: false, // Don't send hosted.ai invite - we send our own welcome email
           password: generatedPassword, // Pre-onboard user during team creation
           pre_onboard: true, // User is fully onboarded - OTL will return shouldOnboard=false
         },
       ],
-      pricing_policy_id: DEFAULT_POLICIES.pricing,
-      resource_policy_id: DEFAULT_POLICIES.resource,
-      service_policy_id: DEFAULT_POLICIES.service,
-      instance_type_policy_id: DEFAULT_POLICIES.instanceType,
-      image_policy_id: DEFAULT_POLICIES.image,
+      pricing_policy_id: whPolicies.pricing,
+      resource_policy_id: whPolicies.resource,
+      service_policy_id: whPolicies.service,
+      instance_type_policy_id: whPolicies.instanceType,
+      image_policy_id: whPolicies.image,
     });
 
     console.log(`✅ SUCCESS: Created team ${team.id} (${team.name}) with user ${customerEmail}`);
@@ -822,8 +830,8 @@ async function handleCheckoutCompleted(
     console.error("Team creation params:", {
       name: teamName,
       email: customerEmail,
-      role: ROLES.teamAdmin,
-      policies: DEFAULT_POLICIES,
+      role: whRoles.teamAdmin,
+      policies: whPolicies,
     });
     throw new Error(`Failed to create hosted.ai team: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -837,7 +845,7 @@ async function handleCheckoutCompleted(
       email: customerEmail,
       send_email_invite: false, // We send our own email
       teamId: team.id,
-      roleId: ROLES.teamAdmin,
+      roleId: whRoles.teamAdmin,
       // NO preOnboard/userName/password - user is already onboarded via team creation
     });
 
@@ -1182,13 +1190,14 @@ async function handleSubscriptionUpdated(
   console.log(`Upgrading/downgrading team ${teamId} to ${productName}`);
 
   try {
-    // Update hosted.ai team policies (all products use same DEFAULT_POLICIES)
+    // Update hosted.ai team policies (all products use same policies)
+    const subPolicies = await ensureDefaultPolicies();
     await changeTeamPackage(teamId, {
-      pricing_policy_id: DEFAULT_POLICIES.pricing,
-      resource_policy_id: DEFAULT_POLICIES.resource,
-      service_policy_id: DEFAULT_POLICIES.service,
-      instance_type_policy_id: DEFAULT_POLICIES.instanceType,
-      image_policy_id: DEFAULT_POLICIES.image,
+      pricing_policy_id: subPolicies.pricing,
+      resource_policy_id: subPolicies.resource,
+      service_policy_id: subPolicies.service,
+      instance_type_policy_id: subPolicies.instanceType,
+      image_policy_id: subPolicies.image,
     });
 
     // Update customer metadata with new product

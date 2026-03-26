@@ -50,7 +50,7 @@ export async function GET(
     // Try to find the team from Stripe customer
     if (metadata.stripeCustomerId) {
       const { getStripe } = await import("@/lib/stripe");
-      const stripe = getStripe();
+      const stripe = await getStripe();
       const customer = await stripe.customers.retrieve(metadata.stripeCustomerId);
       if (customer && !("deleted" in customer)) {
         teamId = customer.metadata?.hostedai_team_id;

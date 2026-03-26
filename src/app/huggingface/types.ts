@@ -50,18 +50,19 @@ export interface CompatibilityInfo {
   compatiblePools?: string[];
 }
 
+export interface LaunchProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  pricePerHourCents: number;
+  vramGb: number | null;
+  available: boolean;
+  regions: Array<{ id: number; region_name: string }>;
+}
+
 export interface LaunchOptions {
-  pools: Array<{
-    id: string;
-    name: string;
-    gpu_model?: string;
-    available_gpus?: number;
-  }>;
-  ephemeralStorageBlocks: Array<{
-    id: string;
-    name: string;
-    size_gb?: number;
-  }>;
+  products: LaunchProduct[];
+  walletBalanceCents: number;
 }
 
 export interface FilterOptions {

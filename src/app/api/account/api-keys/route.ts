@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get team ID from Stripe customer metadata
-    const customer = (await getStripe().customers.retrieve(
+    const customer = (await (await getStripe()).customers.retrieve(
       payload.customerId
     )) as Stripe.Customer;
 

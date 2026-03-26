@@ -99,7 +99,7 @@ export async function GET(
     const { id: subscriptionId } = await params;
 
     // Get customer to find team ID
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = (await stripe.customers.retrieve(payload.customerId)) as Stripe.Customer;
     const teamId = customer.metadata?.hostedai_team_id;
 

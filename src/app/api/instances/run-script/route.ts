@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get customer to find team ID
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = (await stripe.customers.retrieve(
       payload.customerId
     )) as Stripe.Customer;

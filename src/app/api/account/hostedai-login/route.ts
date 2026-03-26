@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
-import { createOneTimeLogin, ROLES } from "@/lib/hostedai";
+import { createOneTimeLogin, ensureRoles } from "@/lib/hostedai";
 
 /**
  * Generate a fresh one-time login URL for hosted.ai dashboard.
@@ -22,11 +22,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate a fresh OTL token
+    const roles = await ensureRoles();
     const otl = await createOneTimeLogin({
       email: payload.email,
       send_email_invite: false,
       teamId: teamId,
-      roleId: ROLES.teamAdmin,
+      roleId: roles.teamAdmin,
     });
 
     return NextResponse.json({

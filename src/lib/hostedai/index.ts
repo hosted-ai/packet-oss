@@ -164,6 +164,7 @@ export {
   getDefaultPoliciesSync,
   clearDefaultPoliciesCache,
   initializeDefaultPolicies,
+  ensureDefaultPolicies,
   DEFAULT_POLICIES,
   FALLBACK_POLICIES,
 } from "./default-policies";
@@ -174,6 +175,7 @@ export {
   getRolesSync,
   clearRolesCache,
   initializeRoles,
+  ensureRoles,
   ROLES,
   FALLBACK_ROLES,
 } from "./default-roles";

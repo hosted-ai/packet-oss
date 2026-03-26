@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
-import { getConnectionInfo, getPoolSubscriptions } from "@/lib/hostedai";
+import { getUnifiedInstances, getInstanceCredentials } from "@/lib/hostedai";
 import {
   generateDeployScript,
   getDefaultPort,
@@ -90,14 +90,6 @@ function parseSSHHost(cmd: string): string {
 }
 
 /**
- * Parse SSH port from command
- */
-function parseSSHPort(cmd: string): number {
-  const match = cmd.match(/-p\s+(\d+)/);
-  return match ? parseInt(match[1], 10) : 22;
-}
-
-/**
  * POST /api/huggingface/deploy-existing
  *
  * Deploy a HuggingFace model to an existing GPU subscription
@@ -166,89 +158,47 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify the subscription belongs to this team
-    const subscriptions = await getPoolSubscriptions(teamId);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sub = subscriptions.find((s: any) => String(s.id) === String(subscriptionId));
+    // HAI 2.2: Verify instance belongs to this team
+    const unifiedResult = await getUnifiedInstances(teamId);
+    const instance = unifiedResult.items?.find(i => i.id === subscriptionId);
 
-    if (!sub) {
+    if (!instance) {
       return NextResponse.json(
-        { error: "Subscription not found or doesn't belong to your account" },
+        { error: "Instance not found or doesn't belong to your account" },
         { status: 404 }
       );
     }
 
-    // Get connection info for the subscription
-    console.log(`[HF Deploy] Getting connection info for team ${teamId}, subscription ${subscriptionId}`);
-    const connInfo = await getConnectionInfo(teamId, subscriptionId);
-    console.log(`[HF Deploy] Connection info response:`, JSON.stringify(connInfo, null, 2));
-
-    if (!connInfo || connInfo.length === 0) {
+    if (instance.status?.toLowerCase() !== "running") {
       return NextResponse.json(
-        { error: "No connection info available for this subscription." },
+        { error: `Instance is not running (status: ${instance.status}). Please wait for it to start.` },
         { status: 400 }
       );
     }
 
-    // Find the subscription by ID (similar to run-script route)
-    const subscription = connInfo.find(
-      (s) => String(s.id) === String(subscriptionId)
-    );
-
-    if (!subscription || !subscription.pods || subscription.pods.length === 0) {
+    // Get SSH credentials via HAI 2.2 credentials API
+    let connectionInfo: { host: string; port: number; username: string; password: string };
+    try {
+      const creds = await getInstanceCredentials(subscriptionId);
+      if (!creds.ip || !creds.port || !creds.username || !creds.password) {
+        return NextResponse.json(
+          { error: "SSH credentials not available for this instance" },
+          { status: 400 }
+        );
+      }
+      connectionInfo = { host: creds.ip, port: creds.port, username: creds.username, password: creds.password };
+    } catch {
       return NextResponse.json(
-        { error: "No running pods found for this subscription. The GPU may still be starting." },
+        { error: "Could not retrieve SSH credentials for this instance" },
         { status: 400 }
       );
     }
 
-    const pod = subscription.pods[0];
-    if (!pod.ssh_info || !pod.ssh_info.cmd || !pod.ssh_info.pass) {
-      return NextResponse.json(
-        { error: "SSH credentials not available for this pod" },
-        { status: 400 }
-      );
-    }
-
-    if (pod.pod_status?.toLowerCase() !== "running") {
-      return NextResponse.json(
-        { error: `Pod is not running (status: ${pod.pod_status}). Please wait for it to start.` },
-        { status: 400 }
-      );
-    }
-
-    // Parse SSH command to get host, port, and username
-    const sshCmd = pod.ssh_info.cmd;
-    const parts = sshCmd.trim().split(/\s+/);
-    const userHostPart = parts.find((p: string) => p.includes("@"));
-
-    let username = "root";
-    let host = "localhost";
-    if (userHostPart) {
-      const [user, h] = userHostPart.split("@");
-      username = user;
-      host = h;
-    }
-
-    let port = 22;
-    const portFlagIndex = parts.indexOf("-p");
-    if (portFlagIndex !== -1 && parts[portFlagIndex + 1]) {
-      port = parseInt(parts[portFlagIndex + 1], 10);
-    }
-
-    const connectionInfo = {
-      host,
-      port,
-      username,
-      password: pod.ssh_info.pass,
-    };
-
-    // Get GPU count from subscription for tensor parallelism
-    const gpuCount = sub.per_pod_info?.vgpu_count || 1;
+    const gpuCount = 1;
 
     // Generate and run deploy script
     console.log(`[HF Deploy] Running deploy script for ${hfItemId} on existing subscription ${subscriptionId} with ${gpuCount} GPUs`);
-    console.log(`[HF Deploy] SSH: ${username}@${host}:${port} (cmd: ${sshCmd})`);
+    console.log(`[HF Deploy] SSH: ${connectionInfo.username}@${connectionInfo.host}:${connectionInfo.port}`);
 
     const script = generateDeployScript(deployScript, {
       modelId: catalogItem?.type !== "docker" ? hfItemId : undefined,

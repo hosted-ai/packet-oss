@@ -3,7 +3,7 @@ import { getStripe } from "@/lib/stripe";
 import { verifyCustomerToken } from "@/lib/customer-auth";
 import { resolveAllTeamsForEmail } from "@/lib/customer-resolver";
 import { getWalletTransactions, formatCents, formatCentsForUser } from "@/lib/wallet";
-import { createOneTimeLogin, ROLES } from "@/lib/hostedai";
+import { createOneTimeLogin, ensureRoles } from "@/lib/hostedai";
 import { getTwoFactorStatus } from "@/lib/two-factor";
 import { logCustomerLogin } from "@/lib/admin-activity";
 import { logAccountLogin, logTeamMemberJoined } from "@/lib/activity";
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     // Resolve all teams and customers for this email — handles customers
     // with separate hourly + monthly Stripe accounts
@@ -212,13 +212,14 @@ export async function POST(request: NextRequest) {
       }));
 
     // ── Parallel fetch: OTL + billing portal + 2FA ──
+    const verifyRoles = await ensureRoles();
     const [otlResult, portalSession, twoFactorStatus] = await Promise.all([
       teamId
         ? createOneTimeLogin({
             email: payload.email,
             send_email_invite: false,
             teamId: teamId,
-            roleId: ROLES.teamAdmin,
+            roleId: verifyRoles.teamAdmin,
           }).catch((error) => {
             console.error("Failed to generate OTL:", error);
             return null;

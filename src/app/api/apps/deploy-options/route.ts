@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = await stripe.customers.retrieve(payload.customerId);
     if (!customer || customer.deleted) {
       return NextResponse.json({ error: "Customer not found" }, { status: 400 });

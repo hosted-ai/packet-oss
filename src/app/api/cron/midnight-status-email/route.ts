@@ -35,7 +35,7 @@ function daysAgoDate(days: number): Date {
 async function collectSnapshot(
   date: Date,
   allCustomers: CustomerCache[],
-  stripe: ReturnType<typeof getStripe>
+  stripe: Awaited<ReturnType<typeof getStripe>>
 ): Promise<DailySnapshot> {
   const dayStart = startOfDayUTC(date);
   const dayEnd = endOfDayUTC(date);
@@ -126,7 +126,7 @@ async function collectSnapshot(
 
 async function calculateMRR(
   allCustomers: CustomerCache[],
-  stripe: ReturnType<typeof getStripe>
+  stripe: Awaited<ReturnType<typeof getStripe>>
 ): Promise<number> {
   // MRR = Stripe recurring subscriptions only (monthly contracts)
   const subscriptions = await stripe.subscriptions.list({ status: "active", limit: 100 });
@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
 
     console.log("[Midnight Status] Starting daily status email generation...");
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     // Read from local cache instead of Stripe
     const allCustomers = await prisma.customerCache.findMany({

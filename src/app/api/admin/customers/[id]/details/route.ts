@@ -25,7 +25,7 @@ export async function GET(
   const { id: customerId } = await params;
 
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = await stripe.customers.retrieve(customerId, {
       expand: ["subscriptions", "sources"],
     }) as Stripe.Customer;

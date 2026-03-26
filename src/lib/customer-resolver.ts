@@ -35,7 +35,7 @@ export async function resolveAllTeamsForEmail(
   email: string,
   jwtCustomerId?: string
 ): Promise<ResolvedCustomer | null> {
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   // Fetch all Stripe customers with this email
   const allCustomers = await stripe.customers.list({

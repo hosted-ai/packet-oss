@@ -180,7 +180,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Get teamId from Stripe customer metadata first
-  const stripe = getStripe();
+  const stripe = await getStripe();
   const customerResult = await stripe.customers.retrieve(payload.customerId);
   if ("deleted" in customerResult && customerResult.deleted) {
     return NextResponse.json({ error: "Customer not found" }, { status: 404 });

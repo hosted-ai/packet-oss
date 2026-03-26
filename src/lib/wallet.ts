@@ -22,7 +22,7 @@ export interface UsageRecord {
  * Get customer's wallet balance from Stripe cash balance
  */
 export async function getWalletBalance(customerId: string): Promise<WalletBalance> {
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   // Use customer balance (not cash_balance) - this is simpler and more appropriate
   const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
@@ -46,7 +46,7 @@ export async function fundWallet(
   amountCents: number,
   paymentMethodId?: string
 ): Promise<{ success: boolean; paymentIntentId?: string; error?: string }> {
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   try {
     // Get customer's default payment method if not provided
@@ -136,7 +136,7 @@ export async function deductUsage(
   hourlyRateCents: number, // Required - must come from GpuProduct pricing
   syncCycleId?: string
 ): Promise<{ success: boolean; newBalance?: number; error?: string; skipped?: boolean }> {
-  const stripe = getStripe();
+  const stripe = await getStripe();
   const amountCents = Math.round(hoursUsed * hourlyRateCents);
 
   if (amountCents <= 0) {
@@ -230,7 +230,7 @@ export async function deductUsage(
 export async function checkAndRefillWallet(
   customerId: string
 ): Promise<{ refilled: boolean; amount?: number; error?: string }> {
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   try {
     const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
@@ -354,7 +354,7 @@ export async function getWalletTransactions(
   customerId: string,
   maxItems: number = 0
 ): Promise<Stripe.CustomerBalanceTransaction[]> {
-  const stripe = getStripe();
+  const stripe = await getStripe();
   const all: Stripe.CustomerBalanceTransaction[] = [];
 
   if (maxItems > 0) {
@@ -406,7 +406,7 @@ export async function refundDeployment(
   amountCents: number,
   description: string
 ): Promise<{ success: boolean; error?: string }> {
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   if (amountCents <= 0) {
     return { success: true };

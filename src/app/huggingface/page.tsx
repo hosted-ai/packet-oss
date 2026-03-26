@@ -47,8 +47,8 @@ function HuggingFacePageContent() {
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<CatalogItem | SearchResult | null>(null);
   const [launchOptions, setLaunchOptions] = useState<LaunchOptions | null>(null);
-  const [selectedPool, setSelectedPool] = useState("");
-  const [selectedStorage, setSelectedStorage] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState("");
+  const [selectedRegion, setSelectedRegion] = useState<number | null>(null);
   const [gpuCount, setGpuCount] = useState(1);
   const [hfToken, setHfToken] = useState("");
   const [deploying, setDeploying] = useState(false);
@@ -150,13 +150,21 @@ function HuggingFacePageContent() {
       });
       if (res.ok) {
         const data = await res.json();
+        const products = data.products || [];
         setLaunchOptions({
-          pools: data.pools || [],
-          ephemeralStorageBlocks: data.ephemeralStorageBlocks || [],
+          products,
+          walletBalanceCents: data.walletBalanceCents || 0,
         });
-        if (data.pools?.length > 0) setSelectedPool(data.pools[0].id);
-        if (data.ephemeralStorageBlocks?.length > 0)
-          setSelectedStorage(data.ephemeralStorageBlocks[0].id);
+        if (products.length > 0) {
+          const firstAvailable = products.find((p: { available: boolean }) => p.available);
+          const pick = firstAvailable || products[0];
+          if (pick) {
+            setSelectedProduct(pick.id);
+            if (pick.regions?.length > 0) {
+              setSelectedRegion(pick.regions[0].id);
+            }
+          }
+        }
       }
     } catch (err) {
       console.error("Error fetching launch options:", err);
@@ -244,7 +252,8 @@ function HuggingFacePageContent() {
       const body: Record<string, unknown> = {
         hfItemId: selectedItem.id,
         gpuCount,
-        ephemeralStorageId: selectedStorage || undefined,
+        product_id: selectedProduct || undefined,
+        region_id: selectedRegion || undefined,
       };
       if (hfToken) body.hfToken = hfToken;
 
@@ -463,10 +472,10 @@ function HuggingFacePageContent() {
         <DeployModal
           item={selectedItem}
           launchOptions={launchOptions}
-          selectedPool={selectedPool}
-          setSelectedPool={setSelectedPool}
-          selectedStorage={selectedStorage}
-          setSelectedStorage={setSelectedStorage}
+          selectedProduct={selectedProduct}
+          setSelectedProduct={setSelectedProduct}
+          selectedRegion={selectedRegion}
+          setSelectedRegion={setSelectedRegion}
           gpuCount={gpuCount}
           setGpuCount={setGpuCount}
           hfToken={hfToken}

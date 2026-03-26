@@ -2,6 +2,7 @@
  * Deploy Modal Component
  *
  * Modal for configuring and starting a deployment.
+ * Uses product cards + region pills for GPU selection (HAI 2.2).
  *
  * @module huggingface/DeployModal
  */
@@ -14,10 +15,10 @@ import { getVramBadge, getCompatibilityBadge } from "./helpers";
 interface DeployModalProps {
   item: CatalogItem | SearchResult;
   launchOptions: LaunchOptions | null;
-  selectedPool: string;
-  setSelectedPool: (v: string) => void;
-  selectedStorage: string;
-  setSelectedStorage: (v: string) => void;
+  selectedProduct: string;
+  setSelectedProduct: (v: string) => void;
+  selectedRegion: number | null;
+  setSelectedRegion: (v: number | null) => void;
   gpuCount: number;
   setGpuCount: (v: number) => void;
   hfToken: string;
@@ -31,12 +32,10 @@ interface DeployModalProps {
 export function DeployModal({
   item,
   launchOptions,
-  selectedPool,
-  setSelectedPool,
-  selectedStorage,
-  setSelectedStorage,
-  gpuCount,
-  setGpuCount,
+  selectedProduct,
+  setSelectedProduct,
+  selectedRegion,
+  setSelectedRegion,
   hfToken,
   setHfToken,
   deploying,
@@ -51,6 +50,21 @@ export function DeployModal({
       ? item.estimatedVramGb
       : 0;
   const isGated = "gated" in item && item.gated;
+
+  const products = launchOptions?.products ?? [];
+  const selectedProductDetails = products.find((p) => p.id === selectedProduct);
+  const regions = selectedProductDetails?.regions ?? [];
+
+  /** When the user clicks a product card, auto-select first region */
+  const handleSelectProduct = (productId: string) => {
+    setSelectedProduct(productId);
+    const product = products.find((p) => p.id === productId);
+    if (product && product.regions.length > 0) {
+      setSelectedRegion(product.regions[0].id);
+    } else {
+      setSelectedRegion(null);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -92,31 +106,137 @@ export function DeployModal({
             </div>
           </div>
 
-          {/* GPU pool is auto-selected by the backend */}
+          {/* Product Cards */}
+          {products.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-500 mb-3 uppercase tracking-wide">
+                Select a GPU
+              </label>
+              <div className="space-y-2">
+                {products.map((product) => {
+                  const isSelected = selectedProduct === product.id;
+                  const isAvailable = product.available;
+                  const pricePerHour = (
+                    product.pricePerHourCents / 100
+                  ).toFixed(2);
 
-          {/* GPU Count - fixed at 1 */}
-
-          {/* Storage Selection */}
-          {launchOptions?.ephemeralStorageBlocks &&
-            launchOptions.ephemeralStorageBlocks.length > 0 && (
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Storage
-                </label>
-                <select
-                  value={selectedStorage}
-                  onChange={(e) => setSelectedStorage(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-transparent"
-                >
-                  {launchOptions.ephemeralStorageBlocks.map((storage) => (
-                    <option key={storage.id} value={storage.id}>
-                      {storage.name}
-                      {storage.size_gb ? ` (${storage.size_gb}GB)` : ""}
-                    </option>
-                  ))}
-                </select>
+                  return (
+                    <button
+                      key={product.id}
+                      type="button"
+                      disabled={!isAvailable}
+                      onClick={() => {
+                        if (isAvailable) handleSelectProduct(product.id);
+                      }}
+                      className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                        !isAvailable
+                          ? "border-gray-200 bg-gray-50 opacity-60 cursor-not-allowed"
+                          : isSelected
+                            ? "border-teal-500 bg-teal-50"
+                            : "border-gray-200 hover:border-teal-300 hover:bg-gray-50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <span className="font-medium text-gray-900">
+                            {product.name}
+                          </span>
+                          {product.vramGb && (
+                            <div className="text-sm text-gray-500 mt-0.5">
+                              {product.vramGb}GB VRAM
+                              {product.description
+                                ? ` · ${product.description}`
+                                : ""}
+                            </div>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0 ml-3">
+                          {!isAvailable ? (
+                            <span className="text-xs font-medium text-gray-400">
+                              Unavailable
+                            </span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <div>
+                                <span className="text-lg font-bold text-gray-900">
+                                  ${pricePerHour}
+                                </span>
+                                <span className="text-xs text-gray-500">
+                                  /hr
+                                </span>
+                              </div>
+                              <span className="w-2 h-2 bg-emerald-500 rounded-full" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
-            )}
+            </div>
+          )}
+
+          {products.length === 0 && launchOptions && (
+            <div className="mb-4 text-center py-6 text-gray-500 text-sm">
+              No GPUs available right now. Check back later.
+            </div>
+          )}
+
+          {/* Region Pills */}
+          {selectedProduct && regions.length > 0 && (
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-gray-500 mb-2 uppercase tracking-wide">
+                Region
+              </label>
+              <div className="flex flex-wrap gap-2">
+                {regions.map((region) => {
+                  const isSelected = selectedRegion === region.id;
+                  return (
+                    <button
+                      key={region.id}
+                      type="button"
+                      onClick={() => setSelectedRegion(region.id)}
+                      className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                        isSelected
+                          ? "bg-teal-100 text-teal-700 border border-teal-300"
+                          : "bg-gray-100 text-gray-600 border border-transparent hover:bg-gray-200"
+                      }`}
+                    >
+                      {region.region_name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Wallet + pricing summary */}
+          {selectedProduct && selectedProductDetails && launchOptions && (
+            <div className="text-xs text-gray-500 mb-4 p-3 bg-gray-50 rounded-lg space-y-1">
+              <div>
+                Wallet:{" "}
+                <span className="font-medium text-gray-700">
+                  ${(launchOptions.walletBalanceCents / 100).toFixed(2)}
+                </span>
+              </div>
+              <div>
+                First 30 min prepaid:{" "}
+                <span className="font-medium text-gray-700">
+                  $
+                  {(
+                    Math.round(
+                      (30 / 60) * selectedProductDetails.pricePerHourCents
+                    ) / 100
+                  ).toFixed(2)}
+                </span>
+              </div>
+              <div>
+                Then billed hourly at $
+                {(selectedProductDetails.pricePerHourCents / 100).toFixed(2)}/hr
+              </div>
+            </div>
+          )}
 
           {/* HF Token (for gated models) */}
           {isGated && (
@@ -163,7 +283,7 @@ export function DeployModal({
             </button>
             <button
               onClick={onDeploy}
-              disabled={deploying}
+              disabled={deploying || !selectedProduct}
               className="flex-1 py-2 px-4 bg-teal-600 text-white rounded-md hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {deploying ? "Deploying..." : "Deploy"}

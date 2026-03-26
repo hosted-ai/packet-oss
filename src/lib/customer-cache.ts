@@ -51,7 +51,7 @@ export async function markCustomerCacheDeleted(stripeCustomerId: string): Promis
  * Safety net cron — run every 12 hours.
  */
 export async function fullSyncCustomerCache(): Promise<{ synced: number; deleted: number }> {
-  const stripe = getStripe();
+  const stripe = await getStripe();
   const seenIds = new Set<string>();
   let synced = 0;
 

@@ -3,6 +3,7 @@
  *
  * Modal for deploying HuggingFace models to GPU instances.
  * Supports both new GPU creation and deployment to existing GPUs.
+ * Uses product cards + region pills for new GPU selection (HAI 2.2).
  *
  * @module components/huggingface-tab/DeployModal
  */
@@ -27,10 +28,10 @@ interface DeployModalProps {
   setDeployMode: (mode: DeployMode) => void;
   selectedSubscription: string;
   setSelectedSubscription: (id: string) => void;
-  selectedPool: string;
-  setSelectedPool: (id: string) => void;
-  selectedStorage: string;
-  setSelectedStorage: (id: string) => void;
+  selectedProduct: string;
+  setSelectedProduct: (id: string) => void;
+  selectedRegion: number | null;
+  setSelectedRegion: (id: number | null) => void;
   gpuCount: number;
   setGpuCount: (count: number) => void;
   hfToken: string;
@@ -59,12 +60,10 @@ export function DeployModal({
   setDeployMode,
   selectedSubscription,
   setSelectedSubscription,
-  selectedPool,
-  setSelectedPool,
-  selectedStorage,
-  setSelectedStorage,
-  gpuCount,
-  setGpuCount,
+  selectedProduct,
+  setSelectedProduct,
+  selectedRegion,
+  setSelectedRegion,
   hfToken,
   setHfToken,
   addOpenWebUI,
@@ -88,6 +87,21 @@ export function DeployModal({
       : "estimatedVramGb" in selectedItem
       ? selectedItem.estimatedVramGb
       : 0;
+
+  const products = launchOptions?.products ?? [];
+  const selectedProductDetails = products.find((p) => p.id === selectedProduct);
+  const regions = selectedProductDetails?.regions ?? [];
+
+  /** When the user clicks a product card, auto-select first region */
+  const handleSelectProduct = (productId: string) => {
+    setSelectedProduct(productId);
+    const product = products.find((p) => p.id === productId);
+    if (product && product.regions.length > 0) {
+      setSelectedRegion(product.regions[0].id);
+    } else {
+      setSelectedRegion(null);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -190,30 +204,141 @@ export function DeployModal({
             </div>
           )}
 
-          {/* New GPU Options */}
+          {/* New GPU Options — Product Picker + Region Pills */}
           {(deployMode === "new" || existingSubscriptions.length === 0) && (
             <>
-              {/* Storage Selection */}
-              {launchOptions?.ephemeralStorageBlocks &&
-                launchOptions.ephemeralStorageBlocks.length > 0 && (
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-[var(--ink)] mb-2">
-                      Storage
-                    </label>
-                    <select
-                      value={selectedStorage}
-                      onChange={(e) => setSelectedStorage(e.target.value)}
-                      className="w-full px-3 py-2.5 border border-[var(--line)] rounded-lg focus:ring-2 focus:ring-[var(--blue)] focus:border-transparent bg-white"
-                    >
-                      {launchOptions.ephemeralStorageBlocks.map((storage) => (
-                        <option key={storage.id} value={storage.id}>
-                          {storage.name}
-                          {storage.size_gb ? ` (${storage.size_gb}GB)` : ""}
-                        </option>
-                      ))}
-                    </select>
+              {/* Product Cards */}
+              {products.length > 0 && (
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-[var(--muted)] mb-3 uppercase tracking-wide">
+                    Select a GPU
+                  </label>
+                  <div className="space-y-2">
+                    {products.map((product) => {
+                      const isSelected = selectedProduct === product.id;
+                      const isAvailable = product.available;
+                      const pricePerHour = (
+                        product.pricePerHourCents / 100
+                      ).toFixed(2);
+
+                      return (
+                        <button
+                          key={product.id}
+                          type="button"
+                          disabled={!isAvailable}
+                          onClick={() => {
+                            if (isAvailable) handleSelectProduct(product.id);
+                          }}
+                          className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
+                            !isAvailable
+                              ? "border-[var(--line)] bg-zinc-50 opacity-60 cursor-not-allowed"
+                              : isSelected
+                                ? "border-teal-500 bg-teal-50"
+                                : "border-[var(--line)] hover:border-teal-300 hover:bg-zinc-50"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1 min-w-0">
+                              <span className="font-medium text-[var(--ink)]">
+                                {product.name}
+                              </span>
+                              {product.vramGb && (
+                                <div className="text-sm text-[var(--muted)] mt-0.5">
+                                  {product.vramGb}GB VRAM
+                                  {product.description
+                                    ? ` · ${product.description}`
+                                    : ""}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-right flex-shrink-0 ml-3">
+                              {!isAvailable ? (
+                                <span className="text-xs font-medium text-zinc-400">
+                                  Unavailable
+                                </span>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <div>
+                                    <span className="text-lg font-bold text-[var(--ink)]">
+                                      ${pricePerHour}
+                                    </span>
+                                    <span className="text-xs text-[var(--muted)]">
+                                      /hr
+                                    </span>
+                                  </div>
+                                  <span className="w-2 h-2 bg-emerald-500 rounded-full" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
-                )}
+                </div>
+              )}
+
+              {products.length === 0 && launchOptions && (
+                <div className="mb-4 text-center py-6 text-[var(--muted)] text-sm">
+                  No GPUs available right now. Check back later.
+                </div>
+              )}
+
+              {/* Region Pills */}
+              {selectedProduct && regions.length > 0 && (
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-[var(--muted)] mb-2 uppercase tracking-wide">
+                    Region
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {regions.map((region) => {
+                      const isSelected = selectedRegion === region.id;
+                      return (
+                        <button
+                          key={region.id}
+                          type="button"
+                          onClick={() => setSelectedRegion(region.id)}
+                          className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                            isSelected
+                              ? "bg-teal-100 text-teal-700 border border-teal-300"
+                              : "bg-zinc-100 text-zinc-600 border border-transparent hover:bg-zinc-200"
+                          }`}
+                        >
+                          {region.region_name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Wallet + pricing summary */}
+              {selectedProduct && selectedProductDetails && launchOptions && (
+                <div className="text-xs text-[var(--muted)] mb-4 p-3 bg-zinc-50 rounded-lg space-y-1">
+                  <div>
+                    Wallet:{" "}
+                    <span className="font-medium text-zinc-700">
+                      ${(launchOptions.walletBalanceCents / 100).toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    First 30 min prepaid:{" "}
+                    <span className="font-medium text-zinc-700">
+                      $
+                      {(
+                        Math.round(
+                          (30 / 60) * selectedProductDetails.pricePerHourCents
+                        ) / 100
+                      ).toFixed(2)}
+                    </span>
+                  </div>
+                  <div>
+                    Then billed hourly at $
+                    {(selectedProductDetails.pricePerHourCents / 100).toFixed(2)}
+                    /hr
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -426,7 +551,10 @@ export function DeployModal({
                 disabled={
                   deploying ||
                   isPolling ||
-                  (deployMode === "existing" && !selectedSubscription)
+                  (deployMode === "existing" && !selectedSubscription) ||
+                  (deployMode === "new" &&
+                    existingSubscriptions.length === 0 &&
+                    !selectedProduct)
                 }
                 className="flex-1 py-2.5 px-4 bg-[var(--blue)] text-white rounded-lg hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity font-medium"
               >

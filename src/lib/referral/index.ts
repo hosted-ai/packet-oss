@@ -302,7 +302,7 @@ export async function processReferralReward(claimId: string): Promise<void> {
   const refereeCustomerId = claim.refereeCustomerId;
   const rewardAmount = settings.rewardAmountCents;
 
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   try {
     // Credit the referrer
@@ -349,7 +349,7 @@ export async function getAllReferralClaims(
   });
 
   // Fetch referrer emails from Stripe
-  const stripe = getStripe();
+  const stripe = await getStripe();
   const claimsWithDetails: ReferralClaimWithDetails[] = [];
 
   for (const claim of claims) {
@@ -468,7 +468,7 @@ export async function validateReferralCode(
   }
 
   // Get referrer email for display
-  const stripe = getStripe();
+  const stripe = await getStripe();
   let referrerEmail = "A friend";
   try {
     const customer = await stripe.customers.retrieve(

@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Budget Check] Found ${budgetSettings.length} customers with budget limits`);
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const results: BudgetCheckResult[] = [];
 
     // Process each customer
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
 }
 
 async function checkCustomerBudget(
-  stripe: ReturnType<typeof getStripe>,
+  stripe: Awaited<ReturnType<typeof getStripe>>,
   settings: {
     stripeCustomerId: string;
     monthlyLimitCents: number | null;

@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
     }
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = (await stripe.customers.retrieve(payload.customerId)) as Stripe.Customer;
     const teamId = customer.metadata?.hostedai_team_id;
     if (!teamId) {

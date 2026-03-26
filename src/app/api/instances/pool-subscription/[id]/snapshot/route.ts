@@ -172,7 +172,7 @@ export async function POST(
     const { displayName, notes, saveData, storageBlockId, terminateAfterSave } = parsed.data;
 
     // Get customer to find team ID
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = (await stripe.customers.retrieve(
       payload.customerId
     )) as Stripe.Customer;

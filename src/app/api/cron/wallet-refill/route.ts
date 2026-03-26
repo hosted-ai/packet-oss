@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   if (authError) return authError;
 
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     // Find all hourly billing customers with pagination
     const allCustomers: Array<{

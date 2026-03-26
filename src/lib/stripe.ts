@@ -1,31 +1,16 @@
 import Stripe from "stripe";
 import type { TenantConfig } from "@/lib/tenant/types";
-import { getSetting, getSettingSync } from "@/lib/settings";
+import { getSetting } from "@/lib/settings";
 
 // Lazy initialization - only creates Stripe client when needed
 let stripeInstance: Stripe | null = null;
 
 /**
- * Get the default Stripe client (sync).
- * Uses settings cache / env fallback. For guaranteed DB-backed resolution
- * in new async code paths, prefer `getStripeAsync()`.
+ * Get the default Stripe client.
+ * Always resolves the secret key from DB → env, so DB-only keys work
+ * even after the in-memory cache expires.
  */
-export function getStripe(): Stripe {
-  if (!stripeInstance) {
-    const key = getSettingSync("STRIPE_SECRET_KEY");
-    if (!key) {
-      throw new Error("STRIPE_SECRET_KEY is not set — configure in Platform Settings or .env.local");
-    }
-    stripeInstance = new Stripe(key);
-  }
-  return stripeInstance;
-}
-
-/**
- * Get the default Stripe client (async, DB-backed).
- * Resolves the secret key from platform settings first, then env.
- */
-export async function getStripeAsync(): Promise<Stripe> {
+export async function getStripe(): Promise<Stripe> {
   if (!stripeInstance) {
     const key = await getSetting("STRIPE_SECRET_KEY");
     if (!key) {
@@ -35,6 +20,7 @@ export async function getStripeAsync(): Promise<Stripe> {
   }
   return stripeInstance;
 }
+
 
 /**
  * Get the Stripe webhook signing secret (async, DB-backed).
@@ -51,9 +37,9 @@ export async function getStripeWebhookSecret(): Promise<string> {
 // or creates a per-tenant instance using the tenant's own Stripe secret key.
 const tenantStripeInstances = new Map<string, Stripe>();
 
-export function getStripeForTenant(tenant: TenantConfig): Stripe {
+export async function getStripeForTenant(tenant: TenantConfig): Promise<Stripe> {
   if (tenant.isDefault) {
-    return getStripe();
+    return await getStripe();
   }
 
   const existing = tenantStripeInstances.get(tenant.id);

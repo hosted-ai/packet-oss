@@ -54,12 +54,12 @@ function getOssBranding(): EmailBranding {
   };
 }
 
-export function getEmailBranding(tenant?: TenantConfig): EmailBranding {
+export async function getEmailBranding(tenant?: TenantConfig): Promise<EmailBranding> {
   if (!isPro()) return getOssBranding();
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { getDefaultTenantConfig } = require('@/lib/tenant/resolve');
-  const t = tenant || getDefaultTenantConfig();
+  const t = tenant || await getDefaultTenantConfig();
   const domain = t.isDefault
     ? new URL(getAppUrl()).hostname
     : (t.domains[0] || new URL(getAppUrl()).hostname);

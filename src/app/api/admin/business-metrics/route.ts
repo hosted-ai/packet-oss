@@ -76,9 +76,9 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    let stripe: ReturnType<typeof getStripe> | null = null;
+    let stripe: Awaited<ReturnType<typeof getStripe>> | null = null;
     try {
-      stripe = getStripe();
+      stripe = await getStripe();
     } catch {
       // Stripe not configured — return empty metrics
       const emptyResponse: Record<string, unknown> = {

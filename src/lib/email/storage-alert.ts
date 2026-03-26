@@ -25,7 +25,7 @@ export async function sendStorageAlert(params: StorageAlertParams): Promise<void
 
   let email: string;
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = await stripe.customers.retrieve(stripeCustomerId);
     if (customer.deleted || !customer.email) {
       console.warn(`[Storage Alert] No email for customer ${stripeCustomerId}`);

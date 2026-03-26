@@ -200,7 +200,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Resolve to primary customer for deployment (wallet, team)
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const resolved = await resolveAllTeamsForEmail(payload.email, payload.customerId);
     if (!resolved || resolved.allTeamIds.length === 0) {
       return NextResponse.json(
@@ -270,7 +270,7 @@ export async function POST(request: NextRequest) {
           teamId,
           customer,
           payload,
-          stripe: getStripe(),
+          stripe: await getStripe(),
         });
       }
     }

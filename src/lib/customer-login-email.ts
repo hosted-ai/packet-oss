@@ -255,7 +255,7 @@ ${plainTextFooter()}`;
  */
 export async function sendLoginEmailForCustomer(email: string): Promise<boolean> {
   const normalizedEmail = email.toLowerCase().trim();
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   // Find all Stripe customers matching this email
   const customers = await stripe.customers.list({

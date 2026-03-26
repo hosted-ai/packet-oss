@@ -131,7 +131,7 @@ export async function POST(request: NextRequest) {
       }
 
       // Get customer email from Stripe
-      const stripe = getStripe();
+      const stripe = await getStripe();
       const customer = await stripe.customers.retrieve(payload.customerId);
       if (!customer || customer.deleted) {
         return NextResponse.json(

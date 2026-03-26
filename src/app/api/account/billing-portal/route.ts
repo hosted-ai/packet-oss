@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     // Create a fresh billing portal session
     const portalSession = await stripe.billingPortal.sessions.create({

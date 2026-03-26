@@ -74,7 +74,7 @@ export async function GET(request: NextRequest) {
   // Check which app services are deployable via HAI scenario compatibility
   let deployableServiceIds = new Set<string>();
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = await stripe.customers.retrieve(payload.customerId);
     if (customer && !customer.deleted) {
       const teamId = (customer as { metadata?: Record<string, string> }).metadata?.hostedai_team_id;

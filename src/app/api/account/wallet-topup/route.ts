@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
     }
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     // Verify customer exists and is hourly billing
     const customer = await stripe.customers.retrieve(payload.customerId);

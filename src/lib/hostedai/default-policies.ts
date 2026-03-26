@@ -189,6 +189,22 @@ export async function initializeDefaultPolicies(): Promise<void> {
   console.log("[DefaultPolicies] Initialization complete");
 }
 
+/**
+ * Ensures policies are fetched from the API (not just fallback).
+ *
+ * Unlike the sync Proxy (`DEFAULT_POLICIES`), this awaits the API call
+ * when the cache is empty. Use this in critical paths like team creation
+ * where stale fallback UUIDs could cause failures.
+ */
+export async function ensureDefaultPolicies(): Promise<DefaultPolicies> {
+  // Fast path: cache is warm
+  if (cachedPolicies && (Date.now() - lastFetchTime < CACHE_DURATION_MS)) {
+    return cachedPolicies;
+  }
+  // Slow path: fetch from API (returns fallback only if API is truly down)
+  return getDefaultPolicies();
+}
+
 // Backward compatibility: export as DEFAULT_POLICIES for existing code
 // This uses the sync getter which will return cached or fallback immediately
 export const DEFAULT_POLICIES = new Proxy({} as DefaultPolicies, {

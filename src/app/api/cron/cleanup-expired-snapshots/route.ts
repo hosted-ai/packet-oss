@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       error?: string;
     }> = [];
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     for (const snapshot of expiredSnapshots) {
       let volumeDeleted = false;

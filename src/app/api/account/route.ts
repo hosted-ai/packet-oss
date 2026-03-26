@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const normalizedEmail = email.toLowerCase();
 
     // ── Team auto-provisioning (login-specific) ──────────────────────────

@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
 
     // Fetch all active Stripe products
     const products = await stripe.products.list({

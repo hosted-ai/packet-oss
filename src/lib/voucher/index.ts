@@ -218,7 +218,7 @@ export async function processVoucherRedemption(
 
     // Credit Stripe balance AFTER DB transaction succeeds
     // If this fails, the redemption is recorded but credit not applied — recoverable via admin
-    const stripe = getStripe();
+    const stripe = await getStripe();
     await stripe.customers.createBalanceTransaction(stripeCustomerId, {
       amount: -creditCents, // Negative = credit
       currency: "usd",

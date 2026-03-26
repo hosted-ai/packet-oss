@@ -47,7 +47,7 @@ export async function getAuthenticatedCustomer(
     );
   }
 
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   // Resolve all teams for this email — handles customers with multiple
   // Stripe accounts (hourly + monthly) that link to different hosted.ai teams

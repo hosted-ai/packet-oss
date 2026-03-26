@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const stripe = getStripe();
+  const stripe = await getStripe();
   const now = new Date();
   const podResults: PodBillingResult[] = [];
   const customerRefills: Map<string, { refilled: boolean; amount?: number }> = new Map();

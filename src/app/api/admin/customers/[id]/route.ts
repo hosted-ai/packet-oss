@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
 import { getStripe } from "@/lib/stripe";
-import { createOneTimeLogin, createTeam, suspendTeam, unsuspendTeam, terminateTeam, syncTeamsToDefaultPolicy, ROLES, DEFAULT_POLICIES } from "@/lib/hostedai";
+import { createOneTimeLogin, createTeam, suspendTeam, unsuspendTeam, terminateTeam, syncTeamsToDefaultPolicy, ensureDefaultPolicies, ensureRoles } from "@/lib/hostedai";
 import { sendEmail } from "@/lib/email";
 import {
   emailLayout, emailButton, emailGreeting, emailText, emailMuted,
@@ -75,7 +75,7 @@ export async function POST(
   const { action, amount, description, reason, reasonNote } = await request.json();
 
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = await stripe.customers.retrieve(customerId);
 
     if ("deleted" in customer && customer.deleted) {
@@ -100,6 +100,10 @@ export async function POST(
             const customerName = customer.name || customer.email.split("@")[0];
             const safeName = customerName.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 30) || "user";
             const billingType = customer.metadata?.billing_type || "hourly";
+            const [adminPolicies, adminRoles] = await Promise.all([
+              ensureDefaultPolicies(),
+              ensureRoles(),
+            ]);
             const team = await createTeam({
               name: `${safeName}-${billingType}-${Date.now()}`,
               description: `${getBrandName()} - Auto-provisioned by admin`,
@@ -108,16 +112,16 @@ export async function POST(
                 {
                   email: customer.email,
                   name: customerName,
-                  role: ROLES.teamAdmin,
+                  role: adminRoles.teamAdmin,
                   send_email_invite: false,
                   pre_onboard: true,
                 },
               ],
-              pricing_policy_id: DEFAULT_POLICIES.pricing,
-              resource_policy_id: DEFAULT_POLICIES.resource,
-              service_policy_id: DEFAULT_POLICIES.service,
-              instance_type_policy_id: DEFAULT_POLICIES.instanceType,
-              image_policy_id: DEFAULT_POLICIES.image,
+              pricing_policy_id: adminPolicies.pricing,
+              resource_policy_id: adminPolicies.resource,
+              service_policy_id: adminPolicies.service,
+              instance_type_policy_id: adminPolicies.instanceType,
+              image_policy_id: adminPolicies.image,
             });
             resolvedTeamId = team.id;
             console.log(`[Admin] Created team ${team.id} for ${customer.email}`);
@@ -142,11 +146,12 @@ export async function POST(
             console.log(`[Admin] Updated Stripe metadata with team ID ${team.id}`);
           }
 
+          const credRoles = await ensureRoles();
           const otl = await createOneTimeLogin({
             email: customer.email,
             send_email_invite: false,
             teamId: resolvedTeamId,
-            roleId: ROLES.teamAdmin,
+            roleId: credRoles.teamAdmin,
             userName: customer.name || customer.email.split("@")[0],
           });
 
@@ -445,11 +450,12 @@ export async function POST(
 
         // Generate OTL for hosted.ai admin dashboard
         try {
+          const haiRoles = await ensureRoles();
           const otl = await createOneTimeLogin({
             email: customer.email,
             send_email_invite: false,
             teamId: teamId,
-            roleId: ROLES.teamAdmin,
+            roleId: haiRoles.teamAdmin,
             userName: customer.name || customer.email.split("@")[0],
           });
 
@@ -518,7 +524,7 @@ export async function DELETE(
   const { id: customerId } = await params;
 
   try {
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = await stripe.customers.retrieve(customerId);
 
     if ("deleted" in customer && customer.deleted) {

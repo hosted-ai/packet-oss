@@ -68,8 +68,8 @@ export default function HuggingFaceTab({
   >([]);
   const [deployMode, setDeployMode] = useState<DeployMode>("existing");
   const [selectedSubscription, setSelectedSubscription] = useState("");
-  const [selectedPool, setSelectedPool] = useState("");
-  const [selectedStorage, setSelectedStorage] = useState("");
+  const [selectedProduct, setSelectedProduct] = useState("");
+  const [selectedRegion, setSelectedRegion] = useState<number | null>(null);
   const [gpuCount, setGpuCount] = useState(1);
   const [hfToken, setHfToken] = useState("");
   const [addOpenWebUI, setAddOpenWebUI] = useState(false);
@@ -243,24 +243,23 @@ export default function HuggingFaceTab({
 
       if (launchRes.ok) {
         const data = await launchRes.json();
+        const products = data.products || [];
         setLaunchOptions({
-          pools: data.pools || [],
-          ephemeralStorageBlocks: data.ephemeralStorageBlocks || [],
+          products,
+          walletBalanceCents: data.walletBalanceCents || 0,
         });
 
-        if (data.pools?.length > 0) {
-          const availablePool = data.pools.find(
-            (p: { available_gpus?: number }) =>
-              p.available_gpus === undefined || p.available_gpus > 0
+        if (products.length > 0) {
+          const firstAvailable = products.find(
+            (p: { available: boolean }) => p.available
           );
-          if (availablePool) {
-            setSelectedPool(availablePool.id);
-          } else {
-            setSelectedPool(data.pools[0].id);
+          const pick = firstAvailable || products[0];
+          if (pick) {
+            setSelectedProduct(pick.id);
+            if (pick.regions?.length > 0) {
+              setSelectedRegion(pick.regions[0].id);
+            }
           }
-        }
-        if (data.ephemeralStorageBlocks?.length > 0) {
-          setSelectedStorage(data.ephemeralStorageBlocks[0].id);
         }
       }
 
@@ -386,7 +385,8 @@ export default function HuggingFaceTab({
         const body: Record<string, unknown> = {
           hfItemId: selectedItem.id,
           gpuCount,
-          ephemeralStorageId: selectedStorage || undefined,
+          product_id: selectedProduct || undefined,
+          region_id: selectedRegion || undefined,
           openWebUI: addOpenWebUI,
           netdata: true,
         };
@@ -677,10 +677,10 @@ export default function HuggingFaceTab({
           setDeployMode={setDeployMode}
           selectedSubscription={selectedSubscription}
           setSelectedSubscription={setSelectedSubscription}
-          selectedPool={selectedPool}
-          setSelectedPool={setSelectedPool}
-          selectedStorage={selectedStorage}
-          setSelectedStorage={setSelectedStorage}
+          selectedProduct={selectedProduct}
+          setSelectedProduct={setSelectedProduct}
+          selectedRegion={selectedRegion}
+          setSelectedRegion={setSelectedRegion}
           gpuCount={gpuCount}
           setGpuCount={setGpuCount}
           hfToken={hfToken}

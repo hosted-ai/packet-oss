@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
   if (shouldVerify && installations.some(i => i.status === "running")) {
     try {
       // Get team ID from Stripe
-      const stripe = getStripe();
+      const stripe = await getStripe();
       const customer = await stripe.customers.retrieve(payload.customerId) as Stripe.Customer;
       const teamId = customer.metadata?.hostedai_team_id;
 

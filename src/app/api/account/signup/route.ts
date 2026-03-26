@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStripeAsync } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { rateLimit, getClientIp } from "@/lib/ratelimit";
 import { generateCustomerToken } from "@/lib/customer-auth";
@@ -11,8 +11,8 @@ import {
   createTeam,
   createOneTimeLogin,
   syncTeamsToDefaultPolicy,
-  DEFAULT_POLICIES,
-  ROLES,
+  ensureDefaultPolicies,
+  ensureRoles,
 } from "@/lib/hostedai";
 import { logAccountCreated, logApiKeyCreated } from "@/lib/activity";
 import { sendOnboardingEvent } from "@/lib/email/onboarding-events";
@@ -195,7 +195,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const stripe = await getStripeAsync();
+    const stripe = await getStripe();
 
     // Check if customer already exists
     const existingCustomers = await stripe.customers.list({
@@ -258,6 +258,13 @@ export async function POST(request: NextRequest) {
 
     let team: { id: string; name: string };
     try {
+      // Await policies and roles from the API (not sync fallback) so team
+      // creation never uses stale staging UUIDs on cold start.
+      const [policies, roles] = await Promise.all([
+        ensureDefaultPolicies(),
+        ensureRoles(),
+      ]);
+
       team = await createTeam({
         name: teamName,
         description: `${getBrandName()} - Free Trial`,
@@ -266,17 +273,17 @@ export async function POST(request: NextRequest) {
           {
             email: customerEmail,
             name: customerName,
-            role: ROLES.teamAdmin,
+            role: roles.teamAdmin,
             send_email_invite: false,
             password: generatedPassword,
             pre_onboard: true,
           },
         ],
-        pricing_policy_id: DEFAULT_POLICIES.pricing,
-        resource_policy_id: DEFAULT_POLICIES.resource,
-        service_policy_id: DEFAULT_POLICIES.service,
-        instance_type_policy_id: DEFAULT_POLICIES.instanceType,
-        image_policy_id: DEFAULT_POLICIES.image,
+        pricing_policy_id: policies.pricing,
+        resource_policy_id: policies.resource,
+        service_policy_id: policies.service,
+        instance_type_policy_id: policies.instanceType,
+        image_policy_id: policies.image,
       });
       console.log(`✅ Created hosted.ai team ${team.id} for free trial`);
 
@@ -294,13 +301,14 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to create hosted.ai team: ${teamError instanceof Error ? teamError.message : String(teamError)}`);
     }
 
-    // Create one-time login token
+    // Create one-time login token (roles already fetched above)
     try {
+      const signupRoles = await ensureRoles();
       await createOneTimeLogin({
         email: customerEmail,
         send_email_invite: false,
         teamId: team.id,
-        roleId: ROLES.teamAdmin,
+        roleId: signupRoles.teamAdmin,
       });
       console.log(`✅ Created OTL for ${customerEmail}`);
     } catch (otlError) {

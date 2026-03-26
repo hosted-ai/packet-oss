@@ -27,7 +27,7 @@ export async function POST(
     }
 
     // Get customer to find team ID
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = (await stripe.customers.retrieve(
       payload.customerId
     )) as Stripe.Customer;
@@ -92,7 +92,7 @@ export async function DELETE(
     }
 
     // Get customer to find team ID
-    const stripe = getStripe();
+    const stripe = await getStripe();
     const customer = (await stripe.customers.retrieve(
       payload.customerId
     )) as Stripe.Customer;

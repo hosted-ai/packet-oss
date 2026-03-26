@@ -134,7 +134,7 @@ function generatePoolName(gpuModel?: string | null): string {
  */
 async function getActiveTeamIdsFromStripe(): Promise<string[]> {
   const teamIds: string[] = [];
-  const stripe = getStripe();
+  const stripe = await getStripe();
 
   try {
     // Get all active subscriptions with team IDs
