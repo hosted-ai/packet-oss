@@ -12,9 +12,8 @@ export class ApiError extends Error {
 
 interface ApiResponse<T> {
   data: T;
-  meta: {
-    requestId: string;
-    timestamp: string;
+  meta?: {
+    [key: string]: any;
   };
 }
 
@@ -33,16 +32,17 @@ export async function apiRequest<T>(
     ...options,
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      "X-API-Key": apiKey,
       ...options.headers,
     },
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
+    const errorMessage = errorData.error?.message || errorData.message || `HTTP ${response.status}`;
     throw new ApiError(
       response.status,
-      errorData.error || errorData.message || `HTTP ${response.status}`
+      errorMessage
     );
   }
 
@@ -50,7 +50,7 @@ export async function apiRequest<T>(
   return json.data;
 }
 
-// Type definitions matching actual API responses
+// Type definitions matching OpenAPI schemas
 
 export interface Account {
   id: string;
@@ -58,6 +58,36 @@ export interface Account {
   name?: string;
   teamId?: string;
   createdAt: string;
+}
+
+export interface Instance {
+  id: string;
+  name: string;
+  status: "running" | "stopped" | "starting" | "stopping" | "error";
+  created_at: string;
+  region?: {
+    id: number;
+    name: string;
+    city: string;
+    country: string;
+  };
+  gpu?: {
+    model: string;
+    vendor: string;
+    vram_gb: string;
+    vgpu_count: number;
+  };
+  instance_type?: {
+    id: string;
+    name: string;
+    cpu_cores: number;
+    ram_mb: number;
+  };
+  ip: string[];
+  metadata?: {
+    displayName: string | null;
+    notes: string | null;
+  };
 }
 
 export interface Pool {
@@ -93,17 +123,7 @@ export interface LaunchOptions {
 }
 
 export interface InstanceList {
-  instances: unknown[];
-  poolSubscriptions: Array<{
-    id: number | string;
-    status: string;
-    pool_id?: number | string;
-    pool_name?: string;
-    gpu_count?: number;
-    created_at?: string;
-    pods?: Array<{ pod_name: string; pod_status: string }>;
-  }>;
-  podMetadata: Record<string, { displayName: string | null; notes: string | null }>;
+  instances: Instance[];
 }
 
 export interface InstanceDetail {
@@ -120,7 +140,7 @@ export interface InstanceDetail {
     displayName: string | null;
     notes: string | null;
   };
-  connectionInfo?: unknown;
+  connectionInfo?: ConnectionInfo;
 }
 
 export interface ConnectionInfo {
@@ -143,4 +163,55 @@ export interface CreateInstanceResult {
   pool_id: string;
   vgpus: number;
   startup_script_status?: string;
+}
+
+export interface SSHKey {
+  id: string;
+  name: string;
+  publicKey: string;
+  fingerprint: string;
+  createdAt: string;
+}
+
+export interface BillingSummary {
+  balance: number;
+  balanceFormatted: string;
+  currentPeriodSpend: number;
+  transactions: Array<{
+    id: string;
+    type: "credit" | "debit";
+    amount: number;
+    amountFormatted: string;
+    description: string;
+    createdAt: string;
+  }>;
+}
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  name?: string;
+  role: "owner" | "member";
+  invitedAt: string;
+  acceptedAt?: string;
+  invitedBy: string;
+}
+
+export interface ApiKey {
+  id: string;
+  name: string;
+  keyPrefix: string;
+  scopes: string[];
+  lastUsedAt?: string;
+  expiresAt?: string;
+  createdAt: string;
+}
+
+export interface CreateApiKeyResponse {
+  id: string;
+  name: string;
+  key: string;
+  keyPrefix: string;
+  createdAt: string;
+  expiresAt?: string;
 }
