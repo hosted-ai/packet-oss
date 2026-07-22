@@ -159,6 +159,18 @@ export async function unassignAppService(serviceId: string): Promise<void> {
 // ============================================
 
 /**
+ * Sanitize a scenario name for HAI: keep alphanumerics, spaces, hyphens and
+ * underscores, collapse whitespace (HAI rejects other characters as
+ * "invalid scenario name").
+ */
+function sanitizeScenarioName(name: string): string {
+  return name
+    .replace(/[^a-zA-Z0-9 _-]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Create an HAI scenario for a GPU category.
  * Returns the scenario UUID, or null if HAI is unreachable.
  */
@@ -166,7 +178,7 @@ export async function createCategoryScenario(
   categoryName: string,
   categorySlug: string
 ): Promise<string | null> {
-  const scenarioName = `Packet GPU: ${categoryName}`;
+  const scenarioName = sanitizeScenarioName(`Packet GPU ${categoryName}`);
   try {
     const result = await createScenario({
       name: scenarioName,
