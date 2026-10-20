@@ -21,14 +21,13 @@ import { prisma } from "./prisma";
  * Default embargoed country codes. Seeds the DB on first enable.
  * Not used at runtime when DB is available — DB is single source of truth.
  *
- * Comprehensive sanctions (primary): CU, IR, KP, SY
+ * Comprehensive sanctions (primary): CU, IR, KP
  * Targeted sector sanctions: RU, BY, MM
  */
 export const DEFAULT_EMBARGOED_COUNTRIES = [
   "CU", // Cuba          — OFAC (US)
   "IR", // Iran          — OFAC (US), UN, EU
   "KP", // North Korea   — OFAC (US), UN, EU
-  "SY", // Syria         — OFAC (US), EU
   "RU", // Russia        — OFAC (US), EU, UK (targeted sectors)
   "BY", // Belarus       — EU, UK (targeted)
   "MM", // Myanmar/Burma — OFAC (US) (targeted)
