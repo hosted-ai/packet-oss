@@ -1,4 +1,5 @@
 import { getApiKey, getApiUrl } from "./config.js";
+import type { components, operations } from "./generated/public-api.js";
 
 export class ApiError extends Error {
   constructor(
@@ -8,14 +9,6 @@ export class ApiError extends Error {
     super(message);
     this.name = "ApiError";
   }
-}
-
-interface ApiResponse<T> {
-  data: T;
-  meta: {
-    requestId: string;
-    timestamp: string;
-  };
 }
 
 export async function apiRequest<T>(
@@ -39,123 +32,34 @@ export async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new ApiError(
-      response.status,
-      errorData.error || errorData.message || `HTTP ${response.status}`
-    );
+    const errorData: Partial<components["schemas"]["Error"]> = await response.json().catch(() => ({}));
+    throw new ApiError(response.status, errorData.error?.message || `HTTP ${response.status}`);
   }
 
-  const json = (await response.json()) as ApiResponse<T>;
+  const json = (await response.json()) as { data: T };
   return json.data;
 }
 
-// Type definitions matching API responses (HAI 2.2 unified instances)
+// Request and response types, generated from the public API spec pinned in openapi/public.json.
 
-export interface Account {
-  id: string;
-  email: string;
-  name?: string;
-  teamId?: string;
-  createdAt: string;
-}
+type JsonBody<R> = R extends { content: { "application/json": infer B } } ? B : never;
+type Data<Op extends keyof operations> = JsonBody<
+  operations[Op]["responses"][keyof operations[Op]["responses"] & (200 | 201)]
+> extends { data?: infer D }
+  ? D
+  : never;
+type RequestBody<Op extends keyof operations> = JsonBody<operations[Op]["requestBody"]>;
 
-export interface Pool {
-  id: number | string;
-  name: string;
-  gpu_model?: string;
-  available_gpus?: number;
-  price_per_hour?: number;
-}
-
-export interface GpuProduct {
-  id: string;
-  name: string;
-  description: string | null;
-  pricePerHourCents: number;
-  poolIds: number[];
-  displayOrder: number;
-  featured: boolean;
-  badgeText: string | null;
-  vramGb: number | null;
-  totalAvailableGpus: number;
-}
-
-export interface LaunchOptions {
-  regions: Array<{ id: string | number; name?: string }>;
-  pools: Pool[];
-  products: GpuProduct[];
-  instanceTypes: Array<{ id: string; name: string; description?: string }>;
-  images: Array<{ id: string; name: string; description?: string }>;
-  storageBlocks: unknown[];
-  ephemeralStorageBlocks: unknown[];
-  persistentStorageBlocks: unknown[];
-}
-
-export interface Instance {
-  id: string;
-  name: string;
-  status: string;
-  created_at: string;
-  region?: {
-    id: number;
-    name: string;
-    city: string;
-    country: string;
-  } | null;
-  gpu?: {
-    model: string;
-    vendor: string;
-    vram_gb: string;
-    vgpu_count: number;
-  } | null;
-  instance_type?: {
-    id: string;
-    name: string;
-    cpu_cores: number;
-    ram_mb: number;
-  } | null;
-  ip: string[];
-  metadata?: {
-    displayName: string | null;
-    notes: string | null;
-  } | null;
-}
-
-export interface InstanceList {
-  instances: Instance[];
-}
-
-export interface InstanceDetail {
-  instance: Instance;
-  metadata: {
-    displayName: string | null;
-    notes: string | null;
-  };
-  connectionInfo?: {
-    ip: string;
-    port: number;
-    username: string;
-    ssh_command: string | null;
-  } | null;
-}
-
-export interface ConnectionInfo {
-  instance_id: string;
-  status: string;
-  connection: {
-    ip: string;
-    port: number;
-    username: string;
-    password?: string;
-    ssh_command: string | null;
-  };
-}
-
-export interface CreateInstanceResult {
-  instance_id: string;
-  name: string;
-  pool_id: string;
-  vgpus: number;
-  startup_script_status?: string;
-}
+export type Account = Data<"getAccount">;
+export type LaunchOptions = Data<"getLaunchOptions">;
+export type Instance = components["schemas"]["Instance"];
+export type InstanceList = Data<"listInstances">;
+export type InstanceDetail = Data<"getInstance">;
+export type UpdateInstanceRequest = RequestBody<"updateInstance">;
+export type ConnectionInfo = Data<"getInstanceConnection">;
+export type CreateInstanceRequest = RequestBody<"createInstance">;
+export type CreateInstanceResult = Data<"createInstance">;
+export type ExposedService = components["schemas"]["Service"];
+export type ExposeServiceRequest = RequestBody<"exposeService">;
+export type ExposeServiceResult = Data<"exposeService">;
+export type DeleteServiceResult = Data<"deleteService">;

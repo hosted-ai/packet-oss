@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { buildSignInRedirect } from "@/lib/auth/signin-redirect";
 
 /**
  * Wraps window.fetch once per page load. When a same-origin /api/* call returns
@@ -17,7 +18,6 @@ interface SessionGuardProps {
 }
 
 const INSTALL_FLAG = "__packetSessionGuardInstalled" as const;
-export const SESSION_EXPIRED_QUERY = "reason=session_expired";
 
 function isAuthEndpoint(pathname: string): boolean {
   return /\/auth(\/|$)/.test(pathname);
@@ -79,8 +79,12 @@ export function SessionGuard({ redirectTo }: SessionGuardProps) {
             refreshStatus = "error";
           }
           const toLogin = () => {
-            const separator = redirectTo.includes("?") ? "&" : "?";
-            window.location.href = `${redirectTo}${separator}${SESSION_EXPIRED_QUERY}`;
+            // PA-335: preserve the deep link the visitor was on so signup/signin
+            // (and the welcome email) can send them back to it.
+            window.location.href = buildSignInRedirect(
+              redirectTo,
+              window.location.pathname + window.location.search,
+            );
           };
           if (refreshStatus === 200) {
             // Fresh token minted. Reload to re-bootstrap — but at most once per ~15s

@@ -63,7 +63,7 @@ export async function GET(
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, teamId } = auth;
+    const { accountId, teamId } = auth;
 
     // PA-202 gate: Hugging Face hidden from Read-only Member + Finance Manager.
     const denial = requirePermission(auth, "huggingface.use", request);
@@ -71,11 +71,12 @@ export async function GET(
 
     const { id } = await params;
 
-    // Get deployment record
+    // Scoped on the operating account, as the collection route is, so a member
+    // operating a team reaches the deployment their list already shows.
     let deployment = await prisma.huggingFaceDeployment.findFirst({
       where: {
         id,
-        stripeCustomerId: payload.customerId,
+        stripeCustomerId: accountId,
       },
     });
 
@@ -109,7 +110,7 @@ export async function GET(
       });
 
       await logActivity(
-        payload.customerId,
+        accountId,
         "hf_deployment_timeout",
         `HuggingFace deployment timed out: ${deployment.hfItemName}`,
         {
@@ -173,7 +174,7 @@ export async function GET(
       });
 
       await logActivity(
-        payload.customerId,
+        accountId,
         "hf_deployment_pod_terminated",
         `HuggingFace deployment pod terminated: ${deployment.hfItemName}`,
         {
@@ -237,7 +238,7 @@ export async function GET(
         });
 
         await logActivity(
-          payload.customerId,
+          accountId,
           "hf_deployment_script_started",
           `HuggingFace deployment script started: ${deployment.hfItemName}`,
           {
@@ -258,7 +259,7 @@ export async function GET(
         });
 
         await logActivity(
-          payload.customerId,
+          accountId,
           "hf_deployment_script_failed",
           `HuggingFace deployment script failed: ${deployment.hfItemName}`,
           {
@@ -372,7 +373,7 @@ export async function DELETE(
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, teamId } = auth;
+    const { accountId, teamId } = auth;
 
     // PA-202 gate: Hugging Face hidden from Read-only Member + Finance Manager.
     const denial = requirePermission(auth, "huggingface.use", request);
@@ -380,11 +381,12 @@ export async function DELETE(
 
     const { id } = await params;
 
-    // Get deployment record
+    // Scoped on the operating account, as the collection route is, so a member
+    // operating a team can delete the deployment their list already shows.
     const deployment = await prisma.huggingFaceDeployment.findFirst({
       where: {
         id,
-        stripeCustomerId: payload.customerId,
+        stripeCustomerId: accountId,
       },
     });
 
@@ -419,7 +421,7 @@ export async function DELETE(
     });
 
     await logActivity(
-      payload.customerId,
+      accountId,
       "hf_deployment_deleted",
       `Deleted HuggingFace deployment: ${deployment.hfItemName}`,
       {

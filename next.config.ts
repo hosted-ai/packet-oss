@@ -2,7 +2,16 @@ import type { NextConfig } from "next";
 import { readFileSync } from "fs";
 import { join } from "path";
 
+// The changelog is what actually ships (the bot bumps it every build); the
+// hand-maintained VERSION file went stale at 0.8.61 and lied in the footer.
 function getPackageVersion(): string {
+  try {
+    const changelog = readFileSync(join(process.cwd(), "debian", "changelog"), "utf-8");
+    const m = changelog.match(/^\S+ \(([^)]+?)(?:-\d+)?\)/);
+    if (m) return m[1];
+  } catch {
+    /* fall through to VERSION */
+  }
   try {
     return readFileSync(join(process.cwd(), "VERSION"), "utf-8").trim();
   } catch {

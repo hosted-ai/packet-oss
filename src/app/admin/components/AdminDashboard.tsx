@@ -23,6 +23,8 @@ import {
   NodeMonitoringTab,
   PoolOverviewTab,
   BusinessTab,
+  OpsSummaryTab,
+  PacketHealthTab,
   CreditModal,
   CustomerDetailPanel,
   BannersTab,
@@ -52,9 +54,9 @@ const BatchesTab = isPro() ? dynamic(() => import("./BatchesTab").then(m => ({ d
 const TokenFactoryProvidersTab = isPro() ? dynamic(() => import("./TokenFactoryProvidersTab").then(m => ({ default: m.TokenFactoryProvidersTab }))) : NullTab;
 const SkyPilotTab = isPro() ? dynamic(() => import("./SkyPilotTab").then(m => ({ default: m.SkyPilotTab }))) : NullTab;
 const SpheronInventoryTab = isPro() ? dynamic(() => import("./SpheronInventoryTab").then(m => ({ default: m.SpheronInventoryTab }))) : NullTab;
+const BareMetalOrdersTab = isPro() ? dynamic(() => import("./BareMetalOrdersTab").then(m => ({ default: m.BareMetalOrdersTab }))) : NullTab;
 const MarketingTab = isPro() ? dynamic(() => import("./MarketingTab").then(m => ({ default: m.MarketingTab }))) : NullTab;
 const TenantsTab = isPro() ? dynamic(() => import("./TenantsTab").then(m => ({ default: m.TenantsTab }))) : NullTab;
-const PixelFactoryTab = isPro() ? dynamic(() => import("./PixelFactoryTab").then(m => ({ default: m.PixelFactoryTab }))) : NullTab;
 const InfrastructureRequestsTab = isPro() ? dynamic(() => import("./InfrastructureRequestsTab").then(m => ({ default: m.InfrastructureRequestsTab }))) : NullTab;
 const DealCalculators = isPro() ? dynamic(() => import("./DealCalculator").then(m => ({ default: m.DealCalculators }))) : NullTab;
 const InvestorsTab = isPro() ? dynamic(() => import("./InvestorsTab").then(m => ({ default: m.InvestorsTab }))) : NullTab;
@@ -412,17 +414,19 @@ export function AdminDashboard() {
       skypilot: "SkyPilot Integration",
       support: "Support Tickets",
       spheron: "Spheron Inventory",
+      baremetal: "Bare Metal",
       "node-revenue": "Node Revenue",
       banners: "Campaign Banners",
       marketing: "Marketing",
       tenants: "White-Label Tenants",
-      "pixel-factory": "Pixel Factory",
       uptime: "Pod Uptime",
       payouts: "Investor Payouts",
       "platform-settings": "Platform Settings",
       "gpu-apps": "GPU Apps",
       announcements: "Dashboard Announcements",
       broadcast: "Email Broadcast",
+      "ops-summary": "Daily Ops Summary",
+      "packet-health": "Packet Health Metrics",
     };
     return labels[tab];
   };
@@ -447,7 +451,10 @@ export function AdminDashboard() {
 
           {/* Stats Row */}
           <div className="grid grid-cols-5 gap-4">
-            <div className="bg-[#f7f8fb] rounded-lg p-3">
+            <div
+              className="bg-[#f7f8fb] rounded-lg p-3"
+              title="Total signups (customers who signed up). Excludes internal & test accounts."
+            >
               <p className="text-[#5b6476] text-xs">Total Customers</p>
               <p className="text-xl font-bold text-[#0b0f1c]">{stats.totalCustomers}</p>
               {stats.growth && (
@@ -657,6 +664,9 @@ export function AdminDashboard() {
 
         {activeTab === "business" && <BusinessTab />}
 
+        {activeTab === "ops-summary" && <OpsSummaryTab />}
+        {activeTab === "packet-health" && <PacketHealthTab />}
+
         {activeTab === "demand" && (
           <InfrastructureRequestsTab
             requests={infrastructureRequests}
@@ -684,13 +694,13 @@ export function AdminDashboard() {
 
         {activeTab === "spheron" && <SpheronInventoryTab />}
 
+        {activeTab === "baremetal" && <BareMetalOrdersTab />}
+
         {activeTab === "banners" && <BannersTab />}
 
         {activeTab === "marketing" && <MarketingTab />}
 
         {activeTab === "tenants" && <TenantsTab />}
-
-        {activeTab === "pixel-factory" && <PixelFactoryTab />}
 
         {activeTab === "uptime" && <UptimeTab />}
 

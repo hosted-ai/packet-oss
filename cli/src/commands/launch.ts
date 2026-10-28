@@ -1,7 +1,13 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
-import { apiRequest, type LaunchOptions, type CreateInstanceResult, type ConnectionInfo } from "../api.js";
+import {
+  apiRequest,
+  type LaunchOptions,
+  type CreateInstanceRequest,
+  type CreateInstanceResult,
+  type ConnectionInfo,
+} from "../api.js";
 import { getApiKey } from "../config.js";
 import { SETUP_PRESETS } from "./setup.js";
 
@@ -46,7 +52,7 @@ export const launchCommand = new Command("launch")
       // Find matching product (case insensitive, partial match)
       const gpuSearch = options.gpu.toLowerCase().replace(/[-_\s]/g, "");
       const product = (launchOptions.products || []).find((p) => {
-        const productName = p.name.toLowerCase().replace(/[-_\s]/g, "");
+        const productName = (p.name ?? "").toLowerCase().replace(/[-_\s]/g, "");
         return productName.includes(gpuSearch) || gpuSearch.includes(productName);
       });
 
@@ -56,15 +62,15 @@ export const launchCommand = new Command("launch")
         process.exit(1);
       }
 
-      if (product.totalAvailableGpus <= 0) {
+      if ((product.totalAvailableGpus ?? 0) <= 0) {
         spinner.fail(`${product.name} is currently unavailable`);
         console.log(chalk.gray("\n  Try a different GPU type or check back later.\n"));
         process.exit(1);
       }
 
       // Pick the first available pool from this product
-      const pool = launchOptions.pools.find((p) =>
-        product.poolIds.includes(Number(p.id)) && (p.available_gpus ?? 0) > 0
+      const pool = (launchOptions.pools || []).find((p) =>
+        product.poolIds?.includes(Number(p.id)) && (p.available_gpus ?? 0) > 0
       );
 
       if (!pool) {
@@ -80,9 +86,10 @@ export const launchCommand = new Command("launch")
 
       const gpuCount = Math.max(1, Math.floor(Number(options.gpus)));
 
-      const body: Record<string, unknown> = {
-        name: options.name || `cli-${product.name.replace(/\s+/g, "-").toLowerCase()}`,
-        pool_id: pool.id,
+      // The public spec has no startup_script fields: the dashboard API accepts them, packet-api refuses them.
+      const body: CreateInstanceRequest & { startup_script?: string; startup_script_preset_id?: string } = {
+        name: options.name || `cli-${(product.name ?? "").replace(/\s+/g, "-").toLowerCase()}`,
+        pool_id: String(pool.id),
         vgpus: gpuCount,
       };
 
@@ -104,7 +111,7 @@ export const launchCommand = new Command("launch")
       console.log(chalk.gray(`  Status:      starting`));
       console.log(
         chalk.gray(
-          `  Price:       $${(product.pricePerHourCents / 100).toFixed(2)}/hr`
+          `  Price:       $${((product.pricePerHourCents ?? 0) / 100).toFixed(2)}/hr`
         )
       );
 

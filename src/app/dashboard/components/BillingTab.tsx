@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import { UsageChart } from "./UsageChart";
+import { AutoRefillCard, type AutoRefillSettings } from "./AutoRefillCard";
 
 interface Transaction {
   id: string;
@@ -40,6 +41,8 @@ interface AllTimeStats {
 interface BillingTabProps {
   transactions: Transaction[];
   walletBalance: string;
+  /** PA-339: signed balance in cents; negative = in arrears (drives the debt styling/note). */
+  walletBalanceCents?: number;
   onTopUp: () => void;
   formatDateTime: (timestamp: number) => string;
   onDownloadCSV: () => void;
@@ -47,6 +50,8 @@ interface BillingTabProps {
   billingPortalUrl?: string;
   subscriptions?: Subscription[];
   token: string;
+  autoRefill?: AutoRefillSettings | null;
+  canManageBilling?: boolean;
 }
 
 type PeriodType = "day" | "week" | "month" | "year" | "all";
@@ -55,22 +60,29 @@ type FilterType = "all" | "credits" | "debits";
 export function BillingTab({
   transactions,
   walletBalance,
+  walletBalanceCents = 0,
   onTopUp,
-  formatDateTime,
   onDownloadCSV,
   payments = [],
   billingPortalUrl,
   subscriptions = [],
   token,
+  autoRefill = null,
+  canManageBilling = false,
 }: BillingTabProps) {
   const [period, setPeriod] = useState<PeriodType>("all");
   const [filter, setFilter] = useState<FilterType>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Lazy-load accurate all-time stats from the server (full Stripe pagination).
-  // The transactions prop is capped at 100 for fast initial page load, so
-  // client-side totals would under-count for customers with more history.
+  // Lazy-load accurate all-time stats AND the full transaction list from the
+  // server (full Stripe pagination). The `transactions` prop is capped at 100
+  // for a fast initial page load, so the visible table, period filters, and
+  // derived stat cards would all under-count / hide older activity (PA-26:
+  // GPU deploy/terminate transactions get pushed out of that 100-slot window
+  // by frequent storage charges within days). Fall back to the capped prop
+  // until this resolves, or if it fails.
   const [serverAllTimeStats, setServerAllTimeStats] = useState<AllTimeStats | null>(null);
+  const [serverTransactions, setServerTransactions] = useState<Transaction[] | null>(null);
   const [allTimeStatsLoading, setAllTimeStatsLoading] = useState(true);
 
   useEffect(() => {
@@ -78,12 +90,15 @@ export function BillingTab({
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
-      .then((data: { allTimeStats?: AllTimeStats }) => {
+      .then((data: { allTimeStats?: AllTimeStats; transactions?: Transaction[] }) => {
         if (data.allTimeStats) setServerAllTimeStats(data.allTimeStats);
+        if (data.transactions) setServerTransactions(data.transactions);
       })
       .catch((err) => console.error("[BillingTab] Failed to fetch all-time stats:", err))
       .finally(() => setAllTimeStatsLoading(false));
   }, [token]);
+
+  const allTransactions = serverTransactions ?? transactions;
 
   // Calculate period boundaries
   const periodBoundaries = useMemo(() => {
@@ -110,7 +125,7 @@ export function BillingTab({
     // Convert periodStart to seconds for comparison
     const periodStartSeconds = periodBoundaries[period] / 1000;
 
-    return transactions.filter((txn) => {
+    return allTransactions.filter((txn) => {
       // Period filter - both now in seconds
       if (txn.created < periodStartSeconds) return false;
 
@@ -126,7 +141,7 @@ export function BillingTab({
 
       return true;
     });
-  }, [transactions, period, filter, searchQuery, periodBoundaries]);
+  }, [allTransactions, period, filter, searchQuery, periodBoundaries]);
 
   // Calculate statistics for filtered transactions
   const stats = useMemo(() => {
@@ -181,12 +196,12 @@ export function BillingTab({
     };
   }, [filteredTransactions]);
 
-  // Calculate all-time statistics
+  // Calculate all-time statistics (fallback for when serverAllTimeStats hasn't loaded)
   const allTimeStats = useMemo(() => {
     let totalSpent = 0;
     let totalCredits = 0;
 
-    transactions.forEach((txn) => {
+    allTransactions.forEach((txn) => {
       const amount = Math.abs(txn.amount) / 100;
       if (txn.type === "debit") {
         totalSpent += amount;
@@ -200,7 +215,7 @@ export function BillingTab({
       totalCredits,
       netSpend: totalSpent - totalCredits,
     };
-  }, [transactions]);
+  }, [allTransactions]);
 
   // Calculate total card payments
   const totalPaid = useMemo(() => {
@@ -275,7 +290,11 @@ export function BillingTab({
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="bg-white rounded-2xl p-5 border border-[var(--line)]">
           <div className="text-xs text-[var(--muted)] mb-1">Current Balance</div>
-          <div className="text-2xl font-bold text-[var(--ink)]">{walletBalance}</div>
+          {/* PA-339: show debt in red with a note rather than a bare (or clamped) figure */}
+          <div className={`text-2xl font-bold ${walletBalanceCents < 0 ? "text-rose-600" : "text-[var(--ink)]"}`}>{walletBalance}</div>
+          {walletBalanceCents < 0 && (
+            <div className="text-xs text-rose-600 mt-1">In arrears — top-ups clear this first</div>
+          )}
         </div>
 
         <div className="bg-white rounded-2xl p-5 border border-[var(--line)]">
@@ -312,6 +331,14 @@ export function BillingTab({
           <div className="text-xs text-zinc-400">{payments.length} payment{payments.length !== 1 ? "s" : ""}</div>
         </div>
       </div>
+
+      {/* Auto-Refill */}
+      <AutoRefillCard
+        settings={autoRefill}
+        token={token}
+        billingPortalUrl={billingPortalUrl}
+        canManage={canManageBilling}
+      />
 
       {/* Active Subscriptions */}
       {subscriptions.length > 0 && (
@@ -449,7 +476,7 @@ export function BillingTab({
           <span className="text-xs text-zinc-400">Last 14 days</span>
         </div>
         <div className="h-48">
-          <UsageChart transactions={transactions} />
+          <UsageChart transactions={allTransactions} />
         </div>
       </div>
 
@@ -517,7 +544,7 @@ export function BillingTab({
           <h3 className="font-semibold text-[var(--ink)]">
             Transactions
             <span className="ml-2 text-sm font-normal text-zinc-400">
-              ({filteredTransactions.length} of {transactions.length})
+              ({filteredTransactions.length} of {allTransactions.length})
             </span>
           </h3>
           {filteredTransactions.length > 0 && (

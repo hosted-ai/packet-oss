@@ -6,8 +6,8 @@ import { getWalletTransactions, formatCentsForUser } from "@/lib/wallet";
 /**
  * GET /api/billing/history
  *
- * Returns the complete Stripe balance transaction history for the authenticated
- * customer, auto-paginating all pages regardless of count.
+ * Returns the complete Stripe balance transaction history for the operating
+ * account, auto-paginating all pages regardless of count.
  *
  * Also returns pre-computed all-time aggregate totals so the dashboard can display
  * accurate "All-Time Spend" stats without the 100-transaction cap imposed by the
@@ -22,17 +22,14 @@ export async function GET(request: NextRequest) {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
 
-    // PA-269: billing.view required — same gate as /api/account/billing-stats.
-    // Previously this route only verified the JWT was valid, so any Team Member
-    // or Read-only Member could read the owner's full transaction history +
-    // all-time spend by calling it directly. The sidebar hide was cosmetic.
+    // billing.view, the same gate as /api/account/billing-stats: the sidebar
+    // hide is cosmetic, so a member can otherwise call this route directly.
     const denial = requirePermission(auth, "billing.view", request);
     if (denial) return denial;
 
-    // auth.payload.customerId is the Stripe customer ID baked into the JWT at
-    // login time. For team members this is the owner's customer ID — the same
-    // wallet this route read before the gate was added (no data-selection change).
-    const allRaw = await getWalletTransactions(auth.payload.customerId);
+    // The wallet on screen belongs to the operating account, which is what
+    // /api/account/verify reads for the same rows.
+    const allRaw = await getWalletTransactions(auth.accountId);
 
     // Apply the same bookkeeping filter as /api/account/verify
     const userFacing = allRaw.filter((txn) => {

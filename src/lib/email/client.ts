@@ -21,6 +21,8 @@ import type { Transporter } from "nodemailer";
 import { getEmailFromName, getEmailFromAddress } from "@/lib/branding";
 import { getSetting, getSettings } from "@/lib/settings";
 import { prisma } from "@/lib/prisma";
+import { noteSendFailure, noteSendSuccess, isQuotaRefusal, isAuthRefusal } from "./send-failure-alert";
+import { deferEmail } from "./deferred";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -150,7 +152,19 @@ async function getAdminBccEmail(): Promise<string | null> {
 
 // ── Retry logic ─────────────────────────────────────────────────────────────
 
+// Deferrable: a refusal of the transport that a later send can still satisfy —
+// a quota clearing at the provider's reset, or a credential an operator fixes.
+export function isDeferrableError(err: unknown): boolean {
+  if (isAuthRefusal(err)) return true;
+  const code = (err as { responseCode?: number } | null)?.responseCode;
+  if (code !== undefined && (code < 400 || code >= 500)) return false;
+  return isQuotaRefusal(err);
+}
+
 function isRetriableError(err: unknown): boolean {
+  // Retrying a deferrable refusal re-hits the provider three more times and
+  // still loses the message; it is queued instead.
+  if (isDeferrableError(err)) return false;
   if (!(err instanceof Error)) return false;
   const msg = err.message.toLowerCase();
   // Connection-level failures are retriable
@@ -189,7 +203,7 @@ async function withRetry<T>(
 
 // ── EmailLog writer (non-blocking) ──────────────────────────────────────────
 
-function logEmail(to: string, subject: string, status: "sent" | "failed", provider: string, error?: string): void {
+function logEmail(to: string, subject: string, status: "sent" | "failed" | "deferred", provider: string, error?: string): void {
   prisma.emailLog.create({
     data: { to, subject, status, provider, error: error?.substring(0, 2000) },
   }).catch((err) => {
@@ -228,7 +242,7 @@ async function sendViaSmtp(
 
 // ── Core send function ──────────────────────────────────────────────────────
 
-async function sendRaw(params: EmailDirectParams): Promise<void> {
+async function sendRaw(params: EmailDirectParams, defer = true): Promise<void> {
   const transport = await resolveTransport();
 
   if (transport.type === "none") {
@@ -246,8 +260,16 @@ async function sendRaw(params: EmailDirectParams): Promise<void> {
       `SMTP send to ${params.to}`,
     );
     logEmail(params.to, params.subject, "sent", "smtp");
+    noteSendSuccess();
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
+    // Not awaited: the alert must not add its own SMTP timeout to this throw.
+    void noteSendFailure(params.to, err);
+    if (defer && isDeferrableError(err)) {
+      await deferEmail(params, errorMsg);
+      logEmail(params.to, params.subject, "deferred", "smtp", errorMsg);
+      return;
+    }
     logEmail(params.to, params.subject, "failed", "smtp", errorMsg);
     throw err;
   }
@@ -281,6 +303,12 @@ export async function sendEmail(params: EmailParams): Promise<void> {
  */
 export async function sendEmailDirect(params: EmailDirectParams): Promise<void> {
   await sendRaw(params);
+}
+
+// Send a message already held in the deferred queue: failures throw, so the
+// queue row stays its single record rather than being queued a second time.
+export async function resendDeferredEmail(params: EmailDirectParams): Promise<void> {
+  await sendRaw(params, false);
 }
 
 /**

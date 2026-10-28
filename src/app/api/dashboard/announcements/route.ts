@@ -1,20 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken } from "@/lib/customer-auth";
+import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import { prisma } from "@/lib/prisma";
-import { getStripe } from "@/lib/stripe";
 import { getPoolSubscriptions } from "@/lib/hostedai";
+import {
+  canonicalDisplayType,
+  canonicalTargetType,
+  parseTargetPoolIds,
+} from "@/lib/announcements/targeting";
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get("authorization")?.replace("Bearer ", "");
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-    }
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
 
     const now = new Date();
 
@@ -36,9 +33,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ announcements: [] });
     }
 
-    // Split by target type
-    const allTarget = announcements.filter((a) => a.targetType === "all");
-    const poolTarget = announcements.filter((a) => a.targetType === "pools");
+    // Canonicalise first so the two splits below cover every stored value
+    const targeted = announcements.map((a) => ({
+      ...a,
+      targetType: canonicalTargetType(a.targetType, a.targetPoolIds),
+    }));
+
+    const allTarget = targeted.filter((a) => a.targetType === "all");
+    const poolTarget = targeted.filter((a) => a.targetType === "pools");
 
     // If no pool-targeted announcements, skip the pool lookup
     if (poolTarget.length === 0) {
@@ -47,17 +49,12 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get customer's pool IDs
-    const customerPoolIds = await getCustomerPoolIds(payload.customerId);
+    // Get the operating account's pool IDs
+    const customerPoolIds = await getPoolIdsForTeam(auth.teamId);
 
-    const matchingPoolAnnouncements = poolTarget.filter((a) => {
-      try {
-        const targetPools: number[] = JSON.parse(a.targetPoolIds || "[]");
-        return targetPools.some((poolId) => customerPoolIds.includes(poolId));
-      } catch {
-        return false;
-      }
-    });
+    const matchingPoolAnnouncements = poolTarget.filter((a) =>
+      parseTargetPoolIds(a.targetPoolIds).some((poolId) => customerPoolIds.includes(poolId))
+    );
 
     return NextResponse.json({
       announcements: [...allTarget, ...matchingPoolAnnouncements].map(formatAnnouncement),
@@ -79,20 +76,14 @@ function formatAnnouncement(a: {
     id: a.id,
     title: a.title,
     message: a.message,
-    displayType: a.displayType,
+    displayType: canonicalDisplayType(a.displayType),
     dismissible: a.dismissible,
   };
 }
 
-async function getCustomerPoolIds(customerId: string): Promise<number[]> {
+async function getPoolIdsForTeam(teamId: string | undefined): Promise<number[]> {
+  if (!teamId) return [];
   try {
-    const stripe = await getStripe();
-    const customer = await stripe.customers.retrieve(customerId);
-    if ("deleted" in customer && customer.deleted) return [];
-
-    const teamId = customer.metadata?.hostedai_team_id;
-    if (!teamId) return [];
-
     const subscriptions = await getPoolSubscriptions(teamId);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return subscriptions.map((s: any) => Number(s.pool_id)).filter((id: number) => !isNaN(id));

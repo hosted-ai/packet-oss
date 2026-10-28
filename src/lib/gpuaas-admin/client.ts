@@ -15,6 +15,8 @@
 import { getSetting } from "@/lib/settings";
 import type { LoginResponse, APIError } from "./types";
 
+const HAI_DEBUG = process.env.HOSTEDAI_DEBUG === "1";
+
 // Session management
 let sessionCookie: string | null = null;
 let sessionExpiry: number | null = null;
@@ -40,7 +42,7 @@ export async function getAdminCredentials(): Promise<{
     throw new Error(
       "HAI admin panel credentials not configured. " +
         "Set HOSTEDAI_ADMIN_URL, HOSTEDAI_ADMIN_USERNAME, HOSTEDAI_ADMIN_PASSWORD " +
-        "in Platform Settings or .env.local."
+        "in Platform Settings or .env.local.",
     );
   }
 
@@ -117,13 +119,13 @@ async function ensureSession(): Promise<string> {
 export async function gpuaasAdminRequest<T>(
   method: string,
   endpoint: string,
-  data?: Record<string, unknown>
+  data?: Record<string, unknown>,
 ): Promise<T> {
   // Cache GET requests to reduce load on admin-console.packet.ai
   if (method === "GET") {
     const cacheKey = endpoint;
     const cached = adminCache.get(cacheKey);
-    if (cached && (Date.now() - cached.timestamp) < ADMIN_CACHE_TTL_MS) {
+    if (cached && Date.now() - cached.timestamp < ADMIN_CACHE_TTL_MS) {
       return cached.data as T;
     }
   }
@@ -132,8 +134,7 @@ export async function gpuaasAdminRequest<T>(
   const creds = await getAdminCredentials();
   const url = `${creds.url}/api${endpoint}`;
 
-  console.log(`[HAI Admin] ${method} ${url}`);
-  if (data) {
+  if (HAI_DEBUG && data) {
     console.log(`[HAI Admin] Request body:`, JSON.stringify(data, null, 2));
   }
 
@@ -148,8 +149,15 @@ export async function gpuaasAdminRequest<T>(
 
   const text = await response.text();
 
+  console.log(
+    `[HAI Admin] ${method} ${endpoint} → ${response.status} (${text.length}B)`,
+  );
+
   if (!response.ok) {
-    console.error(`[HAI Admin] API error ${response.status}:`, text);
+    console.error(
+      `[HAI Admin] API error ${response.status}:`,
+      text.slice(0, 2000),
+    );
 
     // Check if it's an auth error - re-login and retry once
     if (response.status === 401) {
@@ -170,7 +178,7 @@ export async function gpuaasAdminRequest<T>(
       const retryText = await retryResponse.text();
       if (!retryResponse.ok) {
         throw new Error(
-          `HAI Admin API error (${retryResponse.status}): ${retryText}`
+          `HAI Admin API error (${retryResponse.status}): ${retryText}`,
         );
       }
 
@@ -192,7 +200,9 @@ export async function gpuaasAdminRequest<T>(
       // Text is not JSON
     }
 
-    throw new Error(`HAI Admin API error (${response.status}): ${errorMessage}`);
+    throw new Error(
+      `HAI Admin API error (${response.status}): ${errorMessage}`,
+    );
   }
 
   if (!text) {
@@ -202,14 +212,16 @@ export async function gpuaasAdminRequest<T>(
 
   try {
     const parsed = JSON.parse(text);
-    console.log(`[HAI Admin] Response:`, JSON.stringify(parsed, null, 2));
+    if (HAI_DEBUG) {
+      console.log(`[HAI Admin] Response:`, JSON.stringify(parsed, null, 2));
+    }
     // Cache successful GET responses
     if (method === "GET") {
       adminCache.set(endpoint, { data: parsed, timestamp: Date.now() });
     }
     return parsed;
   } catch {
-    console.log(`[HAI Admin] Non-JSON response:`, text);
+    console.log(`[HAI Admin] Non-JSON response:`, text.slice(0, 500));
     return { success: true } as T;
   }
 }

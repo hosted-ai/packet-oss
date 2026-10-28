@@ -11,7 +11,6 @@ interface ServiceRequiredBannerProps {
  * Tabs are NOT disabled — the banner is informational only.
  */
 export function ServiceRequiredBanner({
-  serviceName,
   serviceLabel,
   configured,
 }: ServiceRequiredBannerProps) {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
 import { gatePermission } from "@/lib/auth/gate";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
+import { ApiError } from "@/lib/api";
 import {
   exposeService,
   updateExposedService,
@@ -41,12 +42,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "No team associated" }, { status: 400 });
     }
 
-    // HAI 2.2: Unified instance — use dedicated exposed-services endpoint.
-    // PA-227: `?? []` mirrors the legacy branch below; defends against any
-    // future null from getExposedServices (HAI has historically null'd the
-    // body when an instance has no exposed services).
+    // HAI 2.2: Unified instance — use dedicated exposed-services endpoint,
+    // which normalizes the platform's envelope down to an array of rows.
     if (instanceId.startsWith("i-")) {
-      const services = (await getExposedServices(instanceId)) ?? [];
+      const services = await getExposedServices(instanceId);
       const formattedServices = services.map((s) => ({
         id: s.id,
         service_name: s.service_name,
@@ -156,16 +155,17 @@ export async function POST(request: NextRequest) {
     const normalizedProtocol = protocol?.toUpperCase() === 'UDP' ? 'UDP' : 'TCP';
 
     // Normalize service_type based on protocol
-    // For TCP: "http", "https", or "NodePort" (raw TCP without http prefix)
+    // For TCP: "http", "https", or "none" (raw TCP without http prefix — HAI's
+    // PodExposedServiceType enum has no "NodePort" value; that always 400s. PA-627)
     // For UDP: "NodePort" or "loadbalancer" (Kubernetes types)
-    let normalizedServiceType: "http" | "https" | "NodePort" | "loadbalancer";
+    let normalizedServiceType: "http" | "https" | "none" | "NodePort" | "loadbalancer";
     if (normalizedProtocol === 'TCP') {
-      // For TCP, allow "http", "https", or "NodePort" (raw TCP)
+      // For TCP, allow "http", "https", or "none" (raw TCP)
       const st = service_type?.toLowerCase();
       if (st === 'https') {
         normalizedServiceType = 'https';
-      } else if (st === 'nodeport') {
-        normalizedServiceType = 'NodePort';
+      } else if (st === 'none') {
+        normalizedServiceType = 'none';
       } else {
         normalizedServiceType = 'http';
       }
@@ -184,16 +184,9 @@ export async function POST(request: NextRequest) {
       service_type: normalizedServiceType,
     });
 
-    // Titan unified instances: pool_subscription_id is the instance ID (i-xxx).
-    // HAI expects pod_name to be the instance ID, not the user-given display name.
-    // For legacy pool subscriptions, pool_subscription_id is numeric.
-    const isUnifiedInstance = typeof pool_subscription_id === "string" && pool_subscription_id.startsWith("i-");
-    const resolvedPodName = isUnifiedInstance ? pool_subscription_id : pod_name;
-    const numericSubId = pool_subscription_id ? Number(pool_subscription_id) : NaN;
-
     const service = await exposeService({
-      pod_name: resolvedPodName,
-      ...(Number.isFinite(numericSubId) ? { pool_subscription_id: numericSubId } : {}),
+      pod_name,
+      pool_subscription_id,
       port: Number(port),
       service_name,
       protocol: normalizedProtocol,
@@ -217,7 +210,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    // PA-627: map HAI's real upstream status (e.g. a 400 validation error)
+    // through instead of flattening every failure into an opaque 500.
+    const upstream = ApiError.fromUpstream(error, errorMessage);
+    return NextResponse.json({ error: upstream.message }, { status: upstream.status });
   }
 }
 

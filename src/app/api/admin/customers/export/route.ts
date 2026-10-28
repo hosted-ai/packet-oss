@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
+import { fetchCustomerGroups } from "@/lib/admin-customer-groups";
 import { prisma } from "@/lib/prisma";
 
 function escapeCsvField(value: string): string {
@@ -32,22 +33,15 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") || "";
 
-    // Read from local cache
-    const cachedCustomers = await prisma.customerCache.findMany({
-      where: {
-        isDeleted: false,
-        ...(search
-          ? {
-              OR: [
-                { email: { contains: search } },
-                { name: { contains: search } },
-                { id: { contains: search } },
-              ],
-            }
-          : {}),
-      },
-      orderBy: { stripeCreatedAt: "desc" },
-    });
+    const groups = await fetchCustomerGroups(
+      search
+        ? [
+            { email: { contains: search } },
+            { name: { contains: search } },
+            { id: { contains: search } },
+          ]
+        : null,
+    );
 
     // Count active pods per customer from local PodMetadata
     const podCounts = await prisma.podMetadata.groupBy({
@@ -59,19 +53,28 @@ export async function GET(request: NextRequest) {
       podCountByCustomer.set(row.stripeCustomerId, row._count.id);
     }
 
-    const rows = cachedCustomers.map((customer) => {
-      const walletBalance = -(customer.balanceCents || 0);
-      const activeGPUs = podCountByCustomer.get(customer.id) || 0;
+    const sorted = [...groups].sort(
+      (a, b) => b.primary.stripeCreatedAt.getTime() - a.primary.stripeCreatedAt.getTime(),
+    );
+
+    const rows = sorted.map((group) => {
+      const walletBalance = -(group.primary.balanceCents || 0);
+      // Each pod belongs to exactly one Stripe customer, so the account's pods
+      // are the sum over its records — no record is counted twice.
+      const activeGPUs = group.customerIds.reduce(
+        (sum, id) => sum + (podCountByCustomer.get(id) || 0),
+        0,
+      );
 
       return [
-        escapeCsvField(customer.name || ""),
-        escapeCsvField(customer.email || ""),
-        escapeCsvField(customer.teamId || ""),
-        escapeCsvField(customer.productId || ""),
-        escapeCsvField(customer.billingType || ""),
+        escapeCsvField(group.primary.name || ""),
+        escapeCsvField(group.primary.email || ""),
+        escapeCsvField(group.primary.teamId || ""),
+        escapeCsvField(group.productId || ""),
+        escapeCsvField(group.billingType || ""),
         formatCents(walletBalance),
         String(activeGPUs),
-        formatDate(customer.stripeCreatedAt),
+        formatDate(group.primary.stripeCreatedAt),
       ].join(",");
     });
 

@@ -19,11 +19,13 @@ import {
   assignServiceToScenario,
   unassignServiceFromScenario,
 } from "@/lib/hostedai";
+import { scenarioName } from "@/lib/hostedai/scenario-name";
 import { prisma } from "@/lib/prisma";
 import { getBrandName } from "@/lib/branding";
 
 const GPU_SCENARIO_KEY = "packet_gpu_scenario_id"; // DEPRECATED: kept for migration
 const APPS_SCENARIO_KEY = "packet_apps_scenario_id";
+const BAREMETAL_SCENARIO_KEY = "packet_baremetal_scenario_id";
 
 /**
  * Find an existing scenario by name via the HAI list endpoint.
@@ -155,20 +157,108 @@ export async function unassignAppService(serviceId: string): Promise<void> {
 }
 
 // ============================================
-// Category-scoped scenario management
+// Bare-metal scenario management
 // ============================================
 
 /**
- * Sanitize a scenario name for HAI: keep alphanumerics, spaces, hyphens and
- * underscores, collapse whitespace (HAI rejects other characters as
- * "invalid scenario name").
+ * Get or create the reserved bare-metal scenario. Every HAI service mapped to
+ * a BareMetalProduct is added to it (user decision 2026-06-11 — mirrors how
+ * GPUaaS products use category scenarios). The scenario powers HAI's
+ * scenario-compatible-services discovery, whose response carries each
+ * service's compatible regions inline.
+ *
+ * The name is PREFIX + RANDOM SUFFIX (not a fixed name): multiple Packet
+ * environments share one HAI (local dev + deployed staging both point at
+ * staging HAI), and a fixed name would make them resolve and pollute the
+ * SAME scenario. Each environment mints its own scenario and pins the id in
+ * its own SystemSetting; the description carries the app URL so the HAI
+ * panel shows which deployment owns which scenario. If the DB ever loses the
+ * setting, a fresh scenario is minted (the orphan is harmless panel debris).
  */
-function sanitizeScenarioName(name: string): string {
-  return name
-    .replace(/[^a-zA-Z0-9 _-]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+export async function getBaremetalScenarioId(): Promise<string> {
+  const existing = await getSetting(BAREMETAL_SCENARIO_KEY);
+  if (existing) return existing;
+
+  const { randomBytes } = await import("crypto");
+  const { getAppUrl } = await import("@/lib/branding");
+
+  // Retry on the (unlikely) suffix collision — createScenario rejects
+  // duplicate names with "invalid scenario name" (HAI code 12230002).
+  // NO parentheses/special chars in the name: HAI's validator only allows
+  // letters, numbers, spaces, underscores and hyphens (code 12230001, same
+  // "invalid scenario name" message — verified live 2026-06-12).
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const suffix = randomBytes(3).toString("hex");
+    const name = `Packet Bare Metal - ${suffix}`;
+    try {
+      const result = await createScenario({
+        name,
+        description: `Bare-metal term-prepay services managed by the ${getBrandName()} dashboard at ${getAppUrl()}`,
+      });
+      await setSetting(BAREMETAL_SCENARIO_KEY, result.id);
+      console.log(`[Scenarios] Created Bare Metal scenario "${name}": ${result.id}`);
+      return result.id;
+    } catch (error) {
+      lastError = error;
+      if (error instanceof Error && error.message.includes("invalid scenario name")) {
+        continue; // suffix collision — new suffix
+      }
+      break;
+    }
+  }
+  console.error("[Scenarios] Failed to create Bare Metal scenario:", lastError);
+  throw lastError;
 }
+
+/**
+ * Add/remove the bare-metal scenario on a service's scenarios array.
+ * Uses the WORKING mechanism (PUT /service/{id} with a merged scenarios
+ * array) — POST /scenario/assign-service is broken (see syncServiceScenarios).
+ * Best-effort: a failure never blocks the product operation.
+ */
+async function setBaremetalScenarioMembership(
+  serviceId: string,
+  member: boolean
+): Promise<void> {
+  try {
+    const scenarioId = await getBaremetalScenarioId();
+    const { getHAIService, updateHAIService } = await import("@/lib/hostedai");
+    const { clearCache } = await import("@/lib/hostedai/client");
+    clearCache(`/service/${serviceId}`);
+
+    const svc = await getHAIService(serviceId);
+    const existing: string[] = Array.isArray(svc.scenarios) ? (svc.scenarios as string[]) : [];
+    const next = member
+      ? [...new Set([...existing, scenarioId])]
+      : existing.filter((s) => s !== scenarioId);
+    if (next.length === existing.length && member === existing.includes(scenarioId)) {
+      return; // already in the desired state
+    }
+    clearCache(`/service/${serviceId}`);
+    await updateHAIService(serviceId, { scenarios: next });
+    console.log(
+      `[Scenarios] ${member ? "Added" : "Removed"} service ${serviceId} ${member ? "to" : "from"} the Bare Metal scenario`
+    );
+  } catch (error) {
+    console.error(
+      `[Scenarios] Failed to ${member ? "assign" : "unassign"} bare-metal scenario for service ${serviceId}:`,
+      error
+    );
+  }
+}
+
+export async function assignBaremetalService(serviceId: string): Promise<void> {
+  await setBaremetalScenarioMembership(serviceId, true);
+}
+
+export async function unassignBaremetalService(serviceId: string): Promise<void> {
+  await setBaremetalScenarioMembership(serviceId, false);
+}
+
+// ============================================
+// Category-scoped scenario management
+// ============================================
 
 /**
  * Create an HAI scenario for a GPU category.
@@ -176,12 +266,12 @@ function sanitizeScenarioName(name: string): string {
  */
 export async function createCategoryScenario(
   categoryName: string,
-  categorySlug: string
+  _categorySlug: string
 ): Promise<string | null> {
-  const scenarioName = sanitizeScenarioName(`Packet GPU ${categoryName}`);
+  const name = scenarioName(`Packet GPU - ${categoryName}`);
   try {
     const result = await createScenario({
-      name: scenarioName,
+      name,
       description: `GPU category "${categoryName}" — managed by ${getBrandName()} dashboard`,
     });
     console.log(`[Scenarios] Created category scenario: ${result.id} for ${categoryName}`);
@@ -189,8 +279,8 @@ export async function createCategoryScenario(
   } catch (error) {
     // If scenario already exists in HAI, look it up by name
     if (error instanceof Error && error.message.includes("invalid scenario name")) {
-      console.log(`[Scenarios] Category scenario "${scenarioName}" already exists, looking up...`);
-      const id = await findScenarioByName(scenarioName);
+      console.log(`[Scenarios] Category scenario "${name}" already exists, looking up...`);
+      const id = await findScenarioByName(name);
       if (id) {
         console.log(`[Scenarios] Found existing category scenario: ${id}`);
         return id;

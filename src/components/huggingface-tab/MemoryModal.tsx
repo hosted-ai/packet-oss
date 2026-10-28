@@ -34,7 +34,7 @@ export function MemoryModal({ memoryData, loading, onClose }: MemoryModalProps) 
                 </p>
               )}
             </div>
-            <button
+            <button aria-label="Close dialog"
               onClick={onClose}
               className="text-[var(--muted)] hover:text-[var(--ink)] p-1"
             >

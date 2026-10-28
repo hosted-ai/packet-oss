@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import {
   PoolSubscription,
   ConnectionInfo,
@@ -12,7 +13,7 @@ import {
   getRunningTimeQuip,
 } from "../";
 import { GPUCardSSHInfo } from "./GPUCardSSHInfo";
-import { GPUCardServices } from "./GPUCardServices";
+import { GPUCardServices, type ExposedService } from "./GPUCardServices";
 import { GPUCardHfDeployment } from "./GPUCardHfDeployment";
 import { AddStorageModal } from "./AddStorageModal";
 import { SaveSnapshotModal } from "./SaveSnapshotModal";
@@ -39,7 +40,6 @@ export function PoolSubscriptionCard({
   token,
   onRefresh,
   onSnapshotCreated,
-  gpuDashboardUrl,
   compact = false,
   metadata,
   hfDeployment,
@@ -58,6 +58,16 @@ export function PoolSubscriptionCard({
   const canSnapshot = allow("snapshots.manage");
   // Core state
   const [loading, setLoading] = useState<string | null>(null);
+  // PA-676: an action's status poll is described as state so the effect below owns
+  // its timers. Started inside a click handler, nothing cleared them on unmount —
+  // and unmounting is the expected outcome of terminating, so the interval kept
+  // refetching the whole dashboard against a card that no longer existed.
+  const [statusPoll, setStatusPoll] = useState<{
+    everyMs: number;
+    forMs: number;
+    /** Terminate deliberately keeps its spinner until the card disappears. */
+    clearLoadingWhenDone: boolean;
+  } | null>(null);
   const [connectionInfo, setConnectionInfo] = useState<ConnectionInfo | null>(null);
   const [loadingConnection, setLoadingConnection] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -85,7 +95,7 @@ export function PoolSubscriptionCard({
   const [pollingHfStatus, setPollingHfStatus] = useState(false);
 
   // Service exposure state
-  const [exposedServices, setExposedServices] = useState<any[]>([]);
+  const [exposedServices, setExposedServices] = useState<ExposedService[]>([]);
   const [loadingServices, setLoadingServices] = useState(false);
   const [exposingVllmApi, setExposingVllmApi] = useState(false);
 
@@ -96,7 +106,7 @@ export function PoolSubscriptionCard({
   useEffect(() => {
     if (!editingName) setDisplayName(metadata?.displayName || "");
     if (!editingNotes) setNotes(metadata?.notes || "");
-  }, [metadata]);
+  }, [metadata, editingName, editingNotes]);
 
   // Fetch stopped instance rate for cost warnings
   useEffect(() => {
@@ -152,19 +162,55 @@ export function PoolSubscriptionCard({
     }
   }, [hfDeployment, subscription.id, token, pollingHfStatus, shouldPoll]);
 
+  // PA-676: drives the post-action status poll. Both timers live here so React
+  // clears them on unmount; the poll also pauses while the tab is hidden rather
+  // than refetching the dashboard in the background.
+  useEffect(() => {
+    if (!statusPoll) return;
+    const { everyMs, forMs, clearLoadingWhenDone } = statusPoll;
+
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const start = () => {
+      if (interval === undefined) interval = setInterval(onRefresh, everyMs);
+    };
+    const stop = () => {
+      if (interval !== undefined) {
+        clearInterval(interval);
+        interval = undefined;
+      }
+    };
+    const onVisibility = () => (document.hidden ? stop() : start());
+
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVisibility);
+
+    const done = setTimeout(() => {
+      setStatusPoll(null);
+      if (clearLoadingWhenDone) setLoading(null);
+    }, forMs);
+
+    return () => {
+      stop();
+      clearTimeout(done);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [statusPoll, onRefresh]);
+
   // Fetch connection info (all instances are unified in HAI 2.2). Skip
   // entirely for roles without gpu.access (Finance Manager): the endpoint
   // would 403, and worse, the missing connectionInfo would pin the card
   // at "Connecting…" forever. Without SSH info the card falls back to
   // the pod's own status from HAI, which is what FM should see anyway.
+  const hasSshAvailable = connectionInfo?.pods?.some((p: { ssh_info?: unknown }) => p.ssh_info);
   useEffect(() => {
     if (!canSsh) {
       setLoadingConnection(false);
       return;
     }
+    const s = subscription.status;
+    if (s !== "subscribed" && s !== "active" && s !== "running") return;
+
     async function fetchConnectionInfo() {
-      const s = subscription.status;
-      if (s !== "subscribed" && s !== "active" && s !== "running") return;
       setLoadingConnection(true);
       try {
         const response = await fetch(`/api/instances/connection-info?instance_id=${subscription.id}`, {
@@ -181,7 +227,18 @@ export function PoolSubscriptionCard({
       }
     }
     fetchConnectionInfo();
-  }, [subscription.id, subscription.status, token, canSsh]);
+
+    // PA-349: SSH doesn't come up until the pod finishes booting, so a
+    // one-shot fetch pins the "Setting up…"/"Connecting…" label forever
+    // once the initial call lands before SSH is ready. Keep polling until
+    // it appears; the interval outlives repeated fetches because
+    // hasSshAvailable only flips (and re-triggers this effect) once SSH
+    // actually comes online.
+    if (!hasSshAvailable) {
+      const interval = setInterval(fetchConnectionInfo, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [subscription.id, subscription.status, token, canSsh, hasSshAvailable]);
 
   // Fetch exposed services when card is expanded
   useEffect(() => {
@@ -248,13 +305,9 @@ export function PoolSubscriptionCard({
           throw new Error(`Server error (${response.status}): Please try again`);
         }
       }
-      // Poll more aggressively for status update
-      const pollInterval = setInterval(onRefresh, 2000);
-      setTimeout(() => {
-        clearInterval(pollInterval);
-        // Keep loading state until subscription actually disappears
-        // Don't reset loading - let the card disappear when subscription is gone
-      }, 60000);
+      // Poll more aggressively for status update. Loading stays set on purpose —
+      // the card should keep its spinner until the subscription disappears.
+      setStatusPoll({ everyMs: 2000, forMs: 60000, clearLoadingWhenDone: false });
       onRefresh();
     } catch (error) {
       console.error("Failed to unsubscribe:", error);
@@ -272,11 +325,7 @@ export function PoolSubscriptionCard({
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
-        const pollInterval = setInterval(onRefresh, 3000);
-        setTimeout(() => {
-          clearInterval(pollInterval);
-          setLoading(null);
-        }, 60000);
+        setStatusPoll({ everyMs: 3000, forMs: 60000, clearLoadingWhenDone: true });
         onRefresh();
       } else {
         const data = await response.json();
@@ -308,11 +357,7 @@ export function PoolSubscriptionCard({
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
-        const pollInterval = setInterval(onRefresh, 3000);
-        setTimeout(() => {
-          clearInterval(pollInterval);
-          setLoading(null);
-        }, 30000);
+        setStatusPoll({ everyMs: 3000, forMs: 30000, clearLoadingWhenDone: true });
         onRefresh();
       } else {
         const data = await response.json();
@@ -333,11 +378,7 @@ export function PoolSubscriptionCard({
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
-        const pollInterval = setInterval(onRefresh, 3000);
-        setTimeout(() => {
-          clearInterval(pollInterval);
-          setLoading(null);
-        }, 60000);
+        setStatusPoll({ everyMs: 3000, forMs: 60000, clearLoadingWhenDone: true });
         onRefresh();
       } else {
         const data = await response.json();
@@ -415,7 +456,21 @@ export function PoolSubscriptionCard({
   const podStatus = subscription.pods?.[0]?.pod_status?.toLowerCase() || "";
   const isStopped = podStatus === "stopped" || podStatus === "exited";
   const isFailed = podStatus === "failed" || podStatus === "error";
+  // Region maintenance (stamped by GET /api/instances): hide every action and
+  // show a banner. Display-only — the instance keeps running; we just can't act.
+  const isUnderMaintenance = subscription.maintenance?.active === true;
   const isStarting = podStatus === "starting" || podStatus === "containerizing";
+
+  // PA-80: warn when the local/ephemeral disk (backing `/`) is nearly full — it
+  // gets the pod evicted when it overflows. Usage is stamped onto storage_details
+  // by GET /api/instances from the latest metrics, so it's only present while the
+  // instance is running and reporting. Amber at 80%, escalating to rose at 90%.
+  const ephemeralPercent = subscription.storage_details?.ephemeral_storage_percent;
+  const ephemeralUsedGb = subscription.storage_details?.ephemeral_storage_used_gb;
+  const showStorageWarning =
+    !isUnderMaintenance && !isStopped && !isFailed &&
+    typeof ephemeralPercent === "number" && ephemeralPercent >= 80;
+  const storageCritical = typeof ephemeralPercent === "number" && ephemeralPercent >= 90;
 
   const getDisplayStatus = () => {
     if (isTerminating) return { status: "terminating", label: "Cooling down..." };
@@ -436,7 +491,6 @@ export function PoolSubscriptionCard({
     // Only show "setting up" if script is actively pending/running AND we don't have SSH yet
     // This prevents getting stuck if the runner crashes or PM2 restarts
     const scriptStatus = metadata?.startupScriptStatus;
-    const hasSshAvailable = connectionInfo?.pods?.some((p: any) => p.ssh_info);
     if (isActive && scriptStatus === "pending" && !hasSshAvailable) return { status: "setting-up", label: "Setting up..." };
     if (isActive && scriptStatus === "running") return { status: "setting-up", label: "Setting up..." };
     // Only show "setup-failed" if SSH is NOT available - if SSH works, the pod is functional
@@ -446,8 +500,7 @@ export function PoolSubscriptionCard({
     // Don't show green/running until connection info (SSH) is actually available.
     // For viewers without gpu.access (Finance Manager) we never fetch SSH info,
     // so trust the pod's own status from HAI directly.
-    const hasSshInfo = connectionInfo?.pods?.some((p: any) => p.ssh_info);
-    if (canSsh && isActive && (loadingConnection || (!hasSshInfo && !connectionInfo))) {
+    if (canSsh && isActive && (loadingConnection || (!hasSshAvailable && !connectionInfo))) {
       return { status: "starting", label: "Connecting..." };
     }
 
@@ -557,7 +610,7 @@ export function PoolSubscriptionCard({
                 <p className={`text-sm truncate ${isTerminating ? "text-amber-600" : "text-[var(--muted)]"}`}>
                   {isTerminating ? "Terminating..." : runningQuip || subscription.region?.city || subscription.region?.region_name || "GPU Instance"}
                 </p>
-                <span className="text-[10px] text-zinc-300 font-mono shrink-0">#{subscription.id}</span>
+                <span className="text-[10px] text-zinc-500 font-mono shrink-0">#{subscription.id}</span>
                 {isMonthly && (
                   <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-teal-50 text-teal-700 border border-teal-200 whitespace-nowrap">
                     Monthly
@@ -605,13 +658,40 @@ export function PoolSubscriptionCard({
         </div>
       </div>
 
+      {/* Region maintenance banner — replaces the action bars while active */}
+      {isUnderMaintenance && (
+        <div className="px-4 py-3 border-t border-[var(--line)] bg-amber-50 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" aria-hidden="true" />
+          <div>
+            <p className="text-sm font-medium text-amber-900">Region under maintenance</p>
+            <p className="text-xs text-amber-700 mt-0.5">{subscription.maintenance?.message}</p>
+          </div>
+        </div>
+      )}
+
+      {/* PA-80: local/ephemeral storage almost full — amber at 80%, rose at 90% */}
+      {showStorageWarning && (
+        <div className={`px-4 py-3 border-t border-[var(--line)] flex items-start gap-2 ${storageCritical ? "bg-rose-50" : "bg-amber-50"}`}>
+          <AlertTriangle className={`w-4 h-4 mt-0.5 shrink-0 ${storageCritical ? "text-rose-600" : "text-amber-600"}`} aria-hidden="true" />
+          <div>
+            <p className={`text-sm font-medium ${storageCritical ? "text-rose-900" : "text-amber-900"}`}>
+              Local storage {Math.round(ephemeralPercent!)}% full
+              {typeof ephemeralUsedGb === "number" ? ` — ${ephemeralUsedGb.toFixed(0)} GB used` : ""}
+            </p>
+            <p className={`text-xs mt-0.5 ${storageCritical ? "text-rose-700" : "text-amber-700"}`}>
+              Free up space or move large files to persistent storage — when the local disk fills up, your instance can be evicted.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Quick Actions Bar - Always Visible */}
-      {isActive && !isStopped && (
+      {!isUnderMaintenance && isActive && !isStopped && (
         <div className="px-4 py-2 border-t border-[var(--line)] bg-zinc-50/50 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {canSsh && (
             <button
               onClick={() => setShowTerminal(true)}
-              disabled={!!loading || !connectionInfo?.pods?.some((p: any) => p.ssh_info)}
+              disabled={!!loading || !connectionInfo?.pods?.some((p: { ssh_info?: unknown }) => p.ssh_info)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white text-xs font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -676,7 +756,7 @@ export function PoolSubscriptionCard({
       )}
 
       {/* Failed State - Quick Restart Button */}
-      {isFailed && !isStopped && (
+      {!isUnderMaintenance && isFailed && !isStopped && (
         <div className="px-4 py-2 border-t border-[var(--line)] bg-rose-50/50 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {canTerminate && (
             <button
@@ -707,7 +787,7 @@ export function PoolSubscriptionCard({
       )}
 
       {/* Stopped State - Quick Start Button */}
-      {isStopped && (
+      {!isUnderMaintenance && isStopped && (
         <div className="px-4 py-2 border-t border-[var(--line)] bg-zinc-50/50 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {canProvision && (
             <button
@@ -751,7 +831,7 @@ export function PoolSubscriptionCard({
               )}
               {subscription.storage_details?.ephemeral_storage_gb && (
                 <span className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-[var(--line)] text-zinc-600 text-xs rounded-lg">
-                  {subscription.storage_details.ephemeral_storage_gb}GB Ephemeral
+                  {subscription.storage_details.ephemeral_storage_gb}GB Local Storage
                 </span>
               )}
               {subscription.storage_details?.persistent_storage_gb && (
@@ -884,7 +964,8 @@ export function PoolSubscriptionCard({
             </div>
           )}
 
-          {/* Action Links */}
+          {/* Action Links — hidden entirely while the region is in maintenance */}
+          {!isUnderMaintenance && (
           <div className="px-4 py-3 border-t border-[var(--line)] flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
             {/* Show Restart link when failed */}
             {isFailed && !isStopped && canTerminate && (
@@ -934,6 +1015,7 @@ export function PoolSubscriptionCard({
               </button>
             )}
           </div>
+          )}
         </div>
       )}
 

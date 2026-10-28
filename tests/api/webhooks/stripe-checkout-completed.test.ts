@@ -78,6 +78,7 @@ vi.mock("@/lib/lifecycle", () => lifecycleMock);
 vi.mock("@/lib/email", () => ({ sendWelcomeEmail: mockSendWelcomeEmail }));
 vi.mock("@/lib/customer-auth", () => ({
   generateCustomerToken: vi.fn(() => "dashboard-token"),
+  createLoginLink: vi.fn(async () => "dashboard-token"), // PA-380
 }));
 // isPro false keeps the handler away from the dynamic pipedrive import.
 vi.mock("@/lib/edition", () => ({ isPro: () => false }));
@@ -470,7 +471,83 @@ describe("handleCheckoutCompleted — monthly subscriptions", () => {
     expect(mockSendWelcomeEmail).toHaveBeenCalledWith(
       expect.objectContaining({ to: CUSTOMER_EMAIL })
     );
-    expect(lifecycleMock.recordSubscription).toHaveBeenCalledWith("cus_primary_7");
+    expect(lifecycleMock.recordSubscription).toHaveBeenCalledWith("cus_primary_7", CUSTOMER_EMAIL);
+    // PA-415: a monthly payment counts as a "first deposit" too, per PA-341's
+    // funnel spec — credited to the primary customer, not the monthly one.
+    expect(lifecycleMock.recordFirstDeposit).toHaveBeenCalledWith(
+      "cus_primary_7",
+      10000,
+      "monthly"
+    );
+  });
+
+  it("links to a free-tier primary with a team (was skipped, orphaning the monthly customer)", async () => {
+    // A free signup who buys a monthly sub has a free-with-team primary; the
+    // finder demanded exactly "hourly", so the monthly customer never got its
+    // billing_type stamp and the launch wizard showed "No GPUs Available".
+    const freePrimary = {
+      id: "cus_free_primary",
+      email: CUSTOMER_EMAIL,
+      metadata: {
+        billing_type: "free",
+        hostedai_team_id: "team-free-9",
+      },
+    };
+    stripeMock.customers.list.mockResolvedValue({
+      data: [{ id: CUSTOMER_ID, metadata: {} }, freePrimary],
+    });
+    stripeMock.customers.update.mockResolvedValue({ id: "x", metadata: {} });
+
+    const res = await deliver(checkoutEvent(monthlySession));
+
+    expect(res.status).toBe(200);
+    expect(hostedaiMock.createTeam).not.toHaveBeenCalled();
+    expect(stripeMock.customers.update).toHaveBeenCalledWith(
+      "cus_free_primary",
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          monthly_stripe_customer_ids: expect.stringContaining(CUSTOMER_ID),
+        }),
+      })
+    );
+    expect(stripeMock.customers.update).toHaveBeenCalledWith(
+      CUSTOMER_ID,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          billing_type: "monthly",
+          primary_stripe_customer_id: "cus_free_primary",
+        }),
+      })
+    );
+  });
+
+  it("prefers an hourly primary over a free one when both exist", async () => {
+    const freePrimary = {
+      id: "cus_free_first",
+      email: CUSTOMER_EMAIL,
+      metadata: { billing_type: "free", hostedai_team_id: "team-a" },
+    };
+    const hourlyPrimary = {
+      id: "cus_hourly_second",
+      email: CUSTOMER_EMAIL,
+      metadata: { billing_type: "hourly", hostedai_team_id: "team-b" },
+    };
+    stripeMock.customers.list.mockResolvedValue({
+      data: [{ id: CUSTOMER_ID, metadata: {} }, freePrimary, hourlyPrimary],
+    });
+    stripeMock.customers.update.mockResolvedValue({ id: "x", metadata: {} });
+
+    const res = await deliver(checkoutEvent(monthlySession));
+
+    expect(res.status).toBe(200);
+    expect(stripeMock.customers.update).toHaveBeenCalledWith(
+      CUSTOMER_ID,
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          primary_stripe_customer_id: "cus_hourly_second",
+        }),
+      })
+    );
   });
 
   it("falls through to fresh team creation when no primary customer exists", async () => {
@@ -484,6 +561,12 @@ describe("handleCheckoutCompleted — monthly subscriptions", () => {
     expect(hostedaiMock.createTeam).toHaveBeenCalledTimes(1);
     // Monthly still skips the wallet deposit even on the fallback path.
     expect(stripeMock.customers.createBalanceTransaction).not.toHaveBeenCalled();
-    expect(lifecycleMock.recordSubscription).toHaveBeenCalledWith(CUSTOMER_ID);
+    expect(lifecycleMock.recordSubscription).toHaveBeenCalledWith(CUSTOMER_ID, CUSTOMER_EMAIL);
+    // PA-415: same funnel credit on the fresh-team-creation path.
+    expect(lifecycleMock.recordFirstDeposit).toHaveBeenCalledWith(
+      CUSTOMER_ID,
+      10000,
+      "monthly"
+    );
   });
 });

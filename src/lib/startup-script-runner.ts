@@ -24,8 +24,24 @@ MOTD_EOF
 fi
 `;
 
+// The row is keyed by its HAI instance id; `subscription_id` only ever holds an
+// `instance-` placeholder for these deploys, so looking up by it matches nothing.
+async function setStartupScriptState(
+  instanceId: string,
+  data: { startupScriptStatus: string; startupScriptOutput?: string },
+): Promise<void> {
+  try {
+    await prisma.podMetadata.update({ where: { instanceId }, data });
+  } catch (err) {
+    console.error(
+      `[Startup] Failed to update metadata for ${instanceId}:`,
+      err instanceof Error ? err.stack : err,
+    );
+  }
+}
+
 export async function runStartupScript(
-  subscriptionId: string,
+  instanceId: string,
   teamId: string,
   script: string,
   presetId?: string
@@ -38,17 +54,9 @@ export async function runStartupScript(
   const MAX_ATTEMPTS = 20; // Try for ~10 minutes (30s intervals)
   const RETRY_DELAY = 30000; // 30 seconds
 
-  console.log(`[Startup] Starting startup script execution for subscription ${subscriptionId}`);
+  console.log(`[Startup] Starting startup script execution for instance ${instanceId}`);
 
-  // Update status to pending
-  try {
-    await prisma.podMetadata.update({
-      where: { subscriptionId },
-      data: { startupScriptStatus: "pending" },
-    });
-  } catch {
-    // Ignore if metadata doesn't exist yet
-  }
+  await setStartupScriptState(instanceId, { startupScriptStatus: "pending" });
 
   // Wait for pod to be ready with SSH info
   let pod: { ssh_info?: { cmd?: string; pass?: string }; pod_status?: string; pod_name?: string } | null = null;
@@ -56,18 +64,18 @@ export async function runStartupScript(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const connectionInfo = await getConnectionInfo(teamId);
-      const conn = connectionInfo.find((c) => String(c.id) === subscriptionId);
+      const conn = connectionInfo.find((c) => String(c.id) === instanceId);
       const podInfo = conn?.pods?.[0];
 
       if (podInfo?.pod_status?.toLowerCase() === "running" && podInfo?.ssh_info?.cmd && podInfo?.ssh_info?.pass) {
         pod = podInfo;
-        console.log(`[Startup] Pod ${subscriptionId} is ready (attempt ${attempt})`);
+        console.log(`[Startup] Pod ${instanceId} is ready (attempt ${attempt})`);
         break;
       }
 
-      console.log(`[Startup] Pod ${subscriptionId} not ready yet (attempt ${attempt}/${MAX_ATTEMPTS}), status: ${podInfo?.pod_status || "unknown"}`);
+      console.log(`[Startup] Pod ${instanceId} not ready yet (attempt ${attempt}/${MAX_ATTEMPTS}), status: ${podInfo?.pod_status || "unknown"}`);
     } catch (err) {
-      console.log(`[Startup] Error checking pod ${subscriptionId} (attempt ${attempt}):`, err);
+      console.log(`[Startup] Error checking pod ${instanceId} (attempt ${attempt}):`, err);
     }
 
     if (attempt < MAX_ATTEMPTS) {
@@ -76,14 +84,11 @@ export async function runStartupScript(
   }
 
   if (!pod?.ssh_info?.cmd || !pod?.ssh_info?.pass) {
-    console.error(`[Startup] Pod ${subscriptionId} never became ready, giving up`);
-    await prisma.podMetadata.update({
-      where: { subscriptionId },
-      data: {
-        startupScriptStatus: "failed",
-        startupScriptOutput: "Pod did not become ready in time",
-      },
-    }).catch(() => {});
+    console.error(`[Startup] Pod ${instanceId} never became ready, giving up`);
+    await setStartupScriptState(instanceId, {
+      startupScriptStatus: "failed",
+      startupScriptOutput: "Pod did not become ready in time",
+    });
     return;
   }
 
@@ -97,11 +102,7 @@ export async function runStartupScript(
   const username = userMatch ? userMatch[1] : "ubuntu";
   const password = pod.ssh_info.pass;
 
-  // Update status to running
-  await prisma.podMetadata.update({
-    where: { subscriptionId },
-    data: { startupScriptStatus: "running" },
-  }).catch(() => {});
+  await setStartupScriptState(instanceId, { startupScriptStatus: "running" });
 
   // Prepend the MOTD banner setup, then the user's script
   const fullScript = MOTD_SETUP_SCRIPT + "\n" + script;
@@ -146,23 +147,15 @@ export async function runStartupScript(
 
     proc.on("close", async (code) => {
       const success = code === 0;
-      console.log(`[Startup] Script execution completed for ${subscriptionId} with code ${code}`);
+      console.log(`[Startup] Script execution completed for ${instanceId} with code ${code}`);
 
-      // Update metadata with result
-      try {
-        await prisma.podMetadata.update({
-          where: { subscriptionId },
-          data: {
-            startupScriptStatus: success ? "completed" : "failed",
-            startupScriptOutput: output.slice(0, 10000),
-          },
-        });
-      } catch (e) {
-        console.error(`[Startup] Failed to update metadata for ${subscriptionId}:`, e);
-      }
+      await setStartupScriptState(instanceId, {
+        startupScriptStatus: success ? "completed" : "failed",
+        startupScriptOutput: output.slice(0, 10000),
+      });
 
       if (success) {
-        console.log(`[Startup] Successfully ran startup script on subscription ${subscriptionId}`);
+        console.log(`[Startup] Successfully ran startup script on instance ${instanceId}`);
 
         // Automatically expose ports if a preset was used
         if (presetId && pod) {
@@ -177,7 +170,7 @@ export async function runStartupScript(
                   console.log(`[Startup] Exposing port ${portConfig.port} (${portConfig.name}) on pod ${podName}`);
                   await exposeService({
                     pod_name: podName,
-                    pool_subscription_id: Number(subscriptionId),
+                    pool_subscription_id: instanceId,
                     port: portConfig.port,
                     service_name: portConfig.name,
                     protocol: "TCP",
@@ -194,38 +187,28 @@ export async function runStartupScript(
           }
         }
       } else {
-        console.error(`[Startup] Startup script failed on ${subscriptionId} (code ${code}):`, output.slice(0, 1000));
+        console.error(`[Startup] Startup script failed on ${instanceId} (code ${code}):`, output.slice(0, 1000));
       }
       resolve();
     });
 
     proc.on("error", async (err) => {
-      console.error(`[Startup] SSH error running startup script on ${subscriptionId}:`, err);
-      try {
-        await prisma.podMetadata.update({
-          where: { subscriptionId },
-          data: {
-            startupScriptStatus: "failed",
-            startupScriptOutput: `SSH error: ${err.message}`,
-          },
-        });
-      } catch {
-        // Ignore
-      }
+      console.error(`[Startup] SSH error running startup script on ${instanceId}:`, err);
+      await setStartupScriptState(instanceId, {
+        startupScriptStatus: "failed",
+        startupScriptOutput: `SSH error: ${err.message}`,
+      });
       resolve();
     });
 
     // Timeout after 10 minutes
     setTimeout(() => {
       proc.kill();
-      console.error(`[Startup] Timeout running startup script on ${subscriptionId}`);
-      prisma.podMetadata.update({
-        where: { subscriptionId },
-        data: {
-          startupScriptStatus: "failed",
-          startupScriptOutput: output.slice(0, 10000) + "\n\n[TIMEOUT after 10 minutes]",
-        },
-      }).catch(() => {});
+      console.error(`[Startup] Timeout running startup script on ${instanceId}`);
+      void setStartupScriptState(instanceId, {
+        startupScriptStatus: "failed",
+        startupScriptOutput: output.slice(0, 10000) + "\n\n[TIMEOUT after 10 minutes]",
+      });
       resolve();
     }, 600000);
   });

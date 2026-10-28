@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { getStripe } from "@/lib/stripe";
+import { computeMrrCents, computeRevenueLastNDaysCents } from "@/lib/stripe-metrics";
 import { prisma } from "@/lib/prisma";
+import { getInternalExclusions, buildExcludeInternalWhere } from "@/lib/internal-accounts";
 import { getGlobalInstanceSummary, type UnifiedInstance } from "@/lib/hostedai/instances";
 import { hostedaiRequest } from "@/lib/hostedai/client";
 
@@ -30,36 +32,9 @@ export async function POST(request: NextRequest) {
       (c) => c.stripeCreatedAt >= sevenDaysAgo
     );
 
-    // Revenue this week = Stripe gross volume (successful charges minus refunded amounts)
-    // Use calendar-day boundary to match Stripe dashboard's "last 7 days" view
+    // Revenue this week = Stripe gross volume (succeeded charges minus refunds), last 7 days.
     const stripe = await getStripe();
-    const sevenDaysAgoMidnight = new Date(sevenDaysAgo);
-    sevenDaysAgoMidnight.setUTCHours(0, 0, 0, 0);
-    const sevenDaysAgoUnix = Math.floor(sevenDaysAgoMidnight.getTime() / 1000);
-
-    // Paginate through all charges (not just first 100)
-    let recentRevenue = 0;
-    let hasMore = true;
-    let startingAfter: string | undefined;
-    while (hasMore) {
-      const charges = await stripe.charges.list({
-        limit: 100,
-        created: { gte: sevenDaysAgoUnix },
-        ...(startingAfter ? { starting_after: startingAfter } : {}),
-      });
-      for (const c of charges.data) {
-        if (c.status === "succeeded") {
-          // Subtract refunded portion to match Stripe's gross volume calculation
-          recentRevenue += c.amount - (c.amount_refunded || 0);
-        }
-      }
-      hasMore = charges.has_more;
-      if (charges.data.length > 0) {
-        startingAfter = charges.data[charges.data.length - 1].id;
-      } else {
-        hasMore = false;
-      }
-    }
+    const recentRevenue = await computeRevenueLastNDaysCents(stripe, 7);
 
     // Count active pods from HAI 2.2 /instances/unified (authoritative source)
     let activePods = 0;
@@ -89,9 +64,13 @@ export async function POST(request: NextRequest) {
       if (primary) customerIdToPrimary.set(customer.id, primary);
     }
 
-    // Count running + transitional states as "active"
-    // Ref: Confluence HP/600178689 — Status for VM/Pod Instances
-    const ACTIVE_STATUSES = ["running", "pending", "starting", "restarting"];
+    // "Active GPUs" = live instances. /instances/unified returns both pods and
+    // VMs (nature): a live pod reports "running", a live VM reports "active"
+    // (Confluence HP/600178689 §2 — VM ACTIVE is billable/live, the VM analog
+    // of pod Running). Both must count, else VM-nature GPUs drop out of this
+    // admin per-customer count while still showing on the user dashboard —
+    // the PA-134 divergence. pending/starting/restarting are transitional-up.
+    const ACTIVE_STATUSES = ["running", "active", "pending", "starting", "restarting"];
 
     const podCountByCustomer = new Map<string, number>();
     try {
@@ -155,24 +134,16 @@ export async function POST(request: NextRequest) {
       activePods = lastActivePods;
     }
 
-    // MRR = Stripe recurring subscriptions only (monthly contracts)
-    const subscriptions = await stripe.subscriptions.list({ status: "active", limit: 100 });
-    let totalMrrCents = 0;
-    for (const sub of subscriptions.data) {
-      for (const item of sub.items.data) {
-        if (item.price.recurring?.interval === "month") {
-          totalMrrCents += (item.price.unit_amount || 0) * (item.quantity || 1);
-        } else if (item.price.recurring?.interval === "year") {
-          totalMrrCents += Math.round(((item.price.unit_amount || 0) * (item.quantity || 1)) / 12);
-        }
-      }
-    }
+    // MRR = Stripe active recurring subscriptions, normalized to monthly (paginated).
+    const totalMrrCents = await computeMrrCents(stripe);
+    // Total Customers = Total Signups: real (non-internal) customers with a lifecycle row.
+    const totalCustomersCount = await prisma.customerLifecycle.count({ where: buildExcludeInternalWhere(await getInternalExclusions()) });
     const todayStr = new Date().toISOString().split("T")[0];
 
     await prisma.adminStatsSnapshot.upsert({
       where: { date: todayStr },
       update: {
-        totalCustomers: allCustomers.length,
+        totalCustomers: totalCustomersCount,
         activeGPUs: activePods,
         mrrCents: totalMrrCents,
         newThisWeek: recentCustomers.length,
@@ -180,7 +151,7 @@ export async function POST(request: NextRequest) {
       },
       create: {
         date: todayStr,
-        totalCustomers: allCustomers.length,
+        totalCustomers: totalCustomersCount,
         activeGPUs: activePods,
         mrrCents: totalMrrCents,
         newThisWeek: recentCustomers.length,
@@ -188,12 +159,12 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    console.log(`[Admin Stats] Saved snapshot for ${todayStr}: ${allCustomers.length} customers, ${activePods} pods, $${(totalMrrCents / 100).toFixed(2)} MRR`);
+    console.log(`[Admin Stats] Saved snapshot for ${todayStr}: ${totalCustomersCount} customers, ${activePods} pods, $${(totalMrrCents / 100).toFixed(2)} MRR`);
 
     return NextResponse.json({
       success: true,
       date: todayStr,
-      totalCustomers: allCustomers.length,
+      totalCustomers: totalCustomersCount,
       activePods,
       mrr: totalMrrCents,
       newThisWeek: recentCustomers.length,

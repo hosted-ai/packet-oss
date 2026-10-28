@@ -130,7 +130,6 @@ export default function ReferralCard({ token }: ReferralCardProps) {
   }
 
   const hasUsedCode = !!data.usedReferralCode;
-  const hasReferrals = (data.stats?.totalReferrals || 0) > 0;
 
   return (
     <div className="bg-gradient-to-br from-teal-50 to-cyan-50 rounded-2xl p-6 border border-teal-100">

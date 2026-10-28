@@ -6,7 +6,7 @@ import type { Stats, Customer, Admin, ClusterOffer, Quote, PricingConfig, AdminA
 import { PREMIUM_ADMIN_TABS, OSS_ONLY_ADMIN_TABS } from "../types";
 import { isPro, isOSS } from "@/lib/edition";
 
-const ALL_ADMIN_TABS: AdminTab[] = ["customers", "admins", "investors", "clusters", "quotes", "referrals", "vouchers", "activity", "settings", "calculator", "qa", "providers", "landing", "game", "products", "pods", "gpu-apps", "emails", "email-log", "drip", "nodes", "pools", "business", "demand", "batches", "token-providers", "skypilot", "support", "spheron", "node-revenue", "banners", "marketing", "tenants", "pixel-factory", "uptime", "payouts", "platform-settings", "announcements", "broadcast"];
+const ALL_ADMIN_TABS: AdminTab[] = ["customers", "admins", "investors", "clusters", "quotes", "referrals", "vouchers", "activity", "settings", "calculator", "qa", "providers", "landing", "game", "products", "pods", "gpu-apps", "emails", "email-log", "drip", "nodes", "pools", "business", "demand", "batches", "token-providers", "skypilot", "support", "spheron", "baremetal", "node-revenue", "banners", "marketing", "tenants", "uptime", "payouts", "platform-settings", "announcements", "broadcast", "ops-summary", "packet-health"];
 
 const VALID_ADMIN_TABS: AdminTab[] = ALL_ADMIN_TABS.filter((tab) => {
   if (PREMIUM_ADMIN_TABS.has(tab)) return isPro();

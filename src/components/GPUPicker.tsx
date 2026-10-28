@@ -52,6 +52,9 @@ export interface GPUPickerRegion {
   city?: string;
   country?: string;
   country_code?: string;
+  // Stamped by /api/instances/category-check: region is in maintenance, so the
+  // picker disables it. The server 503 is the real enforcement; this is UX.
+  underMaintenance?: boolean;
 }
 
 export interface GPUPickerSelection {
@@ -90,6 +93,9 @@ export function GPUPicker({
     categoryId: string;
     compatibleServiceIds: string[];
     serviceRegions: Record<string, GPUPickerRegion[]>;
+    // PA-407: true when the HAI compat check failed transiently (timeout /
+    // network / 5xx) rather than genuinely returning zero inventory.
+    checkFailed?: boolean;
   } | null>(null);
 
   const hasCategories = categories.length > 0;
@@ -125,6 +131,26 @@ export function GPUPicker({
   const selectedProductDetails = products.find(p => p.id === selectedProduct) || null;
   const selectedProductRegions = selectedProductDetails ? getProductRegions(selectedProductDetails) : [];
 
+  // PA-407: a transient compat-check failure (HAI timeout / network / 5xx) is
+  // distinct from genuine zero inventory — offer a retry instead of the
+  // misleading "no GPUs available". Shared across both layouts below.
+  const availabilityCheckFailed = categoryCheckResult?.checkFailed === true;
+  const retryNotice = (
+    <div className="flex flex-col items-center gap-2 py-4 text-center">
+      <p className="text-sm font-medium text-amber-700">
+        We couldn&apos;t check GPU availability just now
+      </p>
+      <p className="text-xs text-gray-500">This is usually temporary — please try again.</p>
+      <button
+        type="button"
+        onClick={() => categoryCheckResult && checkCategoryAvailability(categoryCheckResult.categoryId)}
+        className="px-3 py-1.5 rounded-lg border border-teal-500 text-teal-600 text-sm font-medium hover:bg-teal-50 transition-colors"
+      >
+        Retry
+      </button>
+    </div>
+  );
+
   // Check category compatibility
   const checkCategoryAvailability = async (categoryId: string) => {
     setCategoryCheckLoading(true);
@@ -154,10 +180,12 @@ export function GPUPicker({
     }
   };
 
-  // Auto-select region when product changes
+  // Auto-select region when product changes — prefer one that isn't in
+  // maintenance so we don't pre-select a region the user can't deploy into.
   useEffect(() => {
     if (selectedProductRegions.length > 0) {
-      setSelectedRegion(selectedProductRegions[0].id);
+      const firstAvailable = selectedProductRegions.find(r => !r.underMaintenance);
+      setSelectedRegion((firstAvailable ?? selectedProductRegions[0]).id);
     } else {
       setSelectedRegion(null);
     }
@@ -247,8 +275,11 @@ export function GPUPicker({
           </div>
         )}
 
+        {/* PA-407: transient compat-check failure — offer retry, not "unavailable" */}
+        {!categoryCheckLoading && availabilityCheckFailed && retryNotice}
+
         {/* Product dropdown */}
-        {!categoryCheckLoading && selectedCategory && filteredProducts.length > 0 && (
+        {!categoryCheckLoading && !availabilityCheckFailed && selectedCategory && filteredProducts.length > 0 && (
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5 uppercase tracking-wide">
               GPU
@@ -288,8 +319,8 @@ export function GPUPicker({
               {selectedProductRegions.map(region => {
                 const flag = getFlag(region.country_code);
                 return (
-                  <option key={region.id} value={region.id}>
-                    {flag} {region.city || region.region_name}{region.country ? `, ${region.country}` : ""} ({region.region_name})
+                  <option key={region.id} value={region.id} disabled={region.underMaintenance}>
+                    {flag} {region.city || region.region_name}{region.country ? `, ${region.country}` : ""} ({region.region_name}){region.underMaintenance ? " — under maintenance" : ""}
                   </option>
                 );
               })}
@@ -382,8 +413,11 @@ export function GPUPicker({
             </div>
           )}
 
+          {/* PA-407: transient compat-check failure — offer retry, not "unavailable" */}
+          {!categoryCheckLoading && availabilityCheckFailed && retryNotice}
+
           {/* Product Cards */}
-          {!categoryCheckLoading && filteredProducts.length > 0 && (
+          {!categoryCheckLoading && !availabilityCheckFailed && filteredProducts.length > 0 && (
             <div>
               <label className="block text-xs font-medium text-[var(--muted)] mb-2 uppercase tracking-wide">
                 Select a GPU
@@ -451,7 +485,7 @@ export function GPUPicker({
           )}
 
           {/* No products */}
-          {!categoryCheckLoading && filteredProducts.length === 0 && (
+          {!categoryCheckLoading && !availabilityCheckFailed && filteredProducts.length === 0 && (
             <div className="text-center py-6 text-[var(--muted)] text-sm">
               No GPUs available in this category.
             </div>
@@ -470,9 +504,13 @@ export function GPUPicker({
                     <button
                       key={region.id}
                       type="button"
-                      onClick={() => setSelectedRegion(region.id)}
+                      disabled={region.underMaintenance}
+                      aria-disabled={region.underMaintenance}
+                      onClick={() => { if (!region.underMaintenance) setSelectedRegion(region.id); }}
                       className={`w-full text-left px-4 py-3 rounded-lg border-2 transition-all ${
-                        selectedRegion === region.id
+                        region.underMaintenance
+                          ? "border-[var(--line)] bg-zinc-50 opacity-60 cursor-not-allowed"
+                          : selectedRegion === region.id
                           ? "border-teal-500 bg-teal-50"
                           : "border-[var(--line)] hover:border-teal-300"
                       }`}
@@ -485,8 +523,11 @@ export function GPUPicker({
                             {region.country && <span className="text-[var(--muted)] font-normal">, {region.country}</span>}
                           </div>
                           <div className="text-xs text-[var(--muted)]">{region.region_name}</div>
+                          {region.underMaintenance && (
+                            <div className="text-xs font-medium text-amber-600 mt-0.5">Under maintenance</div>
+                          )}
                         </div>
-                        {selectedRegion === region.id && (
+                        {!region.underMaintenance && selectedRegion === region.id && (
                           <svg className="w-5 h-5 text-teal-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" /></svg>
                         )}
                       </div>

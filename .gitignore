@@ -2,7 +2,13 @@
 
 # dependencies
 /node_modules
+<<<<<<< HEAD
 /.pnp
+/.pnpm*
+=======
+/.pnp*
+>>>>>>> 51399f3fe9a7e91f247c134f9ebf196449a22204
+/dev
 .pnp.*
 .yarn/*
 !.yarn/patches
@@ -12,6 +18,7 @@
 
 # testing
 /coverage
+/.vitest-reports
 /test-results/
 /playwright-report/
 /blob-report/
@@ -123,3 +130,7 @@ ansible.log
 agentdb.rvf
 agentdb.rvf.lock
 .rtk/
+<<<<<<< HEAD
+.pnpm-store/v11/
+=======
+>>>>>>> 51399f3fe9a7e91f247c134f9ebf196449a22204

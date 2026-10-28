@@ -5,35 +5,25 @@
  * Returns which services are deployable + compatible regions per service.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken } from "@/lib/customer-auth";
-import { getStripe } from "@/lib/stripe";
+import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import {
   getScenarioCompatibleServices,
   getServiceCompatibleRegions,
 } from "@/lib/hostedai";
+import { getMaintenanceMap } from "@/lib/maintenance/regions";
 import { prisma } from "@/lib/prisma";
-import Stripe from "stripe";
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get("authorization")?.replace("Bearer ", "");
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
-    }
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
 
     const categoryId = request.nextUrl.searchParams.get("categoryId");
     if (!categoryId) {
       return NextResponse.json({ error: "categoryId is required" }, { status: 400 });
     }
 
-    const stripe = await getStripe();
-    const customer = (await stripe.customers.retrieve(payload.customerId)) as Stripe.Customer;
-    const teamId = customer.metadata?.hostedai_team_id;
+    const { teamId } = auth;
     if (!teamId) {
       return NextResponse.json({ error: "No team associated" }, { status: 400 });
     }
@@ -49,7 +39,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Run scenario-compatible-services for this category
-    let compatibleServiceIds = new Set<string>();
+    const compatibleServiceIds = new Set<string>();
+    // PA-407: distinguish a *transient* compat-check failure (HAI timeout /
+    // network / 5xx) from genuine zero inventory or a config problem. All three
+    // leave compatibleServiceIds empty, but only the transient case is
+    // retry-worthy — the UI surfaces "temporarily unavailable / retry" for it
+    // instead of the misleading "No GPUs available".
+    let checkFailed = false;
 
     // HAI scenario-compatible-services is the ONLY source of truth for
     // product availability. No fallback — if we can't get a real HAI
@@ -77,6 +73,9 @@ export async function GET(request: NextRequest) {
           // scenarioId lifecycle (creation, re-sync).
           console.warn(`[CategoryCheck] Scenario ${category.scenarioId} not found for "${category.name}" — leaving scenarioId intact, admin should resync if this persists`);
         } else {
+          // Transient failure (timeout, network, HAI 5xx). Flag it so the UI
+          // can offer a retry rather than reporting a false "No GPUs available".
+          checkFailed = true;
           console.error(`[CategoryCheck] Compat check failed for "${category.name}":`, err);
         }
         // No fallback — leave compatibleServiceIds empty so nothing is
@@ -87,7 +86,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch regions for each compatible service
-    const serviceRegions: Record<string, Array<{ id: number; region_name: string; city?: string; country?: string; country_code?: string }>> = {};
+    const serviceRegions: Record<string, Array<{ id: number; region_name: string; city?: string; country?: string; country_code?: string; underMaintenance?: boolean }>> = {};
     await Promise.all(
       [...compatibleServiceIds].map(async (serviceId) => {
         try {
@@ -100,10 +99,20 @@ export async function GET(request: NextRequest) {
       })
     );
 
+    // Stamp region maintenance so the picker can disable + label those regions.
+    // Server 503 is the real enforcement; this is UX. Fails open (resolver logs).
+    const maintMap = await getMaintenanceMap();
+    if (maintMap.size > 0) {
+      for (const list of Object.values(serviceRegions)) {
+        for (const r of list) if (maintMap.has(r.id)) r.underMaintenance = true;
+      }
+    }
+
     return NextResponse.json({
       categoryId,
       compatibleServiceIds: [...compatibleServiceIds],
       serviceRegions,
+      checkFailed,
     });
   } catch (error) {
     console.error("Category check error:", error);

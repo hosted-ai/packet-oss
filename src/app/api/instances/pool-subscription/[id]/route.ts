@@ -1,24 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
-import { getStripe } from "@/lib/stripe";
-import { unsubscribeFromPool, getPoolSubscriptions, deleteInstance, getUnifiedInstanceDetail } from "@/lib/hostedai";
+import { reconcileTerminationBilling } from "@/lib/termination-billing";
+import {
+  unsubscribeFromPool,
+  getPoolSubscriptions,
+  deleteInstance,
+  getUnifiedInstanceDetail,
+} from "@/lib/hostedai";
 import { logGPUTerminated } from "@/lib/activity";
 import { prisma } from "@/lib/prisma";
 import { sendGpuTerminatedEmail } from "@/lib/email";
-import { generateCustomerToken } from "@/lib/customer-auth";
+import { createLoginLink } from "@/lib/customer-auth";
 import { cacheCustomer } from "@/lib/customer-cache";
 import { gatePermission } from "@/lib/auth/gate";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
+import { closeSubscriptionHistory } from "@/lib/subscription-history";
 
 // Check if the ID looks like an HAI 2.2 instance (i-{uuid}) vs numeric (legacy pool subscription)
 function isInstanceId(id: string): boolean {
-  return /^i-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  return /^i-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    id,
+  );
 }
 
 // GET - Get pod metadata (display name, notes)
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const token = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -31,7 +39,7 @@ export async function GET(
     if (!payload) {
       return NextResponse.json(
         { error: "Invalid or expired token" },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -52,7 +60,7 @@ export async function GET(
     console.error("Get pod metadata error:", error);
     return NextResponse.json(
       { error: "Failed to get pod metadata" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -60,7 +68,7 @@ export async function GET(
 // PATCH - Update pod metadata (display name, notes)
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const token = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -73,7 +81,7 @@ export async function PATCH(
     if (!payload) {
       return NextResponse.json(
         { error: "Invalid or expired token" },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -83,24 +91,28 @@ export async function PATCH(
     if (displayName !== undefined && typeof displayName !== "string") {
       return NextResponse.json(
         { error: "displayName must be a string" },
-        { status: 400 }
+        { status: 400 },
       );
     }
     if (notes !== undefined && typeof notes !== "string") {
       return NextResponse.json(
         { error: "notes must be a string" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     // HAI 2.2: look up by instanceId, then upsert
     if (isInstanceId(id)) {
-      const existing = await prisma.podMetadata.findFirst({ where: { instanceId: id } });
+      const existing = await prisma.podMetadata.findFirst({
+        where: { instanceId: id },
+      });
       if (existing) {
         const updated = await prisma.podMetadata.update({
           where: { id: existing.id },
           data: {
-            ...(displayName !== undefined && { displayName: displayName || null }),
+            ...(displayName !== undefined && {
+              displayName: displayName || null,
+            }),
             ...(notes !== undefined && { notes: notes || null }),
           },
         });
@@ -148,7 +160,7 @@ export async function PATCH(
     console.error("Update pod metadata error:", error);
     return NextResponse.json(
       { error: "Failed to update pod metadata" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -156,7 +168,7 @@ export async function PATCH(
 // DELETE - Unsubscribe from a pool (terminate)
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   try {
     const token = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -169,14 +181,13 @@ export async function DELETE(
     if (!payload) {
       return NextResponse.json(
         { error: "Invalid or expired token" },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
     // PA-175: resolve the OPERATING account. An invited Team Admin / Member
     // terminating a team pod must hit the team owner's wallet for refund,
     // not their own.
-    const stripe = await getStripe();
     const ctx = await resolveOperatingContext({
       email: payload.email,
       jwtCustomerId: payload.customerId,
@@ -188,11 +199,11 @@ export async function DELETE(
     const customer = ctx.customer;
     cacheCustomer(customer).catch(() => {});
 
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -221,56 +232,27 @@ export async function DELETE(
 
       const displayName = podMetadata?.displayName || undefined;
 
-      // Billing reconciliation for hourly instances
-      if (podMetadata?.prepaidUntil && podMetadata?.hourlyRateCents) {
+      // Billing reconciliation for hourly instances — shared with the
+      // public API terminate so both paths settle the prepaid block.
+      if (podMetadata) {
         try {
-          const now = new Date();
-          const prepaidUntil = new Date(podMetadata.prepaidUntil);
-          const hourlyRateCents = podMetadata.hourlyRateCents;
-          const billingIntervalMs = 30 * 60 * 1000;
-
-          if (now < prepaidUntil) {
-            const periodStartMs = prepaidUntil.getTime() - billingIntervalMs;
-            const usedMs = now.getTime() - periodStartMs;
-            const unusedMs = Math.max(0, billingIntervalMs - usedMs);
-            const unusedHours = unusedMs / (1000 * 60 * 60);
-            const creditBackCents = Math.round(unusedHours * hourlyRateCents);
-
-            if (creditBackCents > 0) {
-              const unusedMins = Math.round(unusedMs / 60000);
-              await stripe.customers.createBalanceTransaction(ctx.accountId, {
-                amount: -creditBackCents,
-                currency: "usd",
-                description: `GPU early termination credit: ${unusedMins} mins unused`,
-                metadata: { instance_id: id },
-              });
-              console.log(`[Billing] Credited back $${(creditBackCents / 100).toFixed(2)} for early termination`);
-            }
-          } else {
-            const unbilledMs = now.getTime() - prepaidUntil.getTime();
-            const unbilledHours = unbilledMs / (1000 * 60 * 60);
-            if (unbilledHours > (1 / 60)) {
-              const finalChargeCents = Math.round(unbilledHours * hourlyRateCents);
-              if (finalChargeCents > 0) {
-                const unbilledMins = Math.round(unbilledHours * 60);
-                await stripe.customers.createBalanceTransaction(ctx.accountId, {
-                  amount: finalChargeCents,
-                  currency: "usd",
-                  description: `GPU final usage: ${unbilledMins} mins after prepaid period`,
-                  metadata: { instance_id: id },
-                });
-                console.log(`[Billing] Charged $${(finalChargeCents / 100).toFixed(2)} for final unbilled usage`);
-              }
-            }
-          }
+          await reconcileTerminationBilling({
+            stripeCustomerId: ctx.accountId,
+            teamId,
+            podMetadata,
+            ref: { instanceId: id },
+          });
         } catch (billingErr) {
           console.error("[Billing] Error during reconciliation:", billingErr);
         }
       }
 
-      // Clean up PodMetadata
+      // Clean up PodMetadata (close the PA-354 history window first)
       if (podMetadata) {
-        await prisma.podMetadata.delete({ where: { id: podMetadata.id } }).catch(() => {});
+        await closeSubscriptionHistory({ id: podMetadata.id });
+        await prisma.podMetadata
+          .delete({ where: { id: podMetadata.id } })
+          .catch(() => {});
       }
 
       // Delete the instance via HAI 2.2 API.
@@ -284,10 +266,17 @@ export async function DELETE(
         try {
           const inst = await getUnifiedInstanceDetail(id);
           instanceStatus = inst?.status?.toLowerCase() ?? null;
-        } catch { /* instance may not be fetchable in a dead state */ }
+        } catch {
+          /* instance may not be fetchable in a dead state */
+        }
 
-        if (instanceStatus !== null && HAI_DEAD_STATUSES.includes(instanceStatus)) {
-          console.warn(`[HAI 2.2] deleteInstance failed for ${id} in state '${instanceStatus}'; local records already cleaned, treating as deleted`);
+        if (
+          instanceStatus !== null &&
+          HAI_DEAD_STATUSES.includes(instanceStatus)
+        ) {
+          console.warn(
+            `[HAI 2.2] deleteInstance failed for ${id} in state '${instanceStatus}'; local records already cleaned, treating as deleted`,
+          );
         } else {
           throw deleteErr;
         }
@@ -296,7 +285,7 @@ export async function DELETE(
       await logGPUTerminated(ctx.accountId, "GPU Instance", displayName, id);
 
       try {
-        const dashboardToken = generateCustomerToken(payload.email.toLowerCase(), payload.customerId);
+        const dashboardToken = await createLoginLink({ email: payload.email.toLowerCase(), customerId: ctx.accountId });
         const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${dashboardToken}`;
         await sendGpuTerminatedEmail({
           to: customer.email!,
@@ -308,7 +297,10 @@ export async function DELETE(
         console.error("Failed to send GPU terminated email:", emailErr);
       }
 
-      return NextResponse.json({ success: true, message: "Instance deleted successfully" });
+      return NextResponse.json({
+        success: true,
+        message: "Instance deleted successfully",
+      });
     }
 
     // === Legacy: Pool subscription termination ===
@@ -319,7 +311,7 @@ export async function DELETE(
     let poolId: string | number = 0;
     try {
       const subs = await getPoolSubscriptions(teamId);
-      const sub = subs.find(s => String(s.id) === String(subscriptionId));
+      const sub = subs.find((s) => String(s.id) === String(subscriptionId));
       if (sub?.pool_name) {
         poolName = sub.pool_name;
       }
@@ -330,7 +322,14 @@ export async function DELETE(
       console.error("Failed to get pool info:", e);
     }
 
-    console.log("Unsubscribing from pool:", subscriptionId, "pool_id:", poolId, "for team:", teamId);
+    console.log(
+      "Unsubscribing from pool:",
+      subscriptionId,
+      "pool_id:",
+      poolId,
+      "for team:",
+      teamId,
+    );
 
     // Capture display name BEFORE billing reconciliation deletes PodMetadata
     let displayNameForLog: string | undefined;
@@ -340,7 +339,9 @@ export async function DELETE(
         select: { displayName: true },
       });
       displayNameForLog = meta?.displayName || undefined;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     // === BILLING RECONCILIATION ON TERMINATION ===
     // The billing cycle is 30 minutes. prepaidUntil marks the END of the current paid period.
@@ -351,67 +352,14 @@ export async function DELETE(
         where: { subscriptionId: String(subscriptionId) },
       });
 
-      if (podMetadata?.prepaidUntil && podMetadata?.hourlyRateCents) {
-        const now = new Date();
-        const prepaidUntil = new Date(podMetadata.prepaidUntil);
-        const hourlyRateCents = podMetadata.hourlyRateCents;
-        const billingIntervalMinutes = 30;
-        const billingIntervalMs = billingIntervalMinutes * 60 * 1000;
-
-        if (now < prepaidUntil) {
-          // Terminated before prepaid period ended - credit back unused portion
-          // Calculate the START of the current billing period
-          const periodStartMs = prepaidUntil.getTime() - billingIntervalMs;
-          const usedMs = now.getTime() - periodStartMs;
-          const unusedMs = Math.max(0, billingIntervalMs - usedMs);
-
-          // Calculate credit based on hourly rate and unused time
-          const unusedHours = unusedMs / (1000 * 60 * 60);
-          // Get GPU count from hosted.ai subscription if available, default to 1
-          const gpuCount = 1; // Will be refined below if we can fetch subscription
-          const creditBackCents = Math.round(unusedHours * hourlyRateCents * gpuCount);
-
-          if (creditBackCents > 0) {
-            const unusedMins = Math.round(unusedMs / 60000);
-            await stripe.customers.createBalanceTransaction(ctx.accountId, {
-              amount: -creditBackCents, // Negative amount = credit
-              currency: "usd",
-              description: `GPU early termination credit: ${unusedMins} mins unused`,
-              metadata: {
-                subscription_id: subscriptionId,
-                unused_minutes: unusedMins.toString(),
-                credit_back_cents: creditBackCents.toString(),
-              },
-            });
-            console.log(`[Billing] Credited back $${(creditBackCents / 100).toFixed(2)} to ${customer.email} for early termination (${unusedMins} mins unused)`);
-          }
-        } else {
-          // Terminated after prepaid period - charge for unbilled time since prepaidUntil
-          // This handles the gap between the last sync and termination
-          const unbilledMs = now.getTime() - prepaidUntil.getTime();
-          const unbilledHours = unbilledMs / (1000 * 60 * 60);
-
-          // Only charge if more than 1 minute of unbilled time (avoid micro-charges)
-          if (unbilledHours > (1 / 60)) {
-            const gpuCount = 1; // Default, could fetch from subscription if needed
-            const finalChargeCents = Math.round(unbilledHours * hourlyRateCents * gpuCount);
-
-            if (finalChargeCents > 0) {
-              const unbilledMins = Math.round(unbilledHours * 60);
-              await stripe.customers.createBalanceTransaction(ctx.accountId, {
-                amount: finalChargeCents,
-                currency: "usd",
-                description: `GPU final usage: ${unbilledMins} mins after prepaid period`,
-                metadata: {
-                  subscription_id: subscriptionId,
-                  unbilled_minutes: unbilledMins.toString(),
-                },
-              });
-              console.log(`[Billing] Charged $${(finalChargeCents / 100).toFixed(2)} to ${customer.email} for final unbilled usage (${unbilledMins} mins)`);
-            }
-          }
-        }
-
+      if (podMetadata) {
+        await reconcileTerminationBilling({
+          stripeCustomerId: ctx.accountId,
+          teamId,
+          podMetadata,
+          ref: { subscriptionId: String(subscriptionId) },
+          gpuCount: 1,
+        });
       }
     } catch (billingError) {
       console.error("Error during billing reconciliation:", billingError);
@@ -419,14 +367,22 @@ export async function DELETE(
     }
 
     // Always clean up PodMetadata on termination, regardless of billing state
+    // (close the PA-354 history window first)
     try {
+      await closeSubscriptionHistory({
+        subscriptionId: String(subscriptionId),
+      });
       await prisma.podMetadata.delete({
         where: { subscriptionId: String(subscriptionId) },
       });
-      console.log(`[Billing] Cleaned up PodMetadata for subscription ${subscriptionId}`);
+      console.log(
+        `[Billing] Cleaned up PodMetadata for subscription ${subscriptionId}`,
+      );
     } catch (deleteError) {
       // PodMetadata may not exist (e.g. hourly pods) - that's fine
-      console.log(`[Billing] No PodMetadata to clean up for subscription ${subscriptionId}`);
+      console.log(
+        `[Billing] No PodMetadata to clean up for subscription ${subscriptionId} ${deleteError}`,
+      );
     }
 
     await unsubscribeFromPool(subscriptionId, teamId, poolId);
@@ -443,14 +399,21 @@ export async function DELETE(
           data: { activePods: cached.activePods - 1 },
         });
       }
-    } catch { /* non-critical */ }
+    } catch {
+      /* non-critical */
+    }
 
     // Log the activity
-    await logGPUTerminated(ctx.accountId, poolName, displayNameForLog, String(subscriptionId));
+    await logGPUTerminated(
+      ctx.accountId,
+      poolName,
+      displayNameForLog,
+      String(subscriptionId),
+    );
 
     // Send email notification
     try {
-      const dashboardToken = generateCustomerToken(payload.email.toLowerCase(), payload.customerId);
+      const dashboardToken = await createLoginLink({ email: payload.email.toLowerCase(), customerId: ctx.accountId });
       const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${dashboardToken}`;
       await sendGpuTerminatedEmail({
         to: customer.email!,
@@ -469,8 +432,10 @@ export async function DELETE(
   } catch (error) {
     console.error("Unsubscribe error:", error);
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Failed to unsubscribe" },
-      { status: 500 }
+      {
+        error: error instanceof Error ? error.message : "Failed to unsubscribe",
+      },
+      { status: 500 },
     );
   }
 }

@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { computeStorageCharge, type StorageAccumulatorState } from "@/lib/storage-billing";
+import {
+  computeStorageCharge,
+  storageIntervalHours,
+  type StorageAccumulatorState,
+} from "@/lib/storage-billing";
 
 // Production rate: 0.004 cents/GB/hr ≈ $0.00004/GB/hr
 const RATE_CENTS_PER_GB_HR = 0.004;
 const HALF_HOUR = 0.5;
 
-const HOUR_IN_SEC = 3600;
 
 function emptyState(windowStartedAt: number): StorageAccumulatorState {
   return { pendingCents: 0, pendingGbHours: 0, windowStartedAt };
@@ -79,8 +82,8 @@ describe("computeStorageCharge — bug repro for PA-159", () => {
   });
 });
 
-describe("computeStorageCharge — description content (James's ask)", () => {
-  it("description includes GB, hours, true rate, and UTC window", () => {
+describe("computeStorageCharge — description content", () => {
+  it("description includes billed GB-hours, true rate, and the accrued-since date", () => {
     // Run enough intervals at 400GB to flush.
     let state = emptyState(Date.UTC(2026, 3, 29, 6, 0) / 1000);
     let now = state.windowStartedAt;
@@ -93,13 +96,12 @@ describe("computeStorageCharge — description content (James's ask)", () => {
       charge = r.charge;
     }
 
-    expect(charge.description).toContain("400GB");
-    expect(charge.description).toContain("hrs");
+    expect(charge.description).toContain("GB-hrs");
     expect(charge.description).toContain("$0.000040/GB/hr"); // true rate, not $0.0000
-    expect(charge.description).toContain("2026-04-29 06:00");
-    expect(charge.description).toContain("UTC");
+    expect(charge.description).toContain("accrued since 2026-04-29 06:00 UTC");
     expect(charge.description).not.toContain("$0.0000/GB/hr");
     expect(charge.description).not.toContain("rounded up");
+    expect(charge.description).not.toContain("avg");
   });
 
   it("computes average GB across windows where storage changed", () => {
@@ -119,7 +121,8 @@ describe("computeStorageCharge — description content (James's ask)", () => {
     expect(r2.charge).not.toBeNull();
     // gbHours = 100×0.5 + 1000×0.5 = 550. window = 1h. avg = 550GB.
     expect(r2.charge!.avgGb).toBeCloseTo(550, 1);
-    expect(r2.charge!.description).toContain("550GB avg");
+    // 2c billed at 0.004c/GB-hr = 500 GB-hrs; the 0.2c remainder carries forward.
+    expect(r2.charge!.description).toContain("500.00 GB-hrs");
   });
 });
 
@@ -158,5 +161,145 @@ describe("computeStorageCharge — edge cases", () => {
     expect(result.charge).not.toBeNull();
     expect(result.charge!.cents).toBe(50);
     expect(result.newState.pendingCents).toBeCloseTo(0, 6);
+  });
+});
+
+describe("PA-168 — avg GB drift when accrual interval ≠ real elapsed", () => {
+  // Storage syncs fire when ≥25 min have elapsed (sync runs on a ~5-min cadence),
+  // so real intervals run ~25-30 min, not exactly 30. The accumulator hits a fixed
+  // GB-hours threshold (1¢ / 0.004 = 250 GB-hrs) regardless of volume, so the
+  // displayed "avg" = 250 / realWindowHours — a timing artifact, not the volume.
+
+  it("BUG: a steady 100GB volume reports inflated avg GB when accrued at a fixed 30-min interval", () => {
+    // Reproduces prod: real intervals are 27 min, but the buggy caller passes a
+    // fixed HALF_HOUR. After 5 intervals: 250 GB-hrs over 2.25h real → 111GB shown.
+    const REAL_MIN = 27;
+    let state = emptyState(1_700_000_000);
+    let now = 1_700_000_000;
+    let charge: NonNullable<ReturnType<typeof computeStorageCharge>["charge"]> | null = null;
+
+    while (!charge) {
+      now += REAL_MIN * 60;
+      const r = computeStorageCharge(state, 100, RATE_CENTS_PER_GB_HR, HALF_HOUR, now);
+      state = r.newState;
+      charge = r.charge;
+    }
+
+    expect(charge.cents).toBe(1);
+    expect(charge.avgGb).toBe(111); // wrong — volume is steady 100GB
+  });
+
+  it("FIX: feeding real elapsed hours keeps avg GB == the true volume", () => {
+    // Same 27-min real intervals, but accrue with real elapsed via storageIntervalHours.
+    const REAL_MIN = 27;
+    let state = emptyState(1_700_000_000);
+    let now = 1_700_000_000;
+    let lastSync = now; // windowStartedAt == first metering's lastSync
+    let charge: NonNullable<ReturnType<typeof computeStorageCharge>["charge"]> | null = null;
+
+    while (!charge) {
+      const prev = now;
+      now += REAL_MIN * 60;
+      const h = storageIntervalHours(now, prev, 30, 60); // = 0.45h
+      const r = computeStorageCharge(state, 100, RATE_CENTS_PER_GB_HR, h, now);
+      state = r.newState;
+      lastSync = now;
+      charge = r.charge;
+    }
+    void lastSync;
+
+    expect(charge.cents).toBe(1);
+    expect(charge.avgGb).toBe(100); // correct
+    expect(charge.description).toContain("250.00 GB-hrs");
+  });
+
+  it("FIX: avg GB stays exact across jittery real intervals (25-30 min mix)", () => {
+    // Mirrors the screenshot's mixed window lengths. With real-elapsed accrual the
+    // numerator and denominator telescope, so the average is the volume exactly.
+    const INTERVALS_MIN = [25, 28, 26, 30, 27, 25, 29, 26, 30, 28, 25, 27, 26, 29, 30];
+    let state = emptyState(1_700_000_000);
+    let now = 1_700_000_000;
+    let totalBilled = 0;
+    let totalMinutes = 0;
+
+    for (const min of INTERVALS_MIN) {
+      const prev = now;
+      now += min * 60;
+      totalMinutes += min;
+      const h = storageIntervalHours(now, prev, 30, 60);
+      const r = computeStorageCharge(state, 100, RATE_CENTS_PER_GB_HR, h, now);
+      if (r.charge) {
+        expect(r.charge.avgGb).toBe(100); // never drifts
+        totalBilled += r.charge.cents;
+      }
+      state = r.newState;
+    }
+
+    // Billing tracks real elapsed: 100GB × 0.004c × (minutes/60).
+    const expectedCents = 100 * RATE_CENTS_PER_GB_HR * (totalMinutes / 60);
+    expect(totalBilled).toBeGreaterThanOrEqual(Math.floor(expectedCents) - 1);
+    expect(totalBilled).toBeLessThanOrEqual(Math.ceil(expectedCents));
+  });
+});
+
+describe("storageIntervalHours", () => {
+  const NOW = 1_700_000_000;
+
+  it("returns real elapsed hours when a prior sync timestamp exists", () => {
+    expect(storageIntervalHours(NOW, NOW - 27 * 60, 30, 60)).toBeCloseTo(0.45, 6);
+    expect(storageIntervalHours(NOW, NOW - 25 * 60, 30, 60)).toBeCloseTo(25 / 60, 6);
+  });
+
+  it("falls back to the nominal interval on the first metering", () => {
+    expect(storageIntervalHours(NOW, null, 30, 60)).toBe(0.5);
+    expect(storageIntervalHours(NOW, NaN, 30, 60)).toBe(0.5);
+    expect(storageIntervalHours(NOW, 0, 30, 60)).toBe(0.5);
+  });
+
+  it("caps the interval so a sync outage can't bill an unbounded chunk", () => {
+    expect(storageIntervalHours(NOW, NOW - 6 * 3600, 30, 60)).toBe(1.0); // 6h elapsed → capped at 60 min
+  });
+
+  it("returns 0 on clock skew (negative elapsed), accruing nothing", () => {
+    expect(storageIntervalHours(NOW, NOW + 100, 30, 60)).toBe(0);
+  });
+});
+
+// The description is a customer-facing Stripe statement line, so both the common
+// one-interval charge and a months-long accrual are pinned to an exact string.
+describe("computeStorageCharge — description names what was billed", () => {
+  const START = Date.UTC(2026, 8, 1, 22, 27) / 1000;
+
+  it("a charge covering exactly one capped interval reads as the GB-hours billed", () => {
+    const r = computeStorageCharge(emptyState(START), 5000, RATE_CENTS_PER_GB_HR, HALF_HOUR, START + 1800);
+
+    expect(r.charge!.cents).toBe(10);
+    expect(r.charge!.description).toBe(
+      "Storage: 2500.00 GB-hrs @ $0.000040/GB/hr (accrued since 2026-09-01 22:27 UTC)",
+    );
+  });
+
+  it("a months-long accrual states the accrued-since date, never a 0GB average", () => {
+    // A small volume crosses 1c after ~111 days; the window is unbounded, the
+    // billed GB-hours are not.
+    const windowStartedAt = Date.UTC(2026, 4, 13, 6, 43) / 1000;
+    const nowSec = Date.UTC(2026, 8, 1, 22, 57) / 1000;
+    const state: StorageAccumulatorState = { pendingCents: 0.999, pendingGbHours: 249.75, windowStartedAt };
+
+    const r = computeStorageCharge(state, 1, RATE_CENTS_PER_GB_HR, 1, nowSec);
+
+    expect(r.charge!.cents).toBe(1);
+    expect(r.charge!.description).toBe(
+      "Storage: 250.00 GB-hrs @ $0.000040/GB/hr (accrued since 2026-05-13 06:43 UTC)",
+    );
+    expect(r.charge!.description).not.toContain("0GB");
+    expect(r.charge!.description).not.toContain("2680");
+  });
+
+  it("rate x billed GB-hours equals the cents charged", () => {
+    const r = computeStorageCharge(emptyState(START), 800, RATE_CENTS_PER_GB_HR, HALF_HOUR, START + 1800);
+
+    const gbHours = parseFloat(r.charge!.description.match(/([\d.]+) GB-hrs/)![1]);
+    expect(gbHours * RATE_CENTS_PER_GB_HR).toBeCloseTo(r.charge!.cents, 6);
   });
 });

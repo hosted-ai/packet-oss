@@ -16,28 +16,12 @@ import {
   emailInfoBox, emailSignoff, escapeHtml, plainTextFooter,
 } from "@/lib/email/utils";
 import { loadTemplate } from "@/lib/email/template-loader";
-import { generateCustomerToken } from "@/lib/customer-auth";
+import { createLoginLink, LOGIN_LINK_TTL_MINUTES } from "@/lib/customer-auth";
 import { getTeamMemberships, acceptTeamInvite } from "@/lib/team-members";
 import { logLoginLinkSent } from "@/lib/admin-activity";
-import { prisma } from "@/lib/prisma";
 import { getBrandName, getDashboardUrl } from "@/lib/branding";
 import { findSuspension } from "@/lib/customer-suspension";
 import type Stripe from "stripe";
-
-// ── Session timeout ──────────────────────────────────────────────────────────
-
-async function getSessionTimeout(stripeCustomerId: string): Promise<number> {
-  const settings = await prisma.customerSettings.findUnique({
-    where: { stripeCustomerId },
-  });
-  return settings?.sessionTimeoutHours || 1;
-}
-
-function formatExpiryText(hours: number): string {
-  if (hours === 1) return "1 hour";
-  if (hours === 24) return "24 hours";
-  return `${hours} hours`;
-}
 
 // ── Email templates ──────────────────────────────────────────────────────────
 
@@ -71,7 +55,7 @@ async function sendAccessEmail(params: {
           <a href="{{billingUrl}}" style="color: #1a4fff; text-decoration: none;">Open billing portal</a> to update payment methods or view invoices.
         </p>
       `)}
-      ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="{{dashboardUrl}}/account" style="color: #1a4fff;">{{dashboardUrl}}/account</a>`)}
+      ${emailMuted(`This link expires in 15 minutes. Request a new one at <a href="{{dashboardUrl}}/account" style="color: #1a4fff;">{{dashboardUrl}}/account</a>`)}
       ${emailMuted("Did not request this? You can safely ignore this email.")}
       ${emailSignoff()}
     `,
@@ -89,7 +73,7 @@ From your dashboard you can:
 
 Manage billing: {{billingUrl}}
 
-This link expires in 1 hour. Request a new one at {{dashboardUrl}}/account
+This link expires in 15 minutes. Request a new one at {{dashboardUrl}}/account
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(
@@ -136,7 +120,7 @@ async function sendFreeTrialAccessEmail(params: {
         <li>Run batch processing jobs</li>
       </ul>
       ${emailMuted("Need dedicated GPU instances? Add funds from the Billing tab in your dashboard.")}
-      ${emailMuted(`This link expires in 1 hour. Request a new one at <a href="{{dashboardUrl}}/account" style="color: #1a4fff;">{{dashboardUrl}}/account</a>`)}
+      ${emailMuted(`This link expires in 15 minutes. Request a new one at <a href="{{dashboardUrl}}/account" style="color: #1a4fff;">{{dashboardUrl}}/account</a>`)}
       ${emailMuted("Did not request this? You can safely ignore this email.")}
       ${emailSignoff()}
     `,
@@ -154,7 +138,7 @@ From your dashboard you can:
 
 Need dedicated GPU instances? Add funds from the Billing tab in your dashboard.
 
-This link expires in 1 hour. Request a new one at {{dashboardUrl}}/account
+This link expires in 15 minutes. Request a new one at {{dashboardUrl}}/account
 ${plainTextFooter()}`;
 
   const template = await loadTemplate(
@@ -181,12 +165,11 @@ async function sendTeamMemberAccessEmail(params: {
   memberName: string;
   teamOwnerName: string;
   accountUrl: string;
-  sessionTimeoutHours?: number;
 }) {
   const { to, memberName, teamOwnerName, accountUrl } = params;
   const safeMemberName = escapeHtml(memberName);
   const safeTeamOwnerName = escapeHtml(teamOwnerName);
-  const expiryText = formatExpiryText(params.sessionTimeoutHours || 1);
+  const expiryText = `${LOGIN_LINK_TTL_MINUTES} minutes`;
   const brandName = getBrandName();
   const dashboardUrl = getDashboardUrl();
 
@@ -294,8 +277,7 @@ export async function sendLoginEmailForCustomer(
 
     if (teamId) {
       // Paid/provisioned customer — send full access email with billing portal
-      const sessionTimeout = await getSessionTimeout(customer.id);
-      const token = generateCustomerToken(normalizedEmail, customer.id, { expiresInHours: sessionTimeout, next: options.next });
+      const token = await createLoginLink({ email: normalizedEmail, customerId: customer.id, next: options.next });
       const accountUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${token}${inviteSuffix}`;
 
       const portalSession = await stripe.billingPortal.sessions.create({
@@ -318,8 +300,7 @@ export async function sendLoginEmailForCustomer(
       return true;
     } else if (billingType === "free" || billingType === "free_trial") {
       // Free trial customer — send free trial email (no billing portal)
-      const sessionTimeout = await getSessionTimeout(customer.id);
-      const token = generateCustomerToken(normalizedEmail, customer.id, { expiresInHours: sessionTimeout, next: options.next });
+      const token = await createLoginLink({ email: normalizedEmail, customerId: customer.id, next: options.next });
       const accountUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${token}${inviteSuffix}`;
 
       try {
@@ -362,8 +343,7 @@ export async function sendLoginEmailForCustomer(
       return true;
     }
 
-    const sessionTimeout = await getSessionTimeout(membership.stripeCustomerId);
-    const token = generateCustomerToken(normalizedEmail, membership.stripeCustomerId, { expiresInHours: sessionTimeout, next: options.next });
+    const token = await createLoginLink({ email: normalizedEmail, customerId: membership.stripeCustomerId, next: options.next });
     const accountUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${token}`;
 
     if (!membership.acceptedAt) {

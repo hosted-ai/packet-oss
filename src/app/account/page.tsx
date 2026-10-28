@@ -2,18 +2,57 @@
 
 import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Space_Grotesk } from "next/font/google";
+import Image from "next/image";
 import { BrandLogo } from "@/components/BrandLogo";
 import { captureUtm, getUtmData, clearUtmData } from "@/lib/utm";
 import { getSessionId } from "@/lib/tracker";
-import { getBrandName, getLogoUrl, getAppUrl } from "@/lib/branding-client";
-import { useBranding } from "@/hooks/useBranding";
+import { getBrandName, getAppUrl } from "@/lib/branding-client";
+import { trackEvent } from "@/lib/analytics/track-event";
+import dynamic from "next/dynamic";
+
+// Single typeface for the whole page — headline, body, italic accent, and
+// the trust/proof microcopy all use Space Grotesk. Declared HERE, not in the
+// root layout — next/font preloads its woff2 on every page that mounts the
+// declaring module, and only /account uses it.
+const spaceGrotesk = Space_Grotesk({
+  variable: "--font-space-grotesk",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+});
 
 // MAINTENANCE MODE — set to false when hosted.ai team creation is fixed
 const SIGNUP_MAINTENANCE = false;
 
 const IS_OSS = process.env.NEXT_PUBLIC_EDITION === "oss";
 
+// "AI teams that ship" logo cloud (Pro only). The component file and its
+// trademark logo assets are OSS-export-excluded — edition-gated dynamic
+// import so the OSS bundle never references them.
+const AccountLogoCloud = !IS_OSS
+  ? dynamic(() =>
+      import("./AccountLogoCloud").then((m) => ({ default: m.AccountLogoCloud }))
+    )
+  : () => null;
+
 type Mode = "signin" | "signup";
+
+// Bottom proof marquee content — rendered twice back-to-back in the JSX so
+// the CSS animation can loop seamlessly via translateX(-50%).
+const MARQUEE_STATS = [
+  {
+    icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17" /><polyline points="16 7 22 7 22 13" /></svg>,
+    text: "50%+ below AWS, GCP, and Azure equivalents",
+  },
+  {
+    icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></svg>,
+    text: "Developers in 50+ countries",
+  },
+  {
+    icon: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" strokeLinecap="round" strokeLinejoin="round" /></svg>,
+    text: "4 min avg. signup → SSH",
+  },
+];
 
 const GPU_NAMES: Record<string, string> = {
   b200: "NVIDIA B200",
@@ -26,8 +65,6 @@ const GPU_NAMES: Record<string, string> = {
 function AccountContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const branding = useBranding();
-  const LOGO_URL = branding?.logoUrl || getLogoUrl();
 
   // URL params from marketing pages
   const urlEmail = searchParams.get("email") || "";
@@ -84,11 +121,21 @@ function AccountContent() {
   const [submitted, setSubmitted] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(false);
 
+  // Prevent FOUC: styled-jsx styles aren't applied until hydration completes,
+  // so the raw HTML flashes unstyled for a frame. Hide the page until mounted.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setSubmitted(false);
     setLoading(true);
+
+    // GA4: track sign_up_start when user submits the signup form
+    if (mode === "signup") {
+      trackEvent("sign_up_start");
+    }
 
     if (mode === "signup" && !termsAccepted) {
       setError("Please accept the Legal Policies and Privacy Policies");
@@ -129,11 +176,11 @@ function AccountContent() {
         clearUtmData();
         if (!IS_OSS) {
           import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.SIGNUP)).catch(() => {});
-          if (typeof window !== "undefined" && typeof (window as any).my_analytics !== "undefined") {
-            (window as any).my_analytics.goal("keo2bt1sqibntima");
+          if (typeof window !== "undefined" && typeof window.my_analytics !== "undefined") {
+            window.my_analytics.goal("keo2bt1sqibntima");
           }
-          if (typeof window !== "undefined" && typeof (window as any).lintrk === "function") {
-            (window as any).lintrk("track", { conversion_id: 24436340 });
+          if (typeof window !== "undefined" && typeof window.lintrk === "function") {
+            window.lintrk("track", { conversion_id: 24436340 });
           }
         }
         router.push(data.redirect);
@@ -153,13 +200,19 @@ function AccountContent() {
   }
 
   return (
-    <div className="account-page">
+    <div
+      className={`account-page ${spaceGrotesk.variable}`}
+      style={{ opacity: mounted ? 1 : 0, transition: "opacity 0.15s ease-in" }}
+    >
       {/* Minimal header — logo + one link, nothing more */}
       <header className="account-header">
         <div className="account-header-inner">
-          <a href={getAppUrl()}>
+          <a href={getAppUrl()} suppressHydrationWarning>
+            {/* Pre-styled white wordmark for this page's dark header —
+                intentionally NOT the tenant-branded LOGO_URL, since white-label
+                tenants' logos aren't guaranteed to work knocked-out on black. */}
             <BrandLogo
-              src={LOGO_URL}
+              src="/images/packet-logo-white.png"
               alt={getBrandName()}
               width={120}
               height={40}
@@ -168,7 +221,7 @@ function AccountContent() {
           </a>
           <div className="account-header-nav">
             {process.env.NEXT_PUBLIC_EDITION !== "oss" && (
-              <a href={`${getAppUrl()}/#pricing`} className="account-header-link">
+              <a href={`${getAppUrl()}/pricing`} className="account-header-link">
                 Pricing
               </a>
             )}
@@ -187,71 +240,32 @@ function AccountContent() {
       {/* Two-column layout: sell left, convert right */}
       <div className="account-layout">
 
-        {/* ─── Left panel: value proposition ─── */}
+        {/* ─── Left panel: sell + convert ─── */}
         <div className="account-left">
-          <div className="account-left-glow-1" />
-          <div className="account-left-glow-2" />
-
-          <div className="account-left-content">
+          <div className="account-left-inner">
             <h1 className="account-headline">
               {hasGpuContext ? (
                 <>Deploy {gpuName}<br />in minutes.</>
               ) : IS_OSS ? (
                 <>{getBrandName()}</>
               ) : (
-                <>GPU cloud.<br />No credit card required.</>
+                <>The GPU cloud that<br /><span className="account-headline-em">eliminates</span> idle charges.</>
               )}
             </h1>
 
-            <p className="account-subheadline">
-              {hasGpuContext
-                ? "Create your free account to browse live inventory, compare pricing, and deploy when you\u2019re ready."
-                : IS_OSS
-                  ? "Your GPU cloud platform. Deploy, manage, and scale."
-                  : "Browse GPU inventory, compare live pricing, and deploy a pod in under 5 minutes."}
-            </p>
-
-            {/* What you get — immediate value, no payment */}
-            <div className="account-benefits">
-              {(IS_OSS ? [
-                "Browse GPU inventory with live pricing",
-                "Deploy and manage GPU pods",
-                "SSH access in minutes",
-              ] : [
-                "Full GPU inventory with live pricing",
-                hasGpuContext ? "Fund your wallet and deploy when ready" : "SSH access in under 5 minutes",
-                "No credit card required",
-              ]).map((text) => (
-                <div key={text} className="account-benefit">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#14b8a6" strokeWidth="2.5">
-                    <path d="M5 13l4 4L19 7" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  <span>{text}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Trust stats — real numbers, no fluff (Pro only) */}
+            {/* PA-393 trust proof — one line directly under the headline so the
+                skeptical visitor reads it before the form asks for anything.
+                The rest of the proof points live in the bottom strip below. */}
             {!IS_OSS && (
-              <div className="account-trust-bar">
-                {[
-                  { value: "500+", label: "GPUs" },
-                  { value: "99.9%", label: "Uptime" },
-                  { value: "<5 min", label: "Setup" },
-                  { value: "24/7", label: "Support" },
-                ].map((stat) => (
-                  <div key={stat.label} className="account-trust-stat">
-                    <div className="account-trust-value">{stat.value}</div>
-                    <div className="account-trust-label">{stat.label}</div>
-                  </div>
-                ))}
+              <div className="account-trust-line">
+                <span className="account-trust-icon">
+                  {/* Verified-style checkmark badge, replacing the globe */}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="m8 12 3 3 5-6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </span>
+                <span>Trusted by AI/ML teams and developers across 50+ countries</span>
               </div>
             )}
-          </div>
-        </div>
 
-        {/* ─── Right panel: the form ─── */}
-        <div className="account-right">
           <div className="account-form-container">
             {!submitted ? (
               <>
@@ -307,7 +321,7 @@ function AccountContent() {
                 <form onSubmit={handleSubmit}>
                   <div className="account-field">
                     <label htmlFor="account-email" className="account-label">
-                      {IS_OSS ? "Email" : "Work email"}
+                      Email
                     </label>
                     <input
                       type="email"
@@ -321,7 +335,10 @@ function AccountContent() {
                     />
                   </div>
 
-                  {mode === "signup" && (
+                  {/* Terms + consent note stay hidden until the visitor starts
+                      typing an email — they're real estate that isn't useful
+                      before there's anything to submit. */}
+                  {mode === "signup" && email.trim() !== "" && (
                     <>
                       <label className="account-terms">
                         <input
@@ -432,24 +449,75 @@ function AccountContent() {
               </div>
             )}
           </div>
+          </div>
+        </div>
+
+        {/* ─── Right panel: GPU showcase ─── */}
+        <div className="account-right">
+          <div className="account-showcase">
+            {/* Teal glaze radiating from behind the GPU */}
+            <div className="account-showcase-glow" aria-hidden="true" />
+            {/* Customer logos, light-on-dark — sits above the GPU photo */}
+            {!IS_OSS && <AccountLogoCloud />}
+            <div className="account-gpu-wrap">
+              <Image
+                src="/images/gpu-cloud2.png"
+                alt="Cloud GPU infrastructure"
+                fill
+                priority
+                sizes="(max-width: 768px) 0px, 400px"
+                className="account-gpu-img"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* Bottom proof marquee — continuous scrolling ticker in flow at the
+          page bottom (not an overlay), so it always claims its own slice of
+          the 100dvh budget and the columns above shrink to make room. */}
+      {!IS_OSS && (
+        <div className="account-marquee">
+          <div className="account-marquee-track">
+            {[0, 1, 2, 3].flatMap((rep) =>
+              MARQUEE_STATS.map(({ icon, text }, i) => (
+                <div key={`${rep}-${i}`} className="account-marquee-item">
+                  {icon}
+                  <span>{text}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
       <style jsx>{`
         /* ═══ Page shell ═══ */
+        /* Never scrolls, ever — always exactly one viewport tall. dvh avoids
+           the classic mobile bug where 100vh includes the browser chrome and
+           leaves a sliver of scrollable overflow; vh is the fallback for
+           browsers that don't support dvh. */
         .account-page {
-          min-height: 100vh;
+          height: 100vh;
+          height: 100dvh;
+          max-height: 100vh;
+          max-height: 100dvh;
+          overflow: hidden;
           display: flex;
           flex-direction: column;
+          font-family: var(--font-space-grotesk), Arial, Helvetica, sans-serif;
+          /* True black, per direction — not the zinc-900/800 charcoal
+             gradient this page used before. */
+          background: #000;
+          color: #fafafa;
         }
 
         /* ═══ Header ═══ */
         .account-header {
-          position: sticky;
-          top: 0;
+          flex-shrink: 0;
           z-index: 50;
-          border-bottom: 1px solid var(--line);
-          background: rgba(255, 255, 255, 0.92);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(0, 0, 0, 0.85);
           backdrop-filter: blur(12px);
         }
         .account-header-inner {
@@ -468,16 +536,16 @@ function AccountContent() {
         }
         .account-header-link {
           font-size: 14px;
-          color: var(--muted);
+          color: #a1a1aa;
           text-decoration: none;
           transition: color 0.15s;
         }
         .account-header-link:hover {
-          color: var(--ink);
+          color: #fafafa;
         }
         .account-header-signin {
           font-size: 14px;
-          color: var(--ink);
+          color: #fafafa;
           font-weight: 500;
           background: none;
           border: none;
@@ -488,116 +556,165 @@ function AccountContent() {
         .account-layout {
           flex: 1;
           display: flex;
-        }
-
-        /* ═══ Left panel — dark, sells ═══ */
-        .account-left {
-          flex: 1 1 50%;
-          background: linear-gradient(135deg, #0a0a0a 0%, #111827 50%, #0f172a 100%);
-          color: white;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 60px 48px;
-          position: relative;
           overflow: hidden;
-        }
-        .account-left-glow-1 {
-          position: absolute;
-          top: -120px;
-          right: -80px;
-          width: 400px;
-          height: 400px;
-          background: radial-gradient(circle, rgba(26, 79, 255, 0.12) 0%, transparent 70%);
-          border-radius: 50%;
-          filter: blur(60px);
-          pointer-events: none;
-        }
-        .account-left-glow-2 {
-          position: absolute;
-          bottom: -60px;
-          left: -60px;
-          width: 300px;
-          height: 300px;
-          background: radial-gradient(circle, rgba(20, 184, 166, 0.08) 0%, transparent 70%);
-          border-radius: 50%;
-          filter: blur(40px);
-          pointer-events: none;
-        }
-        .account-left-content {
-          position: relative;
-          z-index: 1;
-          max-width: 440px;
-          width: 100%;
+          min-height: 0;
         }
 
-        /* ═══ Left panel typography ═══ */
-        .account-headline {
-          font-size: clamp(1.8rem, 3vw, 2.4rem);
-          font-weight: 700;
-          line-height: 1.15;
-          margin: 0 0 16px;
-          font-family: var(--font-display);
-        }
-        .account-subheadline {
-          font-size: 16px;
-          color: rgba(255, 255, 255, 0.65);
-          line-height: 1.6;
-          margin: 0 0 32px;
-        }
-
-        /* ═══ Benefits ═══ */
-        .account-benefits {
+        /* ═══ Left panel — sells AND converts ═══ */
+        /* Transparent: the page's charcoal gradient shows straight through so
+           the two columns read as one continuous dark surface. Never scrolls —
+           padding and inner gaps use clamp() so content shrinks to fit instead
+           of overflowing. */
+        .account-left {
+          flex: 1 1 46%;
+          background: transparent;
+          color: #fafafa;
           display: flex;
           flex-direction: column;
-          gap: 14px;
-          margin-bottom: 36px;
+          align-items: center;
+          overflow: hidden;
+          padding: clamp(16px, 5vh, 40px) 56px;
+          min-height: 0;
         }
-        .account-benefit {
+        .account-left-inner {
+          max-width: 480px;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
+          gap: clamp(14px, 2.5vh, 22px);
+          margin-top: auto;
+          margin-bottom: auto;
+          min-height: 0;
+        }
+        /* ═══ Left panel typography ═══ */
+        .account-headline {
+          font-size: clamp(2rem, 2.8vw, 2.6rem);
+          font-weight: 700;
+          line-height: 1.1;
+          margin: 0;
+          color: #fafafa;
+          letter-spacing: -0.5px;
+        }
+        .account-headline-em {
+          /* Space Grotesk has no true italic face — this is a synthetic
+             (browser-generated) slant, which is fine for a one-word accent. */
+          font-style: italic;
+          font-weight: 500;
+          letter-spacing: 0;
+          color: var(--teal);
+        }
+
+        /* ═══ Trust line — single line under the headline ═══ */
+        .account-trust-line {
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 8px;
+          color: #e1e1e1;
+          font-size: 12.5px;
         }
-        .account-benefit svg {
+        .account-trust-icon {
+          display: flex;
+          color: var(--teal);
           flex-shrink: 0;
         }
-        .account-benefit span {
-          font-size: 15px;
-          color: rgba(255, 255, 255, 0.8);
-        }
 
-        /* ═══ Trust bar ═══ */
-        .account-trust-bar {
+        /* ═══ Bottom proof marquee — greenish band, black text, in-flow ═══ */
+        .account-marquee {
+          flex-shrink: 0;
+          width: 100%;
+          overflow: hidden;
+          background: var(--teal);
+        }
+        .account-marquee-track {
           display: flex;
-          gap: 28px;
-          padding-top: 24px;
-          border-top: 1px solid rgba(255, 255, 255, 0.08);
-          flex-wrap: wrap;
+          width: max-content;
+          animation: account-marquee-scroll 26s linear infinite;
         }
-        .account-trust-value {
-          font-size: 17px;
-          font-weight: 700;
-          color: white;
+        .account-marquee:hover .account-marquee-track {
+          animation-play-state: paused;
         }
-        .account-trust-label {
-          font-size: 11px;
-          color: rgba(255, 255, 255, 0.4);
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
-        }
-
-        /* ═══ Right panel — white, converts ═══ */
-        .account-right {
-          flex: 1 1 50%;
+        .account-marquee-item {
           display: flex;
           align-items: center;
-          justify-content: center;
-          padding: 60px 48px;
-          background: white;
+          gap: 10px;
+          font-size: 15px;
+          font-weight: 700;
+          color: #0a0a0a;
+          white-space: nowrap;
+          padding: 14px 36px;
+          border-right: 1px solid rgba(0, 0, 0, 0.15);
         }
+        .account-marquee-item svg {
+          flex-shrink: 0;
+          color: #0a0a0a;
+        }
+        @keyframes account-marquee-scroll {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+
+        /* The card keeps the old page background (zinc-900 → zinc-800
+           gradient) even though the page itself moved to true black — it's
+           what lifts the card off the now-pure-black surface around it. */
         .account-form-container {
-          max-width: 380px;
           width: 100%;
+          background: linear-gradient(to bottom right, #18181b, #27272a);
+          border: 1px solid rgba(255, 255, 255, 0.09);
+          border-radius: 16px;
+          padding: clamp(20px, 4vh, 32px);
+          box-sizing: border-box;
+          box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+        }
+
+        /* ═══ Right panel — GPU showcase, no card ═══ */
+        /* Fully transparent: the GPU and its glow float directly on the page's
+           charcoal so the two columns are one seamless dark surface — no
+           bordered box, no separate section. */
+        .account-right {
+          flex: 1 1 54%;
+          background: transparent;
+          display: flex;
+          min-width: 0;
+        }
+        /* Logos + GPU are one centered vertical group in the middle of the
+           column — logos on top, GPU below. */
+        .account-showcase {
+          position: relative;
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 24px 0 32px;
+          min-height: 0;
+          overflow: hidden;
+        }
+        /* Teal glaze bleeding across the page background behind the GPU. Soft
+           and wide so it reads as ambient light, not a contained panel. */
+        .account-showcase-glow {
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(ellipse 58% 48% at 50% 42%, rgba(24, 182, 168, 0.26), transparent 70%),
+            radial-gradient(ellipse 40% 30% at 50% 60%, rgba(24, 182, 168, 0.12), transparent 72%);
+          pointer-events: none;
+        }
+        /* Fixed-size container — the Image uses fill mode (position:absolute)
+           so this wrapper controls the exact rendered size. Centered by the
+           parent's align-items:center. */
+        .account-gpu-wrap {
+          position: relative;
+          width: min(60%, 400px);
+          aspect-ratio: 1100 / 1162;
+          max-height: 58vh;
+          flex-shrink: 1;
+          min-height: 0;
+          margin-top: auto;
+          margin-bottom: max(5%, 16px);
+        }
+        .account-showcase :global(.account-gpu-img) {
+          object-fit: contain;
+          filter: drop-shadow(0 0 70px rgba(24, 182, 168, 0.38))
+            drop-shadow(0 24px 48px rgba(0, 0, 0, 0.55));
         }
 
         /* ═══ Form header ═══ */
@@ -607,12 +724,12 @@ function AccountContent() {
         .account-form-title {
           font-size: 22px;
           font-weight: 700;
-          color: var(--ink);
+          color: #fafafa;
           margin: 0 0 6px;
         }
         .account-form-subtitle {
           font-size: 14px;
-          color: var(--muted);
+          color: #a1a1aa;
           margin: 0;
         }
 
@@ -624,24 +741,27 @@ function AccountContent() {
           display: block;
           font-size: 13px;
           font-weight: 500;
-          color: var(--ink);
+          color: #e4e4e7;
           margin-bottom: 6px;
         }
         .account-input {
           width: 100%;
           padding: 12px 14px;
-          border: 1px solid var(--line);
+          border: 1px solid rgba(255, 255, 255, 0.12);
           border-radius: 10px;
           font-size: 15px;
-          color: var(--ink);
+          color: #fafafa;
           outline: none;
           transition: border-color 0.2s, box-shadow 0.2s;
           box-sizing: border-box;
-          background: white;
+          background: rgba(255, 255, 255, 0.05);
+        }
+        .account-input::placeholder {
+          color: #71717a;
         }
         .account-input:focus {
-          border-color: var(--blue);
-          box-shadow: 0 0 0 3px rgba(26, 79, 255, 0.1);
+          border-color: var(--teal);
+          box-shadow: 0 0 0 3px rgba(24, 182, 168, 0.18);
         }
 
         /* ═══ Terms ═══ */
@@ -656,16 +776,16 @@ function AccountContent() {
           margin-top: 2px;
           width: 16px;
           height: 16px;
-          accent-color: var(--blue);
+          accent-color: var(--teal);
           flex-shrink: 0;
         }
         .account-terms-text {
           font-size: 13px;
-          color: var(--muted);
+          color: #a1a1aa;
           line-height: 1.5;
         }
         .account-terms-text a {
-          color: var(--blue);
+          color: var(--teal);
           text-decoration: none;
         }
         .account-terms-text a:hover {
@@ -673,10 +793,9 @@ function AccountContent() {
         }
         .account-consent-note {
           font-size: 11px;
-          color: var(--muted);
+          color: #71717a;
           margin: -8px 0 16px;
           line-height: 1.5;
-          opacity: 0.7;
         }
 
         /* ═══ Error ═══ */
@@ -687,18 +806,20 @@ function AccountContent() {
         }
 
         /* ═══ Submit button ═══ */
+        /* Teal gradient pill — same treatment as the dashboard's "+ On-demand"
+           and wallet "Top up" buttons (teal-400 → teal-600). */
         .account-submit {
           width: 100%;
           padding: 13px;
-          background: var(--blue);
+          background: linear-gradient(to bottom right, #2dd4bf, #0d9488);
           color: white;
           border: none;
-          border-radius: 10px;
+          border-radius: 9999px;
           font-size: 15px;
           font-weight: 600;
           cursor: pointer;
           transition: opacity 0.15s, transform 0.1s;
-          box-shadow: 0 4px 14px rgba(26, 79, 255, 0.25);
+          box-shadow: 0 4px 14px rgba(24, 182, 168, 0.35);
         }
         .account-submit:hover:not(:disabled) {
           opacity: 0.92;
@@ -731,11 +852,11 @@ function AccountContent() {
         .account-mode-switch {
           text-align: center;
           font-size: 14px;
-          color: var(--muted);
+          color: #a1a1aa;
           margin: 24px 0 0;
         }
         .account-mode-switch button {
-          color: var(--blue);
+          color: var(--teal);
           background: none;
           border: none;
           cursor: pointer;
@@ -753,7 +874,7 @@ function AccountContent() {
           justify-content: center;
           gap: 6px;
           margin-top: 12px;
-          color: var(--muted);
+          color: #a1a1aa;
           font-size: 12px;
         }
 
@@ -764,7 +885,7 @@ function AccountContent() {
         .account-sent-icon {
           width: 56px;
           height: 56px;
-          background: var(--blue);
+          background: var(--teal);
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -774,37 +895,39 @@ function AccountContent() {
         .account-sent-title {
           font-size: 20px;
           font-weight: 700;
-          color: var(--ink);
+          color: #fafafa;
           margin: 0 0 8px;
         }
         .account-sent-text {
           font-size: 14px;
-          color: var(--muted);
+          color: #a1a1aa;
           margin: 0 0 20px;
         }
         .account-sent-text strong {
-          color: var(--ink);
+          color: #fafafa;
         }
         .account-sent-note {
           padding: 12px;
-          background: var(--background);
+          background: rgba(255, 255, 255, 0.05);
           border-radius: 8px;
-          border: 1px solid var(--line);
+          border: 1px solid rgba(255, 255, 255, 0.09);
           font-size: 13px;
-          color: var(--muted);
+          color: #a1a1aa;
           margin-bottom: 12px;
         }
+        /* Subtle teal tint — a friendly suggestion, not a warning (this used
+           to be amber, which read as an alert). */
         .account-sent-hint {
           padding: 12px;
-          background: #FFFBEB;
+          background: rgba(24, 182, 168, 0.1);
           border-radius: 8px;
-          border: 1px solid #FDE68A;
+          border: 1px solid rgba(24, 182, 168, 0.25);
           font-size: 13px;
-          color: #92400E;
+          color: #e4e4e7;
           margin-bottom: 20px;
         }
         .account-sent-hint button {
-          color: var(--blue);
+          color: var(--teal);
           background: none;
           border: none;
           cursor: pointer;
@@ -813,13 +936,13 @@ function AccountContent() {
         }
         .account-sent-retry {
           font-size: 14px;
-          color: var(--muted);
+          color: #a1a1aa;
           background: none;
           border: none;
           cursor: pointer;
         }
         .account-sent-retry:hover {
-          color: var(--blue);
+          color: #fafafa;
         }
 
         /* ═══ Animation ═══ */
@@ -828,34 +951,100 @@ function AccountContent() {
         }
 
         /* ═══ Responsive ═══ */
+        /* The GPU showcase and bottom marquee are decorative — on a phone
+           there isn't room for headline + form + imagery + marquee in one
+           screen without scrolling, and scrolling isn't allowed. Drop the
+           decorative pieces first; the conversion column (headline, trust
+           line, form) always keeps its full 100dvh to itself. */
         @media (max-width: 768px) {
-          .account-layout {
-            flex-direction: column;
-          }
           .account-left {
-            flex: none;
-            padding: 32px 24px;
+            flex: 1;
+            width: 100%;
+            padding: 24px 20px;
           }
           .account-headline {
-            font-size: 1.5rem;
+            font-size: 1.75rem;
           }
-          .account-subheadline {
-            font-size: 14px;
-            margin-bottom: 24px;
+          .account-right,
+          .account-marquee {
+            display: none;
           }
-          .account-benefits {
+        }
+        /* Short desktop/laptop windows (e.g. a resized browser, a small
+           laptop panel): the marquee is the least essential element, so it
+           goes first rather than risking any clipping of the columns above
+           it. The GPU image max-height also tightens so it stays within
+           the shorter panel. */
+        @media (max-height: 760px) {
+          .account-marquee {
+            display: none;
+          }
+        }
+        /* Very short viewports (short phones, a browser window barely taller
+           than the form itself): the legal boilerplate line is redundant with
+           the checkbox label right above it (both link to the same two
+           policies) and is the safest thing to drop next — nothing the
+           visitor needs to complete signup is lost. */
+        @media (max-height: 700px) {
+          .account-consent-note {
+            display: none;
+          }
+          .account-left-inner {
             gap: 10px;
-            margin-bottom: 24px;
           }
-          .account-benefit span {
-            font-size: 14px;
+          .account-form-container {
+            padding: 16px;
           }
-          .account-trust-bar {
-            gap: 20px;
+        }
+
+        /* ═══ Large screens (≥1440px — QHD / 27″ monitors) ═══ */
+        /* Scale up content so the page feels intentional on wide displays
+           instead of a small island floating in a sea of black. */
+        @media (min-width: 1440px) {
+          .account-header-inner {
+            max-width: 1400px;
           }
-          .account-right {
-            flex: none;
-            padding: 32px 24px 48px;
+          .account-left-inner {
+            max-width: 520px;
+          }
+          .account-headline {
+            font-size: clamp(2.2rem, 2.6vw, 3rem);
+          }
+          .account-gpu-wrap {
+            width: min(65%, 520px);
+          }
+          .account-trust-line {
+            font-size: 13.5px;
+          }
+        }
+
+        /* ═══ Extra-large screens (≥1920px — 4K / ultra-wide) ═══ */
+        @media (min-width: 1920px) {
+          .account-header-inner {
+            max-width: 1600px;
+          }
+          .account-left {
+            padding-left: 80px;
+            padding-right: 80px;
+          }
+          .account-left-inner {
+            max-width: 560px;
+          }
+          .account-headline {
+            font-size: clamp(2.4rem, 2.4vw, 3.2rem);
+          }
+          .account-form-title {
+            font-size: 24px;
+          }
+          .account-form-subtitle {
+            font-size: 15px;
+          }
+          .account-gpu-wrap {
+            width: min(70%, 600px);
+          }
+          .account-marquee-item {
+            font-size: 16px;
+            padding: 16px 44px;
           }
         }
       `}</style>

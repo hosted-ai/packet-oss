@@ -450,6 +450,28 @@ describe("DELETE /api/admin/customers/[id]", () => {
     expect(body.error).toContain("Stripe API blew up");
   });
 
+  it("returns 409 with an actionable message when Stripe rejects deletion for a positive cash balance", async () => {
+    // PA-363 — bare-metal customers can carry a Stripe cash balance from
+    // bank-transfer-funded invoices (see src/lib/baremetal/invoice.ts) even
+    // when the app's own wallet ("balance") reads $0. Stripe refuses to
+    // delete a customer in that state; surface a controlled 409 instead of
+    // passing the raw Stripe message through as a 500.
+    mockSubscriptionsList.mockResolvedValue({ data: [] });
+    mockTerminateTeam.mockResolvedValue({});
+    mockCustomersDel.mockRejectedValue(
+      new Error(
+        "You cannot delete a customer with a positive cash balance. Customer has balances in the following currencies: usd.",
+      ),
+    );
+
+    const res = await DELETE(makeRequest({ method: "DELETE" }), { params });
+
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain("Resolve the balance in the Stripe Dashboard");
+    expect(body.error).not.toContain("positive cash balance");
+  });
+
   it("skips terminateTeam when the customer has no hosted.ai team_id", async () => {
     mockCustomersRetrieve.mockResolvedValue({
       id: CUSTOMER_ID,

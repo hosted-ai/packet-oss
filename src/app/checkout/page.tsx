@@ -66,12 +66,16 @@ function CheckoutContent() {
         const result = await res.json();
         if (result.success && result.data) {
           setProducts(result.data);
-          // Find product by ID (try exact match first, then partial match on name)
-          const productFromUrl = result.data.find((p: GpuProduct) =>
-            p.id === initialProductId ||
-            p.id.toLowerCase().includes(initialProductId.toLowerCase()) ||
-            p.name.toLowerCase().includes(initialProductId.toLowerCase())
-          );
+          // Find product by ID (try exact match first, then partial match on name).
+          // Guard on a non-empty id — "".includes("") is always true, which would
+          // otherwise match the first product and skip the featured fallback below.
+          const productFromUrl = initialProductId
+            ? result.data.find((p: GpuProduct) =>
+                p.id === initialProductId ||
+                p.id.toLowerCase().includes(initialProductId.toLowerCase()) ||
+                p.name.toLowerCase().includes(initialProductId.toLowerCase())
+              )
+            : undefined;
           const featuredProduct = result.data.find((p: GpuProduct) => p.featured);
           setSelectedProduct(productFromUrl || featuredProduct || result.data[0] || null);
         }

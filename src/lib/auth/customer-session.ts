@@ -187,6 +187,30 @@ export function decodeRefreshCustomerId(refreshToken: string): string | null {
   }
 }
 
+/** Decode the email from a refresh token — used at logout to identify who
+ *  is logging out (owner vs. team member) for the activity log. */
+export function decodeRefreshEmail(refreshToken: string): string | null {
+  try {
+    const payload = jwt.verify(refreshToken, getJwtSecret(), { algorithms: ["HS256"] }) as RefreshPayload;
+    return payload.type === "customer-refresh" ? payload.email : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Decode the activeAccountId from a refresh token — used at logout to
+ *  identify the operating account for PA-175 team member sessions. Team
+ *  members carry their own customerId but the owner's Stripe customer ID
+ *  in activeAccountId after an account switch. */
+export function decodeRefreshActiveAccountId(refreshToken: string): string | null {
+  try {
+    const payload = jwt.verify(refreshToken, getJwtSecret(), { algorithms: ["HS256"] }) as RefreshPayload;
+    return payload.type === "customer-refresh" ? (payload.activeAccountId ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Revoke every live session for a customer ("log out everywhere"). */
 export async function revokeAllSessionsForCustomer(stripeCustomerId: string): Promise<number> {
   const result = await prisma.customerSession.updateMany({

@@ -68,7 +68,7 @@ export function PodDetailModal({ pod, timestamp, onClose }: PodDetailModalProps)
             <h3 className="font-semibold text-[var(--ink)]">{pod.poolName}</h3>
             <p className="text-xs text-zinc-500">{pod.podName}</p>
           </div>
-          <button
+          <button aria-label="Close dialog"
             onClick={onClose}
             className="p-2 hover:bg-zinc-100 rounded-lg transition-colors"
           >

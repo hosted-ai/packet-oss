@@ -57,7 +57,6 @@ export const PERMISSIONS = [
   "ssh_keys.manage",
   // PA-202 module permissions (added 2026-05-18)
   "token_factory.use",
-  "pixel_factory.use",
   "huggingface.use",
   "apps.use",
   "referral.view",
@@ -99,7 +98,6 @@ export const ROLE_PERMISSIONS: Record<PacketRole, RoleConfig> = {
       "api_keys.revoke",
       "ssh_keys.manage",
       "token_factory.use",
-      "pixel_factory.use",
       "huggingface.use",
       "apps.use",
       "referral.view",
@@ -119,10 +117,9 @@ export const ROLE_PERMISSIONS: Record<PacketRole, RoleConfig> = {
       "api_keys.create",
       "api_keys.revoke",
       "ssh_keys.manage",
-      // PA-202: Team Members get module access (Token Factory, Pixel Factory, HF, Apps, storage, snapshots)
+      // PA-202: Team Members get module access (Token Factory, HF, Apps, storage, snapshots)
       // but NOT referral (Team Admin only per PA-201).
       "token_factory.use",
-      "pixel_factory.use",
       "huggingface.use",
       "apps.use",
       "storage.manage",
@@ -133,7 +130,7 @@ export const ROLE_PERMISSIONS: Record<PacketRole, RoleConfig> = {
     slug: "readOnlyMember",
     displayName: "Read-only Member",
     summary:
-      "SSH-only access to running GPUs. Cannot deploy, stop, terminate, or see billing. No module access (Token Factory, Pixel Factory, HF, Apps all hidden). HAI side: collapses to teamMember today; distinct slug coming.",
+      "SSH-only access to running GPUs. Cannot deploy, stop, terminate, or see billing. No module access (Token Factory, HF, Apps all hidden). HAI side: collapses to teamMember today; distinct slug coming.",
     permissions: new Set<Permission>(["gpu.access", "ssh_keys.manage"]),
   },
   financeManager: {

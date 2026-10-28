@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken } from "@/lib/customer-auth";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import { requirePermission } from "@/lib/auth/audit";
-import { gatePermission } from "@/lib/auth/gate";
+import { RegionMaintenanceError } from "@/lib/maintenance/regions";
 import {
   createInstance,
   getServiceProvisioningInfo,
@@ -19,6 +18,9 @@ import {
 } from "@/lib/huggingface-deploy-scripts";
 import { getModelInfo, estimateDiskSizeFromModel, STANDARD_EPHEMERAL_STORAGE_GB } from "@/lib/huggingface-api";
 import { logActivity } from "@/lib/activity";
+import { trackGA4Event } from "@/lib/analytics/ga4";
+import { posthogTrackEvent } from "@/lib/analytics/posthog";
+import { isSellable } from "@/lib/product-availability";
 
 /**
  * POST /api/huggingface/deploy
@@ -41,7 +43,11 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, teamId, accountId } = auth;
+    const { teamId, accountId } = auth;
+
+    // Hourly usage is paid from the hourly wallet on the context; the operating
+    // account only owns the deployment.
+    const hourlyWalletId = auth.hourlyCustomerId ?? accountId;
 
     if (!teamId) {
       return NextResponse.json({ error: "No team associated with this account" }, { status: 400 });
@@ -74,7 +80,9 @@ export async function POST(request: NextRequest) {
 
     // Look up product to get serviceId + pricing
     const product = await prisma.gpuProduct.findUnique({ where: { id: product_id } });
-    if (!product || !product.active) {
+    // Sellable: this deducts the hourly rate from the wallet, so it opens a new
+    // billing relationship rather than serving a subscription entitlement.
+    if (!product || !isSellable(product)) {
       return NextResponse.json({ error: "Product not found or inactive" }, { status: 404 });
     }
     if (!product.serviceId) {
@@ -174,7 +182,7 @@ export async function POST(request: NextRequest) {
     }
 
     const prepaidAmountCents = Math.round((MINIMUM_BILLING_MINUTES / 60) * hourlyRateCents * gpuCount);
-    const walletBalance = await getWalletBalance(accountId);
+    const walletBalance = await getWalletBalance(hourlyWalletId);
 
     if (walletBalance.availableBalance < prepaidAmountCents) {
       return NextResponse.json(
@@ -184,11 +192,11 @@ export async function POST(request: NextRequest) {
     }
 
     // CHARGE BEFORE DEPLOYMENT
-    const preDeployId = `predeploy_${accountId}_${Date.now()}`;
+    const preDeployId = `predeploy_${hourlyWalletId}_${Date.now()}`;
     console.log(`[HF Deploy] Pre-charging $${(prepaidAmountCents / 100).toFixed(2)} for ${hfItemId}`);
 
     const deductResult = await deductUsage(
-      accountId,
+      hourlyWalletId,
       (MINIMUM_BILLING_MINUTES / 60) * gpuCount,
       `HF deploy: ${hfItemId} - ${product.name} - ${gpuCount} GPU(s) @ $${(hourlyRateCents / 100).toFixed(2)}/hr`,
       hourlyRateCents,
@@ -246,7 +254,7 @@ export async function POST(request: NextRequest) {
     } catch (deployError) {
       const errMsg = deployError instanceof Error ? deployError.message : "Unknown error";
       console.log(`[HF Deploy] Instance creation failed, refunding: ${errMsg}`);
-      await refundDeployment(accountId, prepaidAmountCents, `Refund: HF deployment failed - ${errMsg.slice(0, 100)}`);
+      await refundDeployment(hourlyWalletId, prepaidAmountCents, `Refund: HF deployment failed - ${errMsg.slice(0, 100)}`);
       throw deployError;
     }
 
@@ -258,10 +266,11 @@ export async function POST(request: NextRequest) {
         data: {
           subscriptionId: instanceId,
           instanceId,
-          stripeCustomerId: accountId,
+          stripeCustomerId: hourlyWalletId,
           displayName: podName,
           deployTime: new Date(),
           productId: product.id,
+          productName: product.name,
           hourlyRateCents,
           billingType: "hourly",
         },
@@ -290,6 +299,18 @@ export async function POST(request: NextRequest) {
     });
 
     console.log(`[HF Deploy] Created deployment ${deployment.id} for ${deployment.hfItemName} (instance ${instanceId})`);
+
+    // GA4 + PostHog: model_deployed — HuggingFace model/app deployed
+    trackGA4Event(accountId, "model_deployed", {
+      model_id: hfItemId,
+      deploy_script: deployScript,
+      gpu_count: gpuCount,
+    }).catch(() => {});
+    posthogTrackEvent(accountId, "model_deployed", {
+      model_id: hfItemId,
+      deploy_script: deployScript,
+      gpu_count: gpuCount,
+    }).catch(() => {});
 
     await logActivity(
       accountId,
@@ -321,6 +342,11 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error("Deploy error:", error);
+
+    // Region maintenance — surface the calm maintenance message, not a 500.
+    if (error instanceof RegionMaintenanceError) {
+      return NextResponse.json({ error: error.message, maintenanceMessage: error.message }, { status: 503 });
+    }
 
     if (error instanceof Error) {
       if (error.message.includes("No GPUs currently available") || error.message.includes("Insufficient resources")) {

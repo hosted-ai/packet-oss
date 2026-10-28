@@ -8,7 +8,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, allTeamIds } = auth;
+    const { accountId, allTeamIds } = auth;
 
     if (!allTeamIds.length) {
       return NextResponse.json(
@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
       {
         type: "ssh-session",
         ssh: sshCredentials,
-        customerId: payload.customerId,
+        customerId: accountId,
         subscriptionId,
       },
       wsSecret,

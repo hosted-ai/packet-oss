@@ -175,7 +175,7 @@ export default function TokenUsageDashboard({
             </p>
           </div>
           {onClose && (
-            <button
+            <button aria-label="Close dialog"
               onClick={onClose}
               className="text-[var(--muted)] hover:text-[var(--ink)] p-1.5 hover:bg-zinc-100 rounded-lg transition-colors"
             >

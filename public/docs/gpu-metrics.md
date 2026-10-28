@@ -2,16 +2,16 @@
 
 ## Overview
 
-The GPU Metrics Dashboard provides real-time monitoring and visualization of your GPU instances running AI workloads. Track utilization, memory usage, temperature, and inference performance metrics to optimize your deployments and troubleshoot issues.
+The Metrics dashboard provides monitoring and visualization of your GPU instances running AI workloads. Track compute usage, memory usage, and inference performance metrics to optimize your deployments and troubleshoot issues.
 
 ### Key Features
 
-- **Real-time Monitoring**: Live updates every 5 seconds
-- **Historical Data**: View trends over hours, days, or weeks
-- **Multi-GPU Support**: Monitor individual GPUs and aggregate metrics
-- **Alert Thresholds**: Set warnings for high utilization or temperature
-- **vLLM Integration**: Inference-specific metrics (tokens/sec, cache usage)
-- **Export Data**: Download metrics as CSV or JSON
+- **Compute & VRAM Tracking**: Account-wide TFLOPs and GPU memory usage from platform telemetry
+- **Automatic Refresh**: The Metrics tab updates every 60 seconds
+- **Per-Pod Breakdown**: See TFLOPs and VRAM usage for each individual pod
+- **Historical Data**: View trends from the last 5 minutes up to all time
+- **vLLM Integration**: Inference-specific metrics (tokens/sec, cache usage, queue depth) for deployed models
+- **Automatic Storage Alerts**: Email warnings when pod storage approaches capacity
 
 ---
 
@@ -20,18 +20,21 @@ The GPU Metrics Dashboard provides real-time monitoring and visualization of you
 ### Accessing GPU Metrics
 
 1. Navigate to your Packet.ai Dashboard
-2. Select a GPU instance
-3. Click the **"Metrics"** or **"Monitoring"** tab
-4. View real-time GPU statistics
+2. Click **Metrics** in the sidebar
+3. Choose a time period: **5 Min**, **1 Hour**, **24 Hours**, **Week**, or **All Time**
 
 ### Understanding the Dashboard
 
-The dashboard displays:
-- **GPU Utilization**: Percentage of compute capacity in use
-- **Memory Usage**: VRAM consumption vs. total available
-- **Temperature**: Current GPU temperature
-- **Power Draw**: Watts consumed vs. TDP limit
-- **Inference Metrics**: Requests/sec, tokens/sec (when vLLM is running)
+The Metrics tab displays:
+- **Compute**: Average TFLOPs consumed over the selected window
+- **VRAM**: Average GPU memory used (GB)
+- **Active Pods**: Number of pods currently running
+- **Usage Over Time**: Chart of TFLOPs and VRAM across the selected window
+- **Pod Metrics**: Per-pod table with status, TFLOPs, and VRAM
+
+Values are sourced from platform telemetry, averaged over the selected window, and refresh every minute.
+
+In addition, each running pod reports hardware metrics (GPU utilization, VRAM, temperature, power draw, fan speed, CPU, system memory, and disk usage) every 60 seconds in the background. These power storage alerts and the metrics history API described below. On shared GPUs, utilization and VRAM-used figures reflect your pod's own processes, while temperature and power reflect the underlying physical GPU.
 
 ---
 
@@ -48,10 +51,7 @@ The dashboard displays:
 | **60-90%** | Good utilization | Optimal for most inference |
 | **90-100%** | Heavy load | Monitor for throttling |
 
-**Dashboard Display**:
-```
-GPU Utilization: 78% ████████░░
-```
+The Metrics tab expresses compute as **TFLOPs**; per-pod GPU utilization percentages are collected in the background and available through the metrics history API.
 
 ### Memory Usage (VRAM)
 
@@ -59,16 +59,10 @@ GPU Utilization: 78% ████████░░
 
 | GPU | Total VRAM | Model Fit |
 |-----|-----------|-----------|
-| RTX Pro 6000 Blackwell | 48 GB | Up to 70B models |
+| RTX Pro 6000 Blackwell | 96 GB | Up to 70B+ models |
 | H100 | 80 GB | Up to 180B models |
 | A100 | 40/80 GB | 30-180B models |
 | L40S | 48 GB | Up to 70B models |
-
-**Dashboard Display**:
-```
-Memory: 42.5 GB / 48 GB (88.5%)
-████████████████████░░
-```
 
 **Memory Breakdown**:
 - **Model Weights**: The neural network parameters
@@ -77,7 +71,7 @@ Memory: 42.5 GB / 48 GB (88.5%)
 
 ### Temperature
 
-**What it measures**: GPU core temperature in Celsius.
+**What it measures**: GPU core temperature in Celsius. Collected in the background and available through the metrics history API.
 
 | Temperature | Status | Action |
 |-------------|--------|--------|
@@ -86,15 +80,9 @@ Memory: 42.5 GB / 48 GB (88.5%)
 | **70-83°C** | Hot | Heavy load, monitor |
 | **> 83°C** | Thermal limit | Throttling may occur |
 
-**Dashboard Display**:
-```
-Temperature: 72°C 🌡️
-[Safe Range: < 83°C]
-```
-
 ### Power Consumption
 
-**What it measures**: Current power draw in watts.
+**What it measures**: Current power draw in watts, versus the GPU's configured power limit. Collected in the background and available through the metrics history API.
 
 | GPU | TDP | Typical Inference |
 |-----|-----|-------------------|
@@ -103,16 +91,20 @@ Temperature: 72°C 🌡️
 | A100 | 400W | 250-350W |
 | L40S | 350W | 200-300W |
 
-**Dashboard Display**:
-```
-Power: 285W / 350W (81%)
-```
-
 ---
 
 ## 📈 Inference Metrics
 
-When running vLLM or other inference servers, additional metrics are available:
+When a vLLM-based model is running on your pod (for example a Hugging Face deployment) **and port 8000 is exposed as a service**, a **GPU Metrics** panel appears on the instance card showing:
+
+- **Health status** and the loaded **model ID**
+- **GPU Cache** (KV cache) usage percentage
+- **Gen Throughput** and **Prompt Throughput** (tokens/sec)
+- **Time to First Token** (ms)
+- **Running** and **Waiting** request counts
+- **Total Tokens** (prompt + generation)
+
+The panel refreshes every 10 seconds while visible.
 
 ### Tokens Per Second
 
@@ -133,7 +125,7 @@ When running vLLM or other inference servers, additional metrics are available:
 
 ### Request Queue
 
-**What it measures**: Pending inference requests.
+**What it measures**: Pending inference requests (the **Waiting** count).
 
 | Queue Size | Meaning |
 |------------|---------|
@@ -144,13 +136,7 @@ When running vLLM or other inference servers, additional metrics are available:
 
 ### KV Cache Utilization
 
-**What it measures**: Attention cache usage for concurrent contexts.
-
-```
-KV Cache: 85% ████████░░
-Active Sequences: 12
-Max Sequences: 16
-```
+**What it measures**: Attention cache usage for concurrent contexts (the **GPU Cache** percentage).
 
 **When KV cache is full**:
 - New requests wait in queue
@@ -164,22 +150,11 @@ Max Sequences: 16
 ### Refresh Interval
 
 The dashboard updates automatically:
-- **Default**: Every 5 seconds
-- **Configurable**: 1s, 5s, 10s, 30s, 60s
+- **Metrics tab**: Every 60 seconds
+- **Inference GPU Metrics panel**: Every 10 seconds while visible
+- **Background hardware collection**: Every 60 seconds per pod
 
-### Live Indicators
-
-```
-● Live (updating every 5s)    [Pause] [Refresh]
-```
-
-### Metric Sparklines
-
-Mini charts showing recent trend:
-```
-GPU Util: 78% ▁▂▃▅▆█▇▆▅▄
-Memory:   88% ▁▁▂▂▃▃▄▅▆█
-```
+The refresh interval is not configurable; use the time period selector to change the window of data shown.
 
 ---
 
@@ -187,71 +162,42 @@ Memory:   88% ▁▁▂▂▃▃▄▅▆█
 
 ### Time Ranges
 
-View historical metrics for:
-- **Last 1 hour**: Fine-grained (1-minute intervals)
-- **Last 6 hours**: Medium detail (5-minute intervals)
-- **Last 24 hours**: Overview (15-minute intervals)
-- **Last 7 days**: Long-term trend (1-hour intervals)
-- **Last 30 days**: Monthly overview (4-hour intervals)
+View historical metrics in the Metrics tab for:
+- **5 Min**: Most recent activity
+- **1 Hour**: Fine-grained recent trend
+- **24 Hours**: Daily overview
+- **Week**: Last 7 days
+- **All Time**: Full available history
+
+Background hardware metrics (utilization, temperature, power, etc.) are retained for **7 days**; older records are automatically removed.
 
 ### Charts
 
-Interactive time-series charts showing:
-- GPU utilization over time
-- Memory usage patterns
-- Temperature fluctuations
-- Request throughput
-- Token generation rates
+The **Usage Over Time** chart shows:
+- Compute (TFLOPs) over time
+- VRAM usage over time
 
 ### Data Export
 
-Download metrics for external analysis:
-
-```bash
-# Export as CSV
-GET /api/gpu-metrics/export?format=csv&from=1705123456&to=1705209856
-
-# Export as JSON
-GET /api/gpu-metrics/export?format=json&from=1705123456&to=1705209856
-```
+Historical hardware metrics can be retrieved as JSON via the metrics history API (see the API Reference section below). CSV export is not currently available.
 
 ---
 
 ## ⚠️ Alerts & Thresholds
 
-### Setting Alerts
+### Storage Alerts
 
-Configure warnings for:
+The platform automatically emails you when pod storage approaches capacity:
 
-| Metric | Default Threshold | Recommendation |
-|--------|-------------------|----------------|
-| GPU Utilization | > 95% for 5 min | May indicate overload |
-| Memory Usage | > 95% | Risk of OOM errors |
-| Temperature | > 80°C | Approaching throttle |
-| Queue Size | > 50 | Scale or optimize |
+| Storage | Threshold | Behaviour |
+|---------|-----------|-----------|
+| Persistent storage (`/workspace`) | ≥ 80% | One email per pod |
+| Root disk (`/`) | ≥ 80% | One email per pod |
+| Root disk (`/`) | ≥ 90% | One additional email per pod |
 
-### Alert Channels
+Alerts are sent to your account email address. No configuration is required, and thresholds are fixed. A full root disk can cause your pod to be evicted, so act on these alerts promptly by freeing space or moving data to persistent storage.
 
-Receive notifications via:
-- **Dashboard**: In-app alerts
-- **Email**: Configurable recipients
-- **Webhook**: POST to your endpoint
-- **Slack**: Integration available
-
-### Example Webhook Payload
-
-```json
-{
-  "alert_type": "threshold_exceeded",
-  "metric": "gpu_memory_usage",
-  "value": 96.5,
-  "threshold": 95,
-  "instance_id": "gpu-abc123",
-  "gpu_index": 0,
-  "timestamp": "2025-01-17T10:30:00Z",
-  "message": "GPU memory usage exceeded 95% threshold"
-}
-```
+Configurable per-metric alerts (for example on GPU utilization or temperature) are not currently available.
 
 ---
 
@@ -259,54 +205,39 @@ Receive notifications via:
 
 ### Metrics Endpoint
 
-vLLM exposes Prometheus metrics:
+vLLM exposes Prometheus metrics on its API port. Once port 8000 is exposed as a service on your pod, you can scrape them directly:
 
 ```bash
-curl http://YOUR_ENDPOINT/metrics
+curl http://YOUR_EXPOSED_HOST:YOUR_EXPOSED_PORT/metrics
 ```
 
 ### Key Prometheus Metrics
 
+The dashboard's inference panel is built from these vLLM metrics:
+
 ```prometheus
-# GPU utilization
-vllm:gpu_utilization{gpu="0"} 0.78
-
-# Memory usage
-vllm:gpu_memory_used_bytes{gpu="0"} 42949672960
-vllm:gpu_memory_total_bytes{gpu="0"} 48654278656
-
-# Inference metrics
-vllm:num_requests_running 5
-vllm:num_requests_waiting 2
-vllm:generation_tokens_total 1234567
-vllm:prompt_tokens_total 654321
-
 # Cache metrics
-vllm:gpu_cache_usage_perc{gpu="0"} 0.85
-vllm:cpu_cache_usage_perc 0.12
+vllm:gpu_cache_usage_perc
+vllm:cpu_cache_usage_perc
+
+# Request queue
+vllm:num_requests_running
+vllm:num_requests_waiting
+vllm:num_requests_swapped
+
+# Token counters
+vllm:prompt_tokens_total
+vllm:generation_tokens_total
+
+# Throughput
+vllm:avg_prompt_throughput_toks_per_s
+vllm:avg_generation_throughput_toks_per_s
 
 # Latency
-vllm:request_latency_seconds_bucket{le="0.5"} 1000
-vllm:request_latency_seconds_bucket{le="1.0"} 1500
-vllm:time_to_first_token_seconds_bucket{le="0.1"} 800
+vllm:time_to_first_token_seconds
 ```
 
-### Grafana Dashboard
-
-Import our pre-built Grafana dashboard:
-
-```json
-{
-  "dashboard_id": "packet-ai-gpu-metrics",
-  "panels": [
-    "GPU Utilization Gauge",
-    "Memory Usage Timeline",
-    "Token Throughput",
-    "Request Latency Distribution",
-    "Queue Depth Over Time"
-  ]
-}
-```
+You can also point your own Prometheus or Grafana instance at the exposed `/metrics` endpoint to build custom dashboards.
 
 ---
 
@@ -356,68 +287,113 @@ Import our pre-built Grafana dashboard:
 
 ## 📚 API Reference
 
+All endpoints require your Packet.ai session token in the `Authorization` header (the same Bearer token the dashboard uses):
+
+```
+Authorization: Bearer YOUR_SESSION_TOKEN
+```
+
 ### Get Current Metrics
 
+Compute and VRAM telemetry — account-wide, or for a single pod with `pod_id`:
+
 ```bash
-GET /api/gpu-metrics/{instance_id}
-Authorization: Bearer YOUR_API_KEY
+GET /api/instances/gpu-metrics?window=last_1h
+GET /api/instances/gpu-metrics?window=last_1h&pod_id=POD_ID
+```
+
+`window` values: `last_5m`, `last_15m`, `last_1h`, `last_24h`, `last_7d`, `all_time`.
+
+**Response**:
+```json
+{
+  "window": "last_1h",
+  "data": [
+    {
+      "unix_timestamp": 1753856400,
+      "formatted_time": "10:20",
+      "tflops": 12.4,
+      "vram_mib": 43520
+    }
+  ]
+}
+```
+
+### Get Inference (vLLM) Metrics
+
+Live inference metrics for one instance. Requires a running vLLM server with port 8000 exposed as a service (returns 404 otherwise):
+
+```bash
+GET /api/instances/{subscription_id}/gpu-metrics
 ```
 
 **Response**:
 ```json
 {
-  "timestamp": "2025-01-17T10:30:00Z",
-  "instance_id": "gpu-abc123",
-  "gpus": [
-    {
-      "index": 0,
-      "name": "NVIDIA RTX Pro 6000 Blackwell",
-      "utilization": 78.5,
-      "memory_used_gb": 42.5,
-      "memory_total_gb": 48.0,
-      "temperature_c": 72,
-      "power_watts": 285,
-      "power_limit_watts": 350
-    }
-  ],
-  "inference": {
-    "requests_running": 5,
-    "requests_waiting": 2,
-    "tokens_per_second": 87.3,
-    "kv_cache_usage": 0.85
-  }
+  "subscriptionId": "SUBSCRIPTION_ID",
+  "metrics": {
+    "gpuCacheUsagePercent": 85.0,
+    "cpuCacheUsagePercent": 12.0,
+    "numRequestsRunning": 5,
+    "numRequestsWaiting": 2,
+    "numRequestsSwapped": 0,
+    "promptTokensTotal": 654321,
+    "generationTokensTotal": 1234567,
+    "avgPromptThroughput": 120.5,
+    "avgGenerationThroughput": 87.3,
+    "avgTimeToFirstToken": 250,
+    "modelId": "meta-llama/Llama-3.3-70B-Instruct",
+    "isHealthy": true
+  },
+  "timestamp": "2026-07-30T10:30:00Z"
 }
 ```
 
 ### Get Historical Metrics
 
-```bash
-GET /api/gpu-metrics/{instance_id}/history?from=1705123456&to=1705209856&interval=5m
-Authorization: Bearer YOUR_API_KEY
-```
-
-### Get Aggregated Stats
+Time-series hardware metrics (utilization, memory, temperature, power, CPU, system memory) with summary statistics:
 
 ```bash
-GET /api/gpu-metrics/{instance_id}/stats?period=24h
-Authorization: Bearer YOUR_API_KEY
+GET /api/instances/metrics-history?subscriptionId=SUBSCRIPTION_ID&hours=24&interval=5
 ```
+
+Query parameters:
+- `subscriptionId` (optional): Filter to one subscription; omit for all
+- `hours` (optional): Look-back window in hours (default 24, max 168 = 7 days)
+- `interval` (optional): Aggregation bucket size in minutes; omit for raw data points
 
 **Response**:
 ```json
 {
-  "period": "24h",
-  "utilization": {
-    "avg": 65.2,
-    "max": 98.1,
-    "min": 12.3
-  },
-  "memory": {
-    "avg_gb": 38.5,
-    "max_gb": 45.2
-  },
-  "tokens_generated": 1543210,
-  "requests_completed": 8432
+  "timeRange": { "start": "2026-07-29T10:30:00Z", "end": "2026-07-30T10:30:00Z", "hours": 24 },
+  "subscriptions": [
+    {
+      "subscriptionId": "SUBSCRIPTION_ID",
+      "data": [
+        {
+          "timestamp": "2026-07-30T10:25:00Z",
+          "gpuUtilization": 78.5,
+          "memoryPercent": 88.5,
+          "temperature": 72,
+          "powerDraw": 285,
+          "cpuPercent": 34.2,
+          "systemMemPercent": 51.0
+        }
+      ],
+      "summary": {
+        "avgGpuUtilization": 65.2,
+        "avgMemoryPercent": 80.1,
+        "avgTemperature": 68.4,
+        "maxTemperature": 79,
+        "avgPowerDraw": 260.3,
+        "maxPowerDraw": 310.5,
+        "avgCpuPercent": 30.1,
+        "avgSystemMemPercent": 48.7,
+        "dataPoints": 288
+      }
+    }
+  ],
+  "totalDataPoints": 288
 }
 ```
 
@@ -425,11 +401,10 @@ Authorization: Bearer YOUR_API_KEY
 
 ## 📚 Related Documentation
 
-- [OpenAI-Compatible API Gateway](./openai-api-gateway.md)
 - [Token Usage Dashboard](./token-usage.md)
 - [Pro 6000 Blackwell Templates](./pro-6000-blackwell.md)
 - [vLLM Multi-GPU Scaling](./vllm-multi-gpu-scaling.md)
 
 ---
 
-**Last Updated**: January 2025 | **Version**: 1.0
+**Last Updated**: July 2026 | **Version**: 1.1

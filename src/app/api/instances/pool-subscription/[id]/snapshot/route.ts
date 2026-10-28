@@ -14,7 +14,6 @@ import {
   getPoolInstanceTypes,
 } from "@/lib/hostedai";
 import { prisma } from "@/lib/prisma";
-import Stripe from "stripe";
 import { z } from "zod";
 import { spawn } from "child_process";
 import { validateSSHParams } from "@/lib/ssh-validation";
@@ -194,7 +193,7 @@ export async function POST(
     });
     if (denial) return denial;
 
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },
@@ -270,7 +269,7 @@ export async function POST(
       }
     }
 
-    let existingVolumeIds = sharedVolumes.map(v => Number(v.id)).filter(id => !isNaN(id));
+    const existingVolumeIds = sharedVolumes.map(v => Number(v.id)).filter(id => !isNaN(id));
     // User has storage if they have shared volumes OR persistent_storage_gb is set
     let hasStorage = sharedVolumes.length > 0 || persistentStorageGb > 0;
     let autoCreatedVolume = false;

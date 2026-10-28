@@ -248,7 +248,7 @@ export async function getModelMemory(
       const indexResponse = await fetch(`${baseUrl}/model_index.json`, { headers });
       const index = await indexResponse.json();
 
-      for (const [componentName, componentConfig] of Object.entries(index)) {
+      for (const [componentName, _componentConfig] of Object.entries(index)) {
         if (componentName.startsWith("_")) continue;
 
         // Try different safetensors file patterns

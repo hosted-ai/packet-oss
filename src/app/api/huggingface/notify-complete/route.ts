@@ -16,7 +16,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, customer } = auth;
+    const { customer, accountId } = auth;
 
     // PA-202 gate: Hugging Face hidden from Read-only Member + Finance Manager.
     const denial = requirePermission(auth, "huggingface.use", request);
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
     // This will be checked by a background process or cron
     await prisma.activityEvent.create({
       data: {
-        customerId: payload.customerId,
+        customerId: accountId,
         type: "hf_notify_request",
         description: `Notification requested for ${modelName || "model"} deployment`,
         metadata: JSON.stringify({

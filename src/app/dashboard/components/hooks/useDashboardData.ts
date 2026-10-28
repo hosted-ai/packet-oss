@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
+import posthog from "posthog-js";
+import { trackEvent } from "@/lib/analytics/track-event";
 import {
   AccountData,
   ActivityEvent,
@@ -17,8 +19,11 @@ import {
   getTimeBasedEasterEgg,
   getEmptyStateMessage,
 } from "../utils";
+import { buildSignInRedirect } from "@/lib/auth/signin-redirect";
 
 export interface DashboardDataState {
+  // Reservation percentage a stopped pod keeps billing at (from /api/instances).
+  stoppedRatePercent: number;
   // Auth & Loading
   token: string | null;
   loading: boolean;
@@ -58,6 +63,9 @@ export interface DashboardDataState {
   // TOS consent state
   tosConsentRequired: boolean;
   tosConsentVersion: string | null;
+
+  // Onboarding tour: first-ever login
+  isNewSignup: boolean;
 }
 
 export interface DashboardDataActions {
@@ -100,6 +108,8 @@ export function useDashboardData(): DashboardDataState & DashboardDataActions & 
   // Instances & subscriptions
   const [instances, setInstances] = useState<Instance[]>([]);
   const [poolSubscriptions, setPoolSubscriptions] = useState<PoolSubscription[]>([]);
+  // Reservation percentage a stopped pod keeps billing at; assume full rate until told otherwise.
+  const [stoppedRatePercent, setStoppedRatePercent] = useState(100);
   const [podMetadata, setPodMetadata] = useState<Record<string, { displayName: string | null; notes: string | null; hourlyRate?: number; startupScriptStatus?: string | null; stripeSubscriptionId?: string; billingType?: string; deployStatus?: string | null; deployStatusReason?: string | null }>>({});
   const [hfDeployments, setHfDeployments] = useState<Record<string, HfDeploymentInfo>>({});
   const [instancesLoading, setInstancesLoading] = useState(false);
@@ -123,6 +133,9 @@ export function useDashboardData(): DashboardDataState & DashboardDataActions & 
   const [tosConsentRequired, setTosConsentRequired] = useState(false);
   const [tosConsentVersion, setTosConsentVersion] = useState<string | null>(null);
 
+  // Onboarding tour: first-ever login signal from /api/account/verify
+  const [isNewSignup, setIsNewSignup] = useState(false);
+
   // Fetch callbacks
   const fetchInstances = useCallback(async () => {
     if (!token) return;
@@ -139,6 +152,7 @@ export function useDashboardData(): DashboardDataState & DashboardDataActions & 
           hourlyRate: metadata[String(sub.id)]?.hourlyRate ?? sub.hourlyRate,
         }));
         setPoolSubscriptions(subscriptions);
+        if (typeof result.stoppedRatePercent === "number") setStoppedRatePercent(result.stoppedRatePercent);
         setPodMetadata(metadata);
         setHfDeployments(result.hfDeployments || {});
         if (subscriptions.length > 0) setProvisioningGpu(null);
@@ -219,7 +233,17 @@ export function useDashboardData(): DashboardDataState & DashboardDataActions & 
 
     function signInRedirect() {
       if (typeof window !== "undefined") {
-        window.location.href = "/account?reason=session_expired";
+        // Clear PostHog identity before redirecting so a subsequent login
+        // by a different user (e.g. a teammate on a shared device) doesn't
+        // merge them with the previous user's PostHog person.
+        posthog.reset();
+        // PA-335: carry the deep link the visitor arrived on through the sign-in
+        // bounce, so signup/signin (and the welcome email) can return them to it.
+        // buildSignInRedirect already sets ?reason=session_expired.
+        window.location.href = buildSignInRedirect(
+          "/account",
+          window.location.pathname + window.location.search,
+        );
         return true;
       }
       return false;
@@ -303,7 +327,12 @@ export function useDashboardData(): DashboardDataState & DashboardDataActions & 
         // (which useSearchParams reacts to) can't momentarily null out `token` and
         // fire a burst of spurious 401s. A token already marked dead isn't promoted.
         if (typeof window !== "undefined" && urlToken) {
-          if (!urlTokenDead && token) setCookieToken(token);
+          // PA-380: after a magic-link sign-in, run the session on the fresh 12h
+          // access token the server just minted (result.accessToken) rather than
+          // the short-lived single-use link — otherwise the tab would hit a
+          // SessionGuard reload the moment the 15-min link expired. Falls back to
+          // the current token on repeat loads (no new session → no accessToken).
+          if (!urlTokenDead && token) setCookieToken(result.accessToken || token);
           const u = new URL(window.location.href);
           if (u.searchParams.has("token")) {
             u.searchParams.delete("token");
@@ -312,6 +341,38 @@ export function useDashboardData(): DashboardDataState & DashboardDataActions & 
         }
 
         setData(result);
+
+        // PostHog: identify the authenticated user and start session recording.
+        // Uses email as distinctId so team members each get their own PostHog
+        // person (multiple users can share one Stripe customer in team accounts).
+        if (result.userEmail && typeof window !== "undefined") {
+          posthog.identify(result.userEmail, {
+            email: result.userEmail,
+            stripe_customer_id: result.customer?.id,
+            ...(result.customer?.teamName ? { team_name: result.customer.teamName } : {}),
+            ...(result.role ? { role: result.role } : {}),
+          });
+          posthog.startSessionRecording();
+        }
+
+        // Signal the onboarding tour for first-time users.
+        if (result.isNewSignup) setIsNewSignup(true);
+
+        // GA4 + PostHog: fire sign_up_complete on the first-ever dashboard load
+        // (account created + email verified via magic-link).
+        if (result.isNewSignup && typeof window !== "undefined") {
+          (window as Window & { gtag?: (...args: unknown[]) => void }).gtag?.(
+            "event",
+            "sign_up_complete",
+            { method: "email" }
+          );
+          posthog.capture("sign_up_complete", { method: "email" });
+        }
+
+        // GA4: fire login event for returning users (not new signups)
+        if (!result.isNewSignup && typeof window !== "undefined") {
+          trackEvent("login");
+        }
         setLoading(false);
       } catch {
         if (!cancelled) {
@@ -354,6 +415,7 @@ export function useDashboardData(): DashboardDataState & DashboardDataActions & 
     data,
     instances,
     poolSubscriptions,
+    stoppedRatePercent,
     podMetadata,
     hfDeployments,
     instancesLoading,
@@ -370,6 +432,7 @@ export function useDashboardData(): DashboardDataState & DashboardDataActions & 
     pendingUserEmail,
     tosConsentRequired,
     tosConsentVersion,
+    isNewSignup,
     ticketId, // Deep link to support ticket
 
     // Actions

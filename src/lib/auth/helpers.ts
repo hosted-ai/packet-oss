@@ -8,7 +8,35 @@ import {
   type ResolvedMembership,
 } from "./membership";
 import { can as canPure, type Permission } from "./role-permissions";
+import { validateAndRotateSession } from "./customer-session";
 import type Stripe from "stripe";
+
+/**
+ * Teams owned by the `packet_session` cookie holder, or null if the cookie is
+ * missing/invalid/revoked/suspended. For read-only GETs reached by browser
+ * navigation (file downloads, server-rendered pages), which cannot send a
+ * Bearer header. Never gate a write on this — cookie auth is not CSRF-safe.
+ */
+export async function getSessionTeamIds(
+  refreshToken: string | undefined,
+): Promise<string[] | null> {
+  if (!refreshToken) return null;
+
+  const identity = await validateAndRotateSession(refreshToken);
+  if (!identity) return null;
+
+  const ctx = await resolveOperatingContext({
+    email: identity.email,
+    jwtCustomerId: identity.customerId,
+    activeAccountId: identity.activeAccountId,
+  });
+  if (!ctx) return null;
+
+  // Fraud lockout applies to reads too.
+  if (await findSuspension(ctx.allCustomerIds)) return null;
+
+  return ctx.allTeamIds;
+}
 
 /**
  * Authenticated customer context returned by getAuthenticatedCustomer().
@@ -30,6 +58,8 @@ export interface AuthenticatedCustomer {
   stripe: Stripe;
   /** stripe_customer_id of the account this request is acting on (de-facto account_id) */
   accountId: string;
+  /** Stripe customer holding the hourly wallet for this context. Null when the context has none. */
+  hourlyCustomerId: string | null;
   /** Resolved membership (role, isOwner, revokedAt). Implicit when the JWT email matches customer.email but no row exists yet. */
   membership: ResolvedMembership;
   /** Bound permission check. Always true for owners; consults ROLE_PERMISSIONS otherwise. */
@@ -98,7 +128,7 @@ export async function getAuthenticatedCustomer(
   }
 
   const customer = ctx.customer;
-  const teamId = customer.metadata?.hostedai_team_id || ctx.allTeamIds[0] || undefined;
+  const teamId = ctx.teamId ?? undefined;
   const accountId = ctx.accountId;
 
   const customerEmail =
@@ -145,6 +175,7 @@ export async function getAuthenticatedCustomer(
     allTeamIds: ctx.allTeamIds,
     stripe,
     accountId,
+    hourlyCustomerId: ctx.hourlyCustomerId,
     membership,
     can,
   };

@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken } from "@/lib/customer-auth";
 import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import { requirePermission } from "@/lib/auth/audit";
 import { sendEmail, escapeHtml } from "@/lib/email";
-import { generateCustomerToken } from "@/lib/customer-auth";
+import { createLoginLink } from "@/lib/customer-auth";
 import {
   getTeamMembers,
   addTeamMember,
@@ -13,6 +12,8 @@ import {
 } from "@/lib/team-members";
 import { getBrandName } from "@/lib/branding";
 import { loadTemplate } from "@/lib/email/template-loader";
+import { logTeamMemberInvited, logTeamMemberRemoved } from "@/lib/activity";
+import { prisma } from "@/lib/prisma";
 
 // Send invite email to new team member
 async function sendTeamInviteEmail(params: {
@@ -126,17 +127,17 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, customer } = auth;
+    const { payload, customer, accountId } = auth;
 
-    // Ensure owner record exists
+    // The owner row belongs to the account's own customer, not to whoever is
+    // calling — an invited member must not be recorded as the owner.
     await ensureOwnerRecord(
-      payload.email,
-      payload.customerId,
+      typeof customer.email === "string" ? customer.email : payload.email,
+      accountId,
       customer.name || undefined
     );
 
-    // Get all team members
-    const members = await getTeamMembers(payload.customerId);
+    const members = await getTeamMembers(accountId);
 
     return NextResponse.json({
       members: members.map((m) => ({
@@ -165,13 +166,11 @@ export async function POST(request: NextRequest) {
 
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, customer, teamId } = auth;
+    const { payload, customer, teamId, accountId } = auth;
 
-    console.log("[Team Invite] Token valid for customer:", payload.customerId);
+    console.log("[Team Invite] Token valid for account:", accountId);
 
-    // PR 3 PRE-WORK SECURITY FIX (2026-05-19): same bug class as the legacy
-    // DELETE — POST had no role check, so any team member could invite people.
-    // Gate via team.invite (teamAdmin only per PA-201 matrix).
+    // Only team admins invite.
     const inviteDenial = requirePermission(auth, "team.invite", request);
     if (inviteDenial) return inviteDenial;
 
@@ -199,7 +198,7 @@ export async function POST(request: NextRequest) {
 
     // Check if already a member
     console.log("[Team Invite] Checking if already a member...");
-    if (await isTeamMember(normalizedEmail, payload.customerId)) {
+    if (await isTeamMember(normalizedEmail, accountId)) {
       console.log("[Team Invite] Already a member");
       return NextResponse.json(
         { error: "This email is already a team member" },
@@ -221,14 +220,19 @@ export async function POST(request: NextRequest) {
     const member = await addTeamMember({
       email: normalizedEmail,
       name: name || null,
-      stripeCustomerId: payload.customerId,
+      stripeCustomerId: accountId,
       invitedBy: payload.email,
     });
     console.log("[Team Invite] Member added with ID:", member.id);
+    logTeamMemberInvited(accountId, normalizedEmail).catch(() => {});
 
-    // Generate a token for the invite link
-    // Team members use the same token structure - customerId points to the owner
-    const inviteToken = generateCustomerToken(normalizedEmail, payload.customerId);
+    // The link must sign the invitee into the same account the membership row
+    // was written against, or they land somewhere they are not a member of.
+    const inviteToken = await createLoginLink({
+      email: normalizedEmail,
+      customerId: accountId,
+      activeAccountId: accountId,
+    });
     const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${inviteToken}`;
     console.log("[Team Invite] Dashboard URL generated:", dashboardUrl);
 
@@ -270,23 +274,11 @@ export async function POST(request: NextRequest) {
 }
 
 // DELETE - Remove a team member
-// PR 3 PRE-WORK SECURITY FIX (2026-05-19):
-// Previously this route had no role check — ANY authenticated team member
-// (not just the Owner) could DELETE other members of their own account by
-// passing the legacy memberId. `payload.customerId` only verifies the caller
-// is acting on their own account, NOT that they have permission to remove
-// people. That's a privilege escalation for non-Owner members.
-//
-// Fix: gate via `getAuthenticatedCustomer` + `requirePermission("team.manage")`
-// — only Team Admins (incl. Owner) can hit this endpoint. The UI no longer
-// uses this route (PR 3 switched to /api/accounts/:accountId/members/:userId),
-// so callers should be effectively zero — but the route stays gated for
-// defense-in-depth until it's removed entirely.
 export async function DELETE(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload } = auth;
+    const { accountId } = auth;
 
     const denial = requirePermission(auth, "team.manage", request);
     if (denial) return denial;
@@ -301,9 +293,18 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    // Remove the team member (legacy table). Defense in depth: pass the
-    // caller's customerId so the deletion is also scoped to their account.
-    await removeTeamMember(memberId, payload.customerId);
+    // Fetch email before removal so we can log which member was removed.
+    const removedMember = await prisma.teamMemberLegacy.findFirst({
+      where: { id: memberId, stripeCustomerId: accountId },
+      select: { email: true },
+    });
+
+    // Defense in depth: the account id scopes the deletion as well as the gate.
+    await removeTeamMember(memberId, accountId);
+
+    if (removedMember?.email) {
+      logTeamMemberRemoved(accountId, removedMember.email).catch(() => {});
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { verifySessionToken } from "@/lib/admin";
 import { prisma } from "@/lib/prisma";
 
@@ -35,13 +36,15 @@ export async function GET(request: NextRequest) {
 
     // Fetch admin activities
     if (source === "all" || source === "admin") {
-      const adminWhere: Record<string, unknown> = {};
+      const adminWhere: Prisma.AdminActivityEventWhereInput = {};
       if (type) adminWhere.type = type;
+      // MySQL's default collation already matches case-insensitively; Prisma's
+      // mode: "insensitive" is PostgreSQL-only and fails query validation here.
       if (search) {
         adminWhere.OR = [
-          { description: { contains: search, mode: "insensitive" } },
-          { adminEmail: { contains: search, mode: "insensitive" } },
-          { type: { contains: search, mode: "insensitive" } },
+          { description: { contains: search } },
+          { adminEmail: { contains: search } },
+          { type: { contains: search } },
         ];
       }
 
@@ -68,14 +71,14 @@ export async function GET(request: NextRequest) {
 
     // Fetch customer activities
     if (source === "all" || source === "customer") {
-      const customerWhere: Record<string, unknown> = {};
+      const customerWhere: Prisma.ActivityEventWhereInput = {};
       if (type) customerWhere.type = type;
       if (customerId) customerWhere.customerId = customerId;
       if (search) {
         customerWhere.OR = [
-          { description: { contains: search, mode: "insensitive" } },
-          { customerId: { contains: search, mode: "insensitive" } },
-          { type: { contains: search, mode: "insensitive" } },
+          { description: { contains: search } },
+          { customerId: { contains: search } },
+          { type: { contains: search } },
         ];
       }
 
@@ -85,12 +88,26 @@ export async function GET(request: NextRequest) {
         take: limit,
       });
 
+      // PA-229: ActivityEvent only stores the Stripe customer id, so resolve
+      // ids to emails via the local CustomerCache (no Stripe round-trip) and
+      // fall back to the raw id when no email is cached (e.g. deleted customer).
+      const emailByCustomerId = new Map<string, string>();
+      if (customerEvents.length > 0) {
+        const cached = await prisma.customerCache.findMany({
+          where: { id: { in: [...new Set(customerEvents.map((e) => e.customerId))] } },
+          select: { id: true, email: true },
+        });
+        for (const c of cached) {
+          if (c.email) emailByCustomerId.set(c.id, c.email);
+        }
+      }
+
       for (const e of customerEvents) {
         results.push({
           id: e.id,
           source: "customer",
           type: e.type,
-          actor: e.customerId,
+          actor: emailByCustomerId.get(e.customerId) ?? e.customerId,
           customerId: e.customerId,
           description: e.description,
           metadata: e.metadata ? JSON.parse(e.metadata) : null,

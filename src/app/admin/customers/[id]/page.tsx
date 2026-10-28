@@ -108,7 +108,7 @@ export default function CustomerDetailPage() {
       } else {
         setError(result.error || "Failed to load customer");
       }
-    } catch (err) {
+    } catch {
       setError("Failed to load customer details");
     } finally {
       setLoading(false);

@@ -179,7 +179,7 @@ export async function GET(request: NextRequest) {
     console.log(`[Admin Nodes] ${providerNodes.length} provider nodes, ${cached.pools.length} cached pools`);
 
     // Build lookup maps from cached data
-    const { nodePoolsMap, poolGpusByNode, poolPodsMap, poolMap, nodeInfoMap } =
+    const { nodePoolsMap, poolGpusByNode, poolPodsMap, poolMap } =
       buildCacheMaps(cached.pools);
 
     const nodeStats: NodeStats[] = [];
@@ -282,7 +282,9 @@ export async function GET(request: NextRequest) {
         summary: {
           totalGpus,
           allocatedGpus,
-          availableGpus: totalGpus - allocatedGpus,
+          // Overcommit/vGPU pools can allocate beyond a node's physical GPUs, so clamp
+          // to keep "Available" from going negative (PA-192).
+          availableGpus: Math.max(0, totalGpus - allocatedGpus),
           utilizationPercent: totalGpus > 0 ? Math.round((allocatedGpus / totalGpus) * 100) : 0,
           activePods: activePods.length,
           totalPods: nodePods.length,
@@ -413,7 +415,9 @@ export async function GET(request: NextRequest) {
           summary: {
             totalGpus,
             allocatedGpus,
-            availableGpus: totalGpus - allocatedGpus,
+            // Overcommit/vGPU pools can allocate beyond a node's physical GPUs, so clamp
+            // to keep "Available" from going negative (PA-192).
+            availableGpus: Math.max(0, totalGpus - allocatedGpus),
             utilizationPercent:
               totalGpus > 0 ? Math.round((allocatedGpus / totalGpus) * 100) : 0,
             activePods: activePods.length,

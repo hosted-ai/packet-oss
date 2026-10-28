@@ -19,9 +19,55 @@ export interface Region {
   status: {
     gpuaas: "enabled" | "disabled" | "none";
     compute: "enabled" | "disabled" | "none";
+    baremetal?: "enabled" | "disabled" | "none";
+    kvm_cluster?: "enabled" | "disabled" | "none";
   };
   accelerator_type: "gpu" | "npu";
   support_rdma?: "infiniband" | "gpu_direct";
+  // Baremetal availability (present on the admin /regions response).
+  baremetal_enabled?: boolean;
+  kvm_cluster_enabled?: boolean;
+  is_marketplace?: boolean;
+  baremetal_status?: {
+    baremetal?: { total: number; active: number; available: number };
+    kvm?: { total: number; active: number; available: number };
+  };
+}
+
+// A physical baremetal node from the admin `/baremetal/node?region_id=` endpoint.
+// This is a different shape from GPUaaSNode (which is /gpuaas/node/list). We use
+// gpu_count + service_status for the Daily Ops Summary baremetal GPU count.
+export interface BaremetalNodeGpuType {
+  id: string;
+  vendor_name: string;
+  model_name: string;
+  architecture: string;
+  v_gram_gb: string;
+  max_tflops: string;
+}
+
+export interface BaremetalNode {
+  id: number;
+  name: string;
+  region_id: number;
+  ip_address: string;
+  username: string;
+  ssh_port: number;
+  os_type: string;
+  assignment_mode: string;
+  gpu_memory_mb: number;
+  gpu_type: BaremetalNodeGpuType;
+  gpu_count: number;
+  storage_mb: number;
+  ram_mb: number;
+  cpu_cores: number;
+  status: string; // "Online", ...
+  service_status: string; // "In service" | "Not in service"
+  // HAI-9288: when true, HAI skips the OS password reset while assigning this node.
+  // Required for backfilling a server the customer already uses — rotating the
+  // password would lock them out of live work, and we may no longer hold access.
+  // Set per node in the HAI admin panel; absent on older HAI builds.
+  bypass_password_reset?: boolean;
 }
 
 export interface CreateRegionInput {

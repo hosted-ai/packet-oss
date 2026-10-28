@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { GPU_APPS, getAppBySlug } from "@/lib/gpu-apps";
+import { getAppBySlug } from "@/lib/gpu-apps";
 import { prisma } from "@/lib/prisma";
 import { verifyCustomerToken } from "@/lib/auth";
 import { gatePermission } from "@/lib/auth/gate";
@@ -201,7 +201,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "App not found" }, { status: 404 });
   }
 
-  const teamId = customer.metadata?.hostedai_team_id;
+  const teamId = ctx.teamId;
 
   if (!teamId) {
     return NextResponse.json(

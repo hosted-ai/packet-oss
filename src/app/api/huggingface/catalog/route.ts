@@ -10,11 +10,10 @@ import {
   searchCatalog,
   getRtxOptimizedModels,
   HFCatalogItem,
-  HFItemType,
 } from "@/lib/huggingface-catalog";
-import { getPoolVRAM, getCompatibilityMessage } from "@/lib/gpu-specs";
+import { getCompatibilityMessage } from "@/lib/gpu-specs";
 import { getAllPools } from "@/lib/hostedai";
-import { getModelMemory, type HfMemResult } from "@/lib/hf-mem";
+import { getModelMemory } from "@/lib/hf-mem";
 
 // Cache for real memory data (in-memory, resets on server restart)
 const realMemoryCache = new Map<string, { vramGb: number; timestamp: number }>();
@@ -268,7 +267,7 @@ async function addCompatibilityInfo(
 
     for (const pool of pools) {
       const poolName = pool.name || pool.id;
-      const { status, minGpusNeeded } = getCompatibilityMessage(
+      const { status } = getCompatibilityMessage(
         item.vramGb,
         poolName,
         8 // max GPUs

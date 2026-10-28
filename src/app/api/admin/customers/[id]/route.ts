@@ -7,7 +7,7 @@ import {
   emailLayout, emailButton, emailGreeting, emailText, emailMuted,
   emailSignoff, escapeHtml, plainTextFooter,
 } from "@/lib/email/utils";
-import { generateAdminBypassToken, generateCustomerToken } from "@/lib/customer-auth";
+import { generateAdminBypassToken, createLoginLink } from "@/lib/customer-auth";
 import { logAdminActivity } from "@/lib/admin-activity";
 import { cacheCustomer, markCustomerCacheDeleted } from "@/lib/customer-cache";
 import { getBrandName, getDashboardUrl } from "@/lib/branding";
@@ -73,7 +73,7 @@ export async function POST(
   }
 
   const { id: customerId } = await params;
-  const { action, amount, description, reason, reasonNote } = await request.json();
+  const { action, amount, reason, reasonNote, internalNotes } = await request.json();
 
   try {
     const stripe = await getStripe();
@@ -148,7 +148,7 @@ export async function POST(
           }
 
           const credRoles = await ensureRoles();
-          const otl = await createOneTimeLogin({
+          await createOneTimeLogin({
             email: customer.email,
             send_email_invite: false,
             teamId: resolvedTeamId,
@@ -157,7 +157,7 @@ export async function POST(
           });
 
           // Generate our JWT-based dashboard URL (NOT the hosted.ai OTL URL)
-          const dashboardToken = generateCustomerToken(customer.email.toLowerCase(), customerId);
+          const dashboardToken = await createLoginLink({ email: customer.email.toLowerCase(), customerId });
           const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${dashboardToken}`;
 
           await sendCredentialsEmail({
@@ -589,6 +589,38 @@ export async function POST(
         });
       }
 
+      case "set-internal-notes": {
+        // PA-359: admin-only account notes (e.g. KYC-step progress). Never
+        // surfaced to the customer — read back only by the admin details route.
+        if (typeof internalNotes !== "string") {
+          return NextResponse.json({ error: "internalNotes must be a string" }, { status: 400 });
+        }
+        if (internalNotes.length > 10000) {
+          return NextResponse.json({ error: "Notes too long (max 10000 characters)" }, { status: 400 });
+        }
+        const value = internalNotes.trim() || null;
+
+        await prisma.customerSettings.upsert({
+          where: { stripeCustomerId: customerId },
+          update: { internalNotes: value },
+          create: { stripeCustomerId: customerId, internalNotes: value },
+        });
+
+        // Log the change, not the contents (notes may hold sensitive KYC detail).
+        await logAdminActivity(
+          session.email,
+          "customer_viewed",
+          `${value ? "Updated" : "Cleared"} internal notes for ${customer.email || customerId}`,
+          { customerId, customerEmail: customer.email, action: "set-internal-notes" }
+        );
+
+        return NextResponse.json({
+          success: true,
+          message: "Internal notes saved",
+          internalNotes: value,
+        });
+      }
+
       case "hostedai-login": {
         if (!customer.email) {
           return NextResponse.json({ error: "Customer has no email" }, { status: 400 });
@@ -728,6 +760,17 @@ export async function DELETE(
   } catch (error) {
     console.error("Customer delete error:", error);
     const errorMessage = error instanceof Error ? error.message : String(error);
+
+    if (errorMessage.includes("positive cash balance")) {
+      return NextResponse.json(
+        {
+          error:
+            "Customer has an unresolved Stripe cash balance and cannot be deleted. Resolve the balance in the Stripe Dashboard, then retry.",
+        },
+        { status: 409 }
+      );
+    }
+
     return NextResponse.json(
       { error: `Failed to delete customer: ${errorMessage}` },
       { status: 500 }

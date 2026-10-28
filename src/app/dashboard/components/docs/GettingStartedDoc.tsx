@@ -2,26 +2,25 @@
 
 export function GettingStartedDoc() {
   return (
-    <div className="prose prose-zinc max-w-none">
-      <h1>Getting Started</h1>
+    <div>
       <p className="lead">
         Get your first GPU running in minutes. This guide covers everything from account setup to running your first training job.
       </p>
 
       {/* Table of Contents */}
-      <nav className="not-prose my-8 p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">On this page</h4>
-        <ul className="space-y-1.5 text-sm">
-          <li><a href="#platform-overview" className="text-blue-600 dark:text-blue-400 hover:underline">Platform Overview</a></li>
-          <li><a href="#prerequisites" className="text-blue-600 dark:text-blue-400 hover:underline">Prerequisites</a></li>
-          <li><a href="#launch-gpu" className="text-blue-600 dark:text-blue-400 hover:underline">Step 1: Launch a GPU</a></li>
-          <li><a href="#connect-gpu" className="text-blue-600 dark:text-blue-400 hover:underline">Step 2: Connect to Your GPU</a></li>
-          <li><a href="#start-working" className="text-blue-600 dark:text-blue-400 hover:underline">Step 3: Start Working</a></li>
-          <li><a href="#common-workflows" className="text-blue-600 dark:text-blue-400 hover:underline">Common Workflows</a></li>
-          <li><a href="#managing-gpu" className="text-blue-600 dark:text-blue-400 hover:underline">Managing Your GPU</a></li>
-          <li><a href="#cost-management" className="text-blue-600 dark:text-blue-400 hover:underline">Cost Management</a></li>
-          <li><a href="#next-steps" className="text-blue-600 dark:text-blue-400 hover:underline">Next Steps</a></li>
-          <li><a href="#troubleshooting" className="text-blue-600 dark:text-blue-400 hover:underline">Troubleshooting</a></li>
+      <nav className="docs-toc">
+        <h4>On this page</h4>
+        <ul>
+          <li><a href="#platform-overview">Platform Overview</a></li>
+          <li><a href="#prerequisites">Prerequisites</a></li>
+          <li><a href="#launch-gpu">Step 1: Launch a GPU</a></li>
+          <li><a href="#connect-gpu">Step 2: Connect to Your GPU</a></li>
+          <li><a href="#start-working">Step 3: Start Working</a></li>
+          <li><a href="#common-workflows">Common Workflows</a></li>
+          <li><a href="#managing-gpu">Managing Your GPU</a></li>
+          <li><a href="#cost-management">Cost Management</a></li>
+          <li><a href="#next-steps">Next Steps</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
         </ul>
       </nav>
 
@@ -43,7 +42,7 @@ export function GettingStartedDoc() {
         <tbody>
           <tr>
             <td><strong>GPU Compute</strong></td>
-            <td>NVIDIA A100, H100, RTX 4090 and more. Scale from 1-8 GPUs per instance.</td>
+            <td>NVIDIA H100, H200, B200, RTX PRO 6000 and more, in single and multi-GPU configurations.</td>
           </tr>
           <tr>
             <td><strong>HuggingFace Integration</strong></td>
@@ -73,10 +72,10 @@ export function GettingStartedDoc() {
         <li>A payment method on file</li>
       </ul>
 
-      <div className="not-prose bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 my-6">
-        <h4 className="text-blue-800 dark:text-blue-200 font-semibold mb-2 text-base">New User?</h4>
-        <p className="text-blue-700 dark:text-blue-300 text-sm mb-0">
-          New accounts get $10 free credits to try the platform. Add funds via the Billing tab when you need more.
+      <div className="docs-callout docs-callout-info">
+        <h4>New User?</h4>
+        <p>
+          Add funds via the Billing tab to get started. GPU usage is deducted from your prepaid balance.
         </p>
       </div>
 
@@ -85,28 +84,22 @@ export function GettingStartedDoc() {
       <ol>
         <li>From your dashboard, click <strong>Launch GPU</strong></li>
         <li>
-          <strong>Select GPU Pool</strong> - Choose from available GPU types and regions.
-          Popular options include:
+          <strong>Select GPU Type, Product and Region</strong> - Choose from the available options.
+          Popular GPU types include:
           <ul>
-            <li><strong>RTX 4090</strong> - Great for inference and smaller training jobs</li>
-            <li><strong>A100 40GB</strong> - Ideal for training and large model inference</li>
-            <li><strong>H100</strong> - Maximum performance for demanding workloads</li>
+            <li><strong>RTX PRO 6000</strong> - Great for inference and smaller training jobs</li>
+            <li><strong>H100 / H200</strong> - Ideal for training and large model inference</li>
+            <li><strong>B200</strong> - Maximum performance for demanding workloads</li>
           </ul>
         </li>
         <li>
-          <strong>Instance Type</strong> - Select CPU/RAM allocation for your container.
-          More RAM is useful for data preprocessing.
-        </li>
-        <li>
-          <strong>Storage</strong> (optional):
+          <strong>Persistent Storage</strong> (optional):
           <ul>
-            <li><strong>Ephemeral Storage</strong> - Fast local NVMe, cleared on restart (default)</li>
-            <li><strong>Persistent Storage</strong> - NFS-based, survives restarts. Choose 50GB-1TB.</li>
+            <li><strong>None</strong> - Local storage only (data lost on termination)</li>
+            <li><strong>Create new volume</strong> - NFS-based, survives restarts. Available sizes and hourly prices vary by region and are listed in the dialog.</li>
+            <li><strong>Use existing volume</strong> - Re-attach a volume you already own in that region</li>
           </ul>
-        </li>
-        <li>
-          <strong>GPU Count</strong> - Select 1-8 GPUs depending on your workload. Start with 1 for
-          most tasks, scale up for distributed training.
+          Note: not every GPU type supports persistent storage — the options are hidden for those GPUs.
         </li>
         <li>Click <strong>Launch GPU</strong></li>
       </ol>
@@ -144,9 +137,9 @@ ssh -p <port> ubuntu@<host>
 # Enter the password when prompted`}</code>
       </pre>
 
-      <div className="not-prose bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 my-6">
-        <h4 className="text-amber-800 dark:text-amber-200 font-semibold mb-2 text-base">SSH Key Recommended</h4>
-        <p className="text-amber-700 dark:text-amber-300 text-sm mb-0">
+      <div className="docs-callout docs-callout-warning">
+        <h4>SSH Key Recommended</h4>
+        <p>
           For the best experience, add your SSH key in Account Settings. This enables passwordless
           authentication and VS Code Remote SSH integration.
         </p>
@@ -165,7 +158,7 @@ ssh -p <port> ubuntu@<host>
         <tbody>
           <tr>
             <td>Operating System</td>
-            <td>Ubuntu 22.04 LTS</td>
+            <td>Ubuntu 24.04 LTS</td>
           </tr>
           <tr>
             <td>NVIDIA Drivers</td>
@@ -177,7 +170,7 @@ ssh -p <port> ubuntu@<host>
           </tr>
           <tr>
             <td>Python</td>
-            <td>Python 3.10+ with pip</td>
+            <td>Python 3.12+ with pip</td>
           </tr>
           <tr>
             <td>Package Managers</td>
@@ -241,8 +234,8 @@ sudo cp -r ./data /data/shareXX/datasets/
 sudo mkdir -p /data/shareXX/checkpoints
 sudo cp model_checkpoint.pt /data/shareXX/checkpoints/
 
-# Link to your project directory
-sudo ln -s /data/shareXX/datasets ./data`}</code>
+# Link into your project directory
+sudo ln -s /data/shareXX/datasets ./datasets`}</code>
       </pre>
 
       <h3>Running Jupyter Notebook</h3>
@@ -318,12 +311,12 @@ uvicorn app:app --host 0.0.0.0 --port 8000`}</code>
           <tr>
             <td><strong>Stop</strong></td>
             <td>Pause the instance. State is preserved.</td>
-            <td>GPU billing stops. Storage continues.</td>
+            <td>GPU billing drops to a reduced stopped rate. Storage continues.</td>
           </tr>
           <tr>
             <td><strong>Start</strong></td>
             <td>Resume a stopped instance.</td>
-            <td>GPU billing resumes.</td>
+            <td>Full GPU billing resumes.</td>
           </tr>
           <tr>
             <td><strong>Restart</strong></td>
@@ -331,22 +324,17 @@ uvicorn app:app --host 0.0.0.0 --port 8000`}</code>
             <td>No change.</td>
           </tr>
           <tr>
-            <td><strong>Scale</strong></td>
-            <td>Change the number of GPUs.</td>
-            <td>Billing adjusts to new GPU count.</td>
-          </tr>
-          <tr>
             <td><strong>Terminate</strong></td>
             <td>Delete the instance permanently.</td>
-            <td>All charges stop. Data is deleted.</td>
+            <td>GPU charges stop. Local data is deleted. Persistent volumes remain (and keep billing) until you delete them.</td>
           </tr>
         </tbody>
       </table>
 
-      <div className="not-prose bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 my-6">
-        <h4 className="text-red-800 dark:text-red-200 font-semibold mb-2 text-base">Warning: Terminate is Permanent</h4>
-        <p className="text-red-700 dark:text-red-300 text-sm mb-0">
-          Terminating an instance deletes all data including ephemeral storage.
+      <div className="docs-callout docs-callout-danger">
+        <h4>Warning: Terminate is Permanent</h4>
+        <p>
+          Terminating an instance deletes all local data.
           Make sure to save important files to persistent storage or download them first.
         </p>
       </div>
@@ -354,17 +342,17 @@ uvicorn app:app --host 0.0.0.0 --port 8000`}</code>
       {/* Cost Management */}
       <h2 id="cost-management">Cost Management</h2>
       <ul>
-        <li><strong>GPUs are billed per hour</strong> while running (prorated by minute)</li>
-        <li><strong>Stopped instances don&apos;t incur GPU charges</strong></li>
+        <li><strong>GPUs are billed at an hourly rate</strong> while running (metered roughly every 30 minutes)</li>
+        <li><strong>Stopped instances are billed at a reduced rate</strong> — terminate to stop GPU charges entirely</li>
         <li><strong>Persistent storage is billed continuously</strong> while it exists</li>
         <li>Check your balance and usage in the <strong>Billing</strong> section</li>
       </ul>
 
       <h3>Quick Tips to Save Money</h3>
       <ol>
-        <li><strong>Stop when not using</strong> - GPU billing pauses immediately</li>
+        <li><strong>Stop when not using</strong> - Stopped instances bill at a reduced rate</li>
         <li><strong>Right-size your GPU</strong> - Start small, scale up only if needed</li>
-        <li><strong>Use ephemeral storage</strong> - Persistent storage has ongoing costs</li>
+        <li><strong>Use local storage</strong> - Persistent storage has ongoing costs</li>
         <li><strong>Terminate when done</strong> - Delete instances you no longer need</li>
         <li><strong>Monitor usage</strong> - Check the Billing tab regularly</li>
       </ol>
@@ -385,11 +373,6 @@ uvicorn app:app --host 0.0.0.0 --port 8000`}</code>
             <td><strong>HuggingFace Deployment</strong></td>
             <td>One-click deployment of any HuggingFace model</td>
             <td><a href="?tab=huggingface">HuggingFace Docs</a></td>
-          </tr>
-          <tr>
-            <td><strong>OpenAI Gateway</strong></td>
-            <td>Use your models with OpenAI SDKs and tools</td>
-            <td><a href="?tab=openai-api">OpenAI Gateway Docs</a></td>
           </tr>
           <tr>
             <td><strong>SSH Access</strong></td>
@@ -444,7 +427,6 @@ pip install torch --index-url https://download.pytorch.org/whl/cu121`}</code>
         <li><strong>Reduce batch size</strong>: Lower <code>--batch-size</code> in your training script</li>
         <li><strong>Enable gradient checkpointing</strong>: Trade compute for memory</li>
         <li><strong>Use mixed precision</strong>: Add <code>--fp16</code> or <code>--bf16</code> flags</li>
-        <li><strong>Scale up GPUs</strong>: Use the Scale feature to add more GPUs</li>
         <li><strong>Try a smaller model</strong>: Consider a quantized version</li>
       </ul>
 

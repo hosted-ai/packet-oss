@@ -136,7 +136,7 @@ export function PodDetailModal({
             <h2 className="text-xl font-bold text-[var(--ink)]">{pod.poolName}</h2>
             <p className="text-sm text-[var(--muted)]">{pod.podName}</p>
           </div>
-          <button
+          <button aria-label="Close dialog"
             onClick={onClose}
             className="text-[var(--muted)] hover:text-zinc-700 p-2"
           >

@@ -16,12 +16,11 @@ import {
   getPoolPersistentStorageBlocks,
   createSharedVolume,
   getSharedVolumes,
+  getSharedStorageBlocks,
   deleteSharedVolume,
 } from '@/lib/hostedai/pools';
 import type {
   GPURegion,
-  GPUPool,
-  PoolSubscription,
   PoolSubscriptionCostEstimate,
   SubscriptionConnectionInfo,
   SharedVolume,
@@ -40,6 +39,12 @@ vi.mock('@/lib/hostedai/client', () => ({
 // Mock the subscription lineage module (uses Prisma)
 vi.mock('@/lib/subscription-lineage', () => ({
   recordSubscriptionLineage: vi.fn().mockResolvedValue(undefined),
+}));
+
+// Storage rate is admin-configured in data/pricing.json (absent in tests -> 0),
+// so pin it here: 0.02 cents/GB/hr.
+vi.mock('@/lib/pricing', () => ({
+  getStoragePricePerGBHourCents: vi.fn(() => 0.02),
 }));
 
 import {
@@ -447,6 +452,91 @@ describe('Pool Management', () => {
       expect(result).toEqual(mockInfo);
       expect(mockSetCache).toHaveBeenCalled();
     });
+
+    // HAI 2.2 instance ids (`i-<uuid>`) have no row on /gpuaas/connection-info,
+    // so they resolve through the instance detail + credentials endpoints.
+    describe('unified instance ids', () => {
+      const INSTANCE_ID = 'i-11111111-2222-3333-4444-555555555555';
+
+      it('resolves an owned instance to pod SSH info', async () => {
+        mockRequest.mockResolvedValueOnce({
+          id: INSTANCE_ID,
+          name: 'my-pod',
+          status: 'Running',
+          team: { id: 'team-123', name: 'Team' },
+          region: { id: 7, region_name: 'eu-1' },
+        });
+        mockRequest.mockResolvedValueOnce({
+          ip: '1.2.3.4',
+          username: 'root',
+          password: 'pw',
+          port: 2222,
+        });
+
+        const result = await getConnectionInfo('team-123', INSTANCE_ID);
+
+        expect(mockRequest).toHaveBeenNthCalledWith(1, 'GET', `/instances/unified/${INSTANCE_ID}`);
+        expect(mockRequest).toHaveBeenNthCalledWith(2, 'GET', `/instance/${INSTANCE_ID}/credentials`);
+        expect(result).toEqual([
+          {
+            id: INSTANCE_ID,
+            pool_name: 'my-pod',
+            region_id: 7,
+            pods: [
+              {
+                pod_name: 'my-pod',
+                pod_status: 'running',
+                ssh_info: { cmd: 'ssh -p 2222 root@1.2.3.4', pass: 'pw' },
+              },
+            ],
+          },
+        ]);
+      });
+
+      it('returns nothing and reads no credentials for another team\'s instance', async () => {
+        mockRequest.mockResolvedValueOnce({
+          id: INSTANCE_ID,
+          name: 'their-pod',
+          status: 'Running',
+          team: { id: 'team-999', name: 'Other' },
+        });
+
+        const result = await getConnectionInfo('team-123', INSTANCE_ID);
+
+        expect(result).toEqual([]);
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        expect(mockRequest).toHaveBeenCalledWith('GET', `/instances/unified/${INSTANCE_ID}`);
+      });
+
+      it('returns nothing when the instance reports no owning team', async () => {
+        mockRequest.mockResolvedValueOnce({ id: INSTANCE_ID, name: 'orphan', status: 'Running' });
+
+        const result = await getConnectionInfo('team-123', INSTANCE_ID);
+
+        expect(result).toEqual([]);
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        expect(mockRequest).toHaveBeenCalledWith('GET', `/instances/unified/${INSTANCE_ID}`);
+      });
+
+      it('omits ssh_info when the credentials are incomplete', async () => {
+        mockRequest.mockResolvedValueOnce({
+          id: INSTANCE_ID,
+          name: 'my-pod',
+          status: 'provisioning',
+          team: { id: 'team-123', name: 'Team' },
+        });
+        mockRequest.mockResolvedValueOnce({ ip: null, username: null, password: null, port: null });
+
+        const result = await getConnectionInfo('team-123', INSTANCE_ID);
+
+        expect(result[0].region_id).toBe(0);
+        expect(result[0].pods[0]).toEqual({
+          pod_name: 'my-pod',
+          pod_status: 'provisioning',
+          ssh_info: undefined,
+        });
+      });
+    });
   });
 
   describe('podAction', () => {
@@ -532,6 +622,32 @@ describe('Pool Management', () => {
       await deleteSharedVolume(1);
 
       expect(mockRequest).toHaveBeenCalledWith('DELETE', '/shared-volumes/1');
+    });
+
+    // PA-356 (same root cause as PA-345): HAI's own `cost` on a storage block is
+    // unrelated to this tenant's configured rate (often 0/unset) and /api/sync
+    // bills size_in_gb * storagePricePerGBHourCents. Every block price we quote
+    // (launch modal, add-storage modal) reads this function, so it must return
+    // OUR $/hr, never HAI's.
+    it('prices storage blocks at the configured rate, not the cost HAI reports', async () => {
+      mockRequest.mockResolvedValueOnce([
+        { id: 'blk-50', name: 'Block-50', size: 50, cost: '0' },
+        { id: 'blk-500', name: 'Block-500', size: 500, cost: '9.99' },
+      ]);
+
+      const blocks = await getSharedStorageBlocks(2, 'team-123');
+
+      expect(mockRequest).toHaveBeenCalledWith(
+        'GET',
+        '/shared-volumes/shared-storage-blocks?region_id=2&team_id=team-123'
+      );
+      // 0.02 cents/GB/hr -> 50GB = $0.01/hr, 500GB = $0.10/hr.
+      expect(blocks.map((b) => b.cost)).toEqual([0.01, 0.1]);
+    });
+
+    it('returns an empty block list when HAI returns nothing', async () => {
+      mockRequest.mockResolvedValueOnce(undefined);
+      await expect(getSharedStorageBlocks(2, 'team-123')).resolves.toEqual([]);
     });
   });
 

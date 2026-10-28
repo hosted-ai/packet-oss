@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   RefreshCw,
   Server,
@@ -18,6 +18,9 @@ import {
   BarChart3,
   Skull,
   DollarSign,
+  ExternalLink,
+  Copy,
+  Eye,
 } from "lucide-react";
 import { PodDetailModal } from "./PodDetailModal";
 import { HistoryChart, type PodHistory } from "./pods/HistoryChart";
@@ -30,6 +33,7 @@ interface AdminPod {
   status: string;
   podStatus?: string;
   isDead: boolean;
+  nature?: string;
   vgpuCount: number;
   podName?: string;
   owner?: {
@@ -48,12 +52,8 @@ interface AdminPod {
     vramUsage?: number;
   };
   gpuMetrics?: {
-    utilization: number;
-    memoryUsed: number;
-    memoryTotal: number;
-    memoryPercent: number;
-    temperature: number;
-    powerDraw: number;
+    tflops: number;
+    vramGb: number;
   };
   metadata?: {
     displayName?: string;
@@ -66,6 +66,15 @@ interface AdminPod {
     billingType?: string;
     prepaidUntil?: string;
     stripeCustomerId?: string;
+  };
+  publicIps?: string[];
+  accelerator?: string;
+  baremetal?: {
+    invoiceNumber: string;
+    hostedInvoiceUrl?: string;
+    contractMonths: number;
+    totalInvoiceCents: number;
+    status: string;
   };
   createdAt?: string;
 }
@@ -108,6 +117,11 @@ export function PodsTab() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyHours, setHistoryHours] = useState(24);
 
+  // Per-pod SSH creds, fetched on demand when the admin clicks "Get SSH".
+  const [sshCreds, setSshCreds] = useState<
+    Record<string, { command: string; password?: string } | "loading" | "error">
+  >({});
+
   const loadPods = async () => {
     setLoading(true);
     setError(null);
@@ -128,11 +142,16 @@ export function PodsTab() {
 
   // Fetch GPU metrics for running pods with SSH access
   const loadGpuMetrics = useCallback(async () => {
-    const runningPodsWithSSH = pods.filter(
-      (p) => (p.status === "running" || p.status === "subscribed" || p.status === "active") && p.ssh?.password
+    // PA-187: GPU metrics now come from HAI telemetry, keyed by instance id +
+    // team (no SSH needed). Run for any active pod that has a team.
+    const gpuPods = pods.filter(
+      (p) =>
+        (p.status === "running" || p.status === "subscribed" || p.status === "active") &&
+        p.teamId &&
+        p.nature !== "baremetal"
     );
 
-    if (runningPodsWithSSH.length === 0) return;
+    if (gpuPods.length === 0) return;
 
     setMetricsLoading(true);
     try {
@@ -140,9 +159,9 @@ export function PodsTab() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          pods: runningPodsWithSSH.map((p) => ({
+          pods: gpuPods.map((p) => ({
             subscriptionId: p.subscriptionId,
-            ssh: p.ssh,
+            teamId: p.teamId,
           })),
         }),
       });
@@ -200,14 +219,22 @@ export function PodsTab() {
     return () => clearInterval(autoRefresh);
   }, []);
 
-  // Auto-refresh metrics every 30 seconds
+  // Keep the latest loadGpuMetrics in a ref so the polling effect below does NOT
+  // depend on its identity. loadGpuMetrics calls setPods, which changes `pods`
+  // and thus the callback identity; depending on it here would re-fire the effect
+  // on every metrics update and re-fetch in a tight loop (the "Fetching…" flicker).
+  const loadGpuMetricsRef = useRef(loadGpuMetrics);
+  loadGpuMetricsRef.current = loadGpuMetrics;
+
+  // Auto-refresh metrics every 30 seconds. Re-armed only when the pod set size or
+  // load state changes, not on every metrics update.
   useEffect(() => {
     if (pods.length > 0 && !loading) {
-      loadGpuMetrics();
-      const interval = setInterval(loadGpuMetrics, 30000);
+      loadGpuMetricsRef.current();
+      const interval = setInterval(() => loadGpuMetricsRef.current(), 30000);
       return () => clearInterval(interval);
     }
-  }, [pods.length, loading, loadGpuMetrics]);
+  }, [pods.length, loading]);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -248,10 +275,34 @@ export function PodsTab() {
     return new Date(dateStr).toLocaleString();
   };
 
-  const getSSHCommand = (pod: AdminPod) => {
-    if (!pod.ssh) return null;
-    const password = pod.ssh.password ? ` # password: ${pod.ssh.password}` : "";
-    return `ssh -p ${pod.ssh.port} ${pod.ssh.username}@${pod.ssh.host}${password}`;
+  // Reveal a pod's SSH creds. Uses the creds already in the list payload when
+  // present, otherwise fetches them on demand (baremetal + pods the bulk fetch missed).
+  const fetchSshCreds = async (pod: AdminPod) => {
+    if (pod.ssh) {
+      setSshCreds((prev) => ({
+        ...prev,
+        [pod.subscriptionId]: {
+          command: `ssh -p ${pod.ssh!.port} ${pod.ssh!.username}@${pod.ssh!.host}`,
+          password: pod.ssh!.password,
+        },
+      }));
+      return;
+    }
+    setSshCreds((prev) => ({ ...prev, [pod.subscriptionId]: "loading" }));
+    try {
+      const params = new URLSearchParams({ id: pod.subscriptionId });
+      if (pod.teamId) params.set("teamId", pod.teamId);
+      if (pod.nature) params.set("nature", pod.nature);
+      const res = await fetch(`/api/admin/pods/ssh?${params}`);
+      if (!res.ok) throw new Error("not ok");
+      const data = await res.json();
+      setSshCreds((prev) => ({
+        ...prev,
+        [pod.subscriptionId]: { command: data.command, password: data.password },
+      }));
+    } catch {
+      setSshCreds((prev) => ({ ...prev, [pod.subscriptionId]: "error" }));
+    }
   };
 
   // Handle sort
@@ -329,9 +380,9 @@ export function PodsTab() {
           comparison = a.vgpuCount - b.vgpuCount;
           break;
         case "metrics":
-          const aUtil = a.gpuMetrics?.utilization ?? -1;
-          const bUtil = b.gpuMetrics?.utilization ?? -1;
-          comparison = aUtil - bUtil;
+          const aTf = a.gpuMetrics?.tflops ?? -1;
+          const bTf = b.gpuMetrics?.tflops ?? -1;
+          comparison = aTf - bTf;
           break;
         case "ssh":
           const aHasSSH = a.ssh ? 1 : 0;
@@ -354,11 +405,11 @@ export function PodsTab() {
   // Get unique statuses for filter
   const uniqueStatuses = [...new Set(pods.map((p) => p.status))];
 
-  // Calculate average GPU utilization
-  const avgGpuUtil = useMemo(() => {
+  // Average TFLOPs across pods that have metrics (HAI telemetry).
+  const avgTflops = useMemo(() => {
     const podsWithMetrics = pods.filter((p) => p.gpuMetrics);
     if (podsWithMetrics.length === 0) return null;
-    const sum = podsWithMetrics.reduce((acc, p) => acc + (p.gpuMetrics?.utilization || 0), 0);
+    const sum = podsWithMetrics.reduce((acc, p) => acc + (p.gpuMetrics?.tflops || 0), 0);
     return sum / podsWithMetrics.length;
   }, [pods]);
 
@@ -410,7 +461,7 @@ export function PodsTab() {
             className="flex items-center gap-2 px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-700 rounded-lg transition-colors disabled:opacity-50"
           >
             <Activity className={`w-4 h-4 ${metricsLoading ? "animate-pulse" : ""}`} />
-            {metricsLoading ? "Fetching..." : "GPU Metrics"}
+            {metricsLoading ? "Refreshing..." : "Refresh Metrics"}
           </button>
           <button
             onClick={() => setShowHistoryChart(!showHistoryChart)}
@@ -435,7 +486,11 @@ export function PodsTab() {
 
       {/* Summary Cards */}
       {summary && (
-        <div className="grid grid-cols-8 gap-4">
+        // 8 across only once the viewport is wide enough to hold them: each card needs
+        // ~150px, so 8 + gaps (~1280px) plus the 256px sidebar want ~1600px. lg (1024px)
+        // fired ~600px too early, clipping the last cards in the 1024-1660px band (also
+        // reachable via browser zoom) - PA-429.
+        <div className="grid grid-cols-2 sm:grid-cols-4 min-[1700px]:grid-cols-8 gap-4">
           <div className="bg-white border border-[#e4e7ef] rounded-xl p-4 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-blue-100 rounded-lg">
@@ -534,9 +589,9 @@ export function PodsTab() {
               </div>
               <div>
                 <p className="text-2xl font-bold text-[#0b0f1c]">
-                  {avgGpuUtil !== null ? `${avgGpuUtil.toFixed(0)}%` : "-"}
+                  {avgTflops !== null ? avgTflops.toFixed(1) : "-"}
                 </p>
-                <p className="text-xs text-[#5b6476]">Avg GPU Util</p>
+                <p className="text-xs text-[#5b6476]">Avg TFLOPs</p>
               </div>
             </div>
           </div>
@@ -606,6 +661,8 @@ export function PodsTab() {
             <thead>
               <tr className="border-b border-[#e4e7ef] bg-[#f7f8fb] text-left text-sm text-[#5b6476]">
                 <th className="px-4 py-3 font-medium">Pod</th>
+                <th className="px-4 py-3 font-medium">Accelerator</th>
+                <th className="px-4 py-3 font-medium">Public IP</th>
                 <th
                   className="px-4 py-3 font-medium cursor-pointer hover:bg-[#e4e7ef] transition-colors"
                   onClick={() => handleSort("owner")}
@@ -665,7 +722,7 @@ export function PodsTab() {
             <tbody className="divide-y divide-[#e4e7ef]">
               {sortedPods.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-[#5b6476]">
+                  <td colSpan={11} className="px-4 py-8 text-center text-[#5b6476]">
                     No pods found matching your filters
                   </td>
                 </tr>
@@ -694,6 +751,22 @@ export function PodsTab() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
+                      {pod.accelerator ? (
+                        <span className="text-xs text-[#0b0f1c]">{pod.accelerator}</span>
+                      ) : (
+                        <span className="text-xs text-[#9ca3af]">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {pod.publicIps && pod.publicIps.length > 0 ? (
+                        <span className="text-xs font-mono text-[#0b0f1c]">
+                          {pod.publicIps.join(", ")}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-[#9ca3af]">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       {pod.owner ? (
                         <div>
                           <div className="text-sm text-[#0b0f1c]">{pod.owner.name}</div>
@@ -719,7 +792,34 @@ export function PodsTab() {
                     </td>
                     <td className="px-4 py-3">
                       {(() => {
-                        const activeStatuses = ["running", "pending", "starting", "restarting", "subscribed", "active"];
+                        // Baremetal is term-prepaid by Stripe invoice, not an hourly/monthly rate.
+                        if (pod.nature === "baremetal") {
+                          if (pod.baremetal) {
+                            const label = `${pod.baremetal.contractMonths}mo prepaid`;
+                            return pod.baremetal.hostedInvoiceUrl ? (
+                              <a
+                                href={pod.baremetal.hostedInvoiceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                title={`Invoice ${pod.baremetal.invoiceNumber}`}
+                                className="text-xs px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded hover:bg-blue-200 inline-flex items-center gap-1"
+                              >
+                                {label}
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            ) : (
+                              <span
+                                title={`Invoice ${pod.baremetal.invoiceNumber}`}
+                                className="text-xs px-2 py-1 bg-blue-100 text-blue-700 border border-blue-200 rounded"
+                              >
+                                {label}
+                              </span>
+                            );
+                          }
+                          return <span className="text-xs text-[#9ca3af]">-</span>;
+                        }
+                        const activeStatuses = ["running", "pending", "starting", "restarting", "subscribed", "active", "online"];
                         const isActive = activeStatuses.includes(pod.status) && !pod.isDead;
                         if (!isActive) {
                           return <span className="text-xs text-[#9ca3af]">-</span>;
@@ -746,38 +846,31 @@ export function PodsTab() {
                       })()}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-1 text-[#0b0f1c]">
-                        <Cpu className="w-4 h-4 text-purple-600" />
-                        <span>{pod.vgpuCount}</span>
-                      </div>
+                      {pod.nature === "baremetal" ? (
+                        // Baremetal nodes aren't vGPU-sliced; the listing's default of 1 is meaningless here.
+                        <span className="text-xs text-[#9ca3af]">N/A</span>
+                      ) : (
+                        <div className="flex items-center gap-1 text-[#0b0f1c]">
+                          <Cpu className="w-4 h-4 text-purple-600" />
+                          <span>{pod.vgpuCount}</span>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
-                      {pod.gpuMetrics ? (
+                      {pod.nature === "baremetal" ? (
+                        <span className="text-xs text-[#9ca3af]">N/A</span>
+                      ) : pod.gpuMetrics ? (
                         <div className="text-xs space-y-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-[#5b6476]">GPU:</span>
-                            <span className={`font-medium ${
-                              pod.gpuMetrics.utilization > 80 ? "text-green-600" :
-                              pod.gpuMetrics.utilization > 20 ? "text-yellow-600" :
-                              "text-[#0b0f1c]"
-                            }`}>
-                              {pod.gpuMetrics.utilization.toFixed(0)}%
+                            <span className="text-[#5b6476]">TFLOPs:</span>
+                            <span className="font-medium text-[#0b0f1c]">
+                              {pod.gpuMetrics.tflops.toFixed(1)}
                             </span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-[#5b6476]">VRAM:</span>
                             <span className="text-[#0b0f1c]">
-                              {(pod.gpuMetrics.memoryUsed / 1024).toFixed(1)}/{(pod.gpuMetrics.memoryTotal / 1024).toFixed(0)} GB
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-[#5b6476]">Temp:</span>
-                            <span className={`${
-                              pod.gpuMetrics.temperature > 80 ? "text-red-600" :
-                              pod.gpuMetrics.temperature > 60 ? "text-yellow-600" :
-                              "text-[#0b0f1c]"
-                            }`}>
-                              {pod.gpuMetrics.temperature}°C
+                              {pod.gpuMetrics.vramGb.toFixed(1)} GB
                             </span>
                           </div>
                         </div>
@@ -788,30 +881,60 @@ export function PodsTab() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {pod.ssh ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            copyToClipboard(getSSHCommand(pod) || "", pod.subscriptionId);
-                          }}
-                          className="flex items-center gap-1 text-xs px-2 py-1 bg-[#f7f8fb] hover:bg-[#e4e7ef] border border-[#e4e7ef] rounded transition-colors text-[#0b0f1c]"
-                          title={getSSHCommand(pod) || ""}
-                        >
-                          {copiedId === pod.subscriptionId ? (
-                            <>
-                              <Check className="w-3 h-3 text-green-600" />
-                              <span className="text-green-600">Copied</span>
-                            </>
-                          ) : (
-                            <>
-                              <Terminal className="w-3 h-3" />
-                              <span>Copy SSH</span>
-                            </>
-                          )}
-                        </button>
-                      ) : (
-                        <span className="text-xs text-[#9ca3af]">-</span>
-                      )}
+                      {(() => {
+                        const cred = sshCreds[pod.subscriptionId];
+                        if (cred === "loading") {
+                          return <span className="text-xs text-[#9ca3af]">Fetching…</span>;
+                        }
+                        if (cred === "error") {
+                          return (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); fetchSshCreds(pod); }}
+                              className="text-xs text-red-600 hover:underline"
+                            >
+                              Unavailable · retry
+                            </button>
+                          );
+                        }
+                        if (cred) {
+                          return (
+                            <div className="flex flex-col gap-1 max-w-[260px]">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); copyToClipboard(cred.command, `${pod.subscriptionId}:cmd`); }}
+                                title={cred.command}
+                                className="flex items-center gap-1 text-xs px-2 py-1 bg-[#f7f8fb] hover:bg-[#e4e7ef] border border-[#e4e7ef] rounded transition-colors text-[#0b0f1c] font-mono"
+                              >
+                                {copiedId === `${pod.subscriptionId}:cmd` ? (
+                                  <><Check className="w-3 h-3 text-green-600 shrink-0" /><span className="text-green-600">Copied</span></>
+                                ) : (
+                                  <><Terminal className="w-3 h-3 shrink-0" /><span className="truncate">{cred.command}</span></>
+                                )}
+                              </button>
+                              {cred.password && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); copyToClipboard(cred.password!, `${pod.subscriptionId}:pass`); }}
+                                  className="flex items-center gap-1 text-xs px-2 py-1 bg-[#f7f8fb] hover:bg-[#e4e7ef] border border-[#e4e7ef] rounded transition-colors text-[#5b6476]"
+                                >
+                                  {copiedId === `${pod.subscriptionId}:pass` ? (
+                                    <><Check className="w-3 h-3 text-green-600" /><span className="text-green-600">Copied pass</span></>
+                                  ) : (
+                                    <><Copy className="w-3 h-3" /><span>Copy password</span></>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); fetchSshCreds(pod); }}
+                            className="flex items-center gap-1 text-xs px-2 py-1 bg-[#f7f8fb] hover:bg-[#e4e7ef] border border-[#e4e7ef] rounded transition-colors text-[#0b0f1c]"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>Get SSH</span>
+                          </button>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-[#5b6476]">
                       {formatDate(pod.createdAt || pod.metadata?.deployTime)}

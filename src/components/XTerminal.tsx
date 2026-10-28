@@ -90,7 +90,10 @@ export default function XTerminal({
     const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     if (!wsToken) {
       console.error("WebSocket token required for terminal connection");
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- this effect owns the WebSocket connection side-effect
       setErrorMessage("Terminal connection requires authentication token");
+       
+      setStatus("error");
       return;
     }
     const wsUrl = `${wsProtocol}//${window.location.host}/ssh-ws?token=${encodeURIComponent(wsToken)}`;
@@ -193,7 +196,7 @@ export default function XTerminal({
       ws.close();
       term.dispose();
     };
-  }, [host, port, username, password]);
+  }, [host, port, username, password, wsToken]);
 
   return (
     <div className="h-full w-full bg-zinc-900 relative">

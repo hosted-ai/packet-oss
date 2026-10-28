@@ -59,7 +59,6 @@ describe("can()", () => {
       ["ssh_keys.manage", true],
       // PA-202 modules
       ["token_factory.use", true],
-      ["pixel_factory.use", true],
       ["huggingface.use", true],
       ["apps.use", true],
       ["referral.view", true],
@@ -86,7 +85,6 @@ describe("can()", () => {
       ["ssh_keys.manage", true],
       // PA-202 modules: member gets all except referral
       ["token_factory.use", true],
-      ["pixel_factory.use", true],
       ["huggingface.use", true],
       ["apps.use", true],
       ["referral.view", false], // PA-201 marks referral as Team Admin only
@@ -118,7 +116,6 @@ describe("can()", () => {
 
     it("cannot access any of the PA-202 modules", () => {
       expect(can("readOnlyMember", false, "token_factory.use")).toBe(false);
-      expect(can("readOnlyMember", false, "pixel_factory.use")).toBe(false);
       expect(can("readOnlyMember", false, "huggingface.use")).toBe(false);
       expect(can("readOnlyMember", false, "apps.use")).toBe(false);
       expect(can("readOnlyMember", false, "referral.view")).toBe(false);
@@ -147,7 +144,6 @@ describe("can()", () => {
 
     it("cannot access any of the PA-202 modules", () => {
       expect(can("financeManager", false, "token_factory.use")).toBe(false);
-      expect(can("financeManager", false, "pixel_factory.use")).toBe(false);
       expect(can("financeManager", false, "huggingface.use")).toBe(false);
       expect(can("financeManager", false, "apps.use")).toBe(false);
       expect(can("financeManager", false, "referral.view")).toBe(false);

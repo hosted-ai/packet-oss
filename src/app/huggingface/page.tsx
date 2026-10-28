@@ -14,7 +14,8 @@ import type {
 } from "./types";
 import { ItemCard } from "./ItemCard";
 import { ProgressModal } from "./ProgressModal";
-import { LaunchGPUModal, type DeployContext } from "@/app/dashboard/components/LaunchGPUModal";
+import { LaunchGPUModal } from "@/app/dashboard/components/LaunchGPUModal";
+import { useWalletTopup } from "@/hooks/useWalletTopup";
 import { FilterPanel } from "./FilterPanel";
 
 function HuggingFacePageContent() {
@@ -23,8 +24,9 @@ function HuggingFacePageContent() {
 
   // Auth
   const [token, setToken] = useState<string | null>(null);
+  const { topupLoading, handleTopup } = useWalletTopup(token);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useState<string | null>(null);
 
   // Catalog
   const [activeTab, setActiveTab] = useState<TabType>("popular");
@@ -46,13 +48,12 @@ function HuggingFacePageContent() {
   // Deploy modal
   const [showDeployModal, setShowDeployModal] = useState(false);
   const [selectedItem, setSelectedItem] = useState<CatalogItem | SearchResult | null>(null);
-  const [launchOptions, setLaunchOptions] = useState<LaunchOptions | null>(null);
-  const [selectedProduct, setSelectedProduct] = useState("");
-  const [selectedRegion, setSelectedRegion] = useState<number | null>(null);
-  const [gpuCount, setGpuCount] = useState(1);
-  const [hfToken, setHfToken] = useState("");
-  const [deploying, setDeploying] = useState(false);
-  const [deployError, setDeployError] = useState<string | null>(null);
+  const [, setLaunchOptions] = useState<LaunchOptions | null>(null);
+  const [, setSelectedProduct] = useState("");
+  const [, setSelectedRegion] = useState<number | null>(null);
+  const [, setGpuCount] = useState(1);
+  const [, setHfToken] = useState("");
+  const [, setDeployError] = useState<string | null>(null);
 
   // Progress modal
   const [showProgressModal, setShowProgressModal] = useState(false);
@@ -64,6 +65,9 @@ function HuggingFacePageContent() {
   const [apiEndpoint, setApiEndpoint] = useState<string | null>(null);
   const [notifyRequested, setNotifyRequested] = useState(false);
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  // Read through a ref so a fresh router object cannot re-key the fetch below.
+  const routerRef = useRef(router);
+  routerRef.current = router;
 
   // Check auth on mount
   useEffect(() => {
@@ -76,13 +80,7 @@ function HuggingFacePageContent() {
     }
   }, [searchParams, router]);
 
-  // Fetch catalog when tab changes
-  useEffect(() => {
-    if (!token) return;
-    fetchCatalog(activeTab);
-  }, [token, activeTab]);
-
-  const fetchCatalog = async (type: TabType) => {
+  const fetchCatalog = useCallback(async (type: TabType) => {
     setCatalogLoading(true);
     try {
       const res = await fetch(`/api/huggingface/catalog?type=${type}&checkCompatibility=true`, {
@@ -91,7 +89,7 @@ function HuggingFacePageContent() {
       if (!res.ok) {
         if (res.status === 401) {
           localStorage.removeItem("packet_token");
-          router.push("/account");
+          routerRef.current.push("/account");
           return;
         }
         throw new Error("Failed to fetch catalog");
@@ -104,7 +102,15 @@ function HuggingFacePageContent() {
     } finally {
       setCatalogLoading(false);
     }
-  };
+  }, [token]);
+
+  // Fetch catalog when tab changes
+  useEffect(() => {
+    if (!token) return;
+    fetchCatalog(activeTab);
+  }, [token, activeTab, fetchCatalog]);
+
+
 
   const handleSearch = async () => {
     if (!searchQuery.trim() || searchQuery.length < 2) return;
@@ -241,59 +247,6 @@ function HuggingFacePageContent() {
       if (res.ok) setNotifyRequested(true);
     } catch (err) {
       console.error("Notification request error:", err);
-    }
-  };
-
-  const handleDeploy = async () => {
-    if (!selectedItem) return;
-    setDeploying(true);
-    setDeployError(null);
-
-    try {
-      const body: Record<string, unknown> = {
-        hfItemId: selectedItem.id,
-        gpuCount,
-        product_id: selectedProduct || undefined,
-        region_id: selectedRegion || undefined,
-      };
-      if (hfToken) body.hfToken = hfToken;
-
-      const res = await fetch("/api/huggingface/deploy", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        if (data.requiresToken) {
-          setDeployError(
-            `This model requires a HuggingFace token. Get yours at huggingface.co/settings/tokens`
-          );
-        } else {
-          setDeployError(data.error || "Failed to deploy");
-        }
-        return;
-      }
-
-      const subId = data.deployment?.subscriptionId || data.subscriptionId;
-      if (subId) {
-        setDeploymentSubscriptionId(String(subId));
-        setDeploymentStatus(data.installing ? "installing" : "starting");
-        setDeploymentMessage(data.message || "Deployment started...");
-        setDeploymentLogs(data.logs || "");
-        setNotifyRequested(false);
-        setApiEndpoint(null);
-        closeDeployModal();
-        setShowProgressModal(true);
-      } else {
-        router.push(`/dashboard?token=${token}&hf_deploy=${data.deployment?.id || "new"}`);
-      }
-    } catch (err) {
-      console.error("Deploy error:", err);
-      setDeployError("Failed to start deployment");
-    } finally {
-      setDeploying(false);
     }
   };
 
@@ -478,6 +431,8 @@ function HuggingFacePageContent() {
             closeDeployModal();
           }}
           onError={(msg) => setDeployError(msg)}
+          onTopup={handleTopup}
+          topupLoading={topupLoading}
           deployContext={{
             type: "huggingface",
             title: `Deploy ${selectedItem.name}`,

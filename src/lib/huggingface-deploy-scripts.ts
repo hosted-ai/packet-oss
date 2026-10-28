@@ -431,19 +431,30 @@ log "Installing pip..."
 pip install --upgrade pip >> install.log 2>&1
 
 log "Installing vLLM (this takes a while)..."
-# Detect CUDA driver version to pick a compatible vLLM release.
-# vLLM >= 0.9 ships with CUDA 12.8 wheels which require driver >= 560.
-# Older drivers (535 = CUDA 12.2, 550 = CUDA 12.4) need vLLM 0.8.x.
+# Wheel selection is gated on the host NVIDIA driver. The newest vLLM (0.9+)
+# ships CUDA 12.8 (cu128) PyTorch 2.7 wheels that require driver >= 575; on
+# older drivers they die at CUDA init ("driver too old", e.g. 570 reports
+# 12080). Pinning vLLM alone isn't enough — pip then resolves transformers 5.x,
+# which needs torch 2.7's float8_e8m0fnu. So for driver < 575 (or an undetected
+# driver) install a coherent, known-good cu124 stack; cu124 wheels are backward
+# compatible and run fine on newer 12.x drivers too. See PA-280.
 DRIVER_VER=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | cut -d. -f1)
-if [ -n "$DRIVER_VER" ] && [ "$DRIVER_VER" -lt 560 ] 2>/dev/null; then
-  log "CUDA driver $DRIVER_VER < 560 — installing vLLM 0.8.x for compatibility"
-  VLLM_PKG="vllm>=0.8,<0.9"
+if [ -n "$DRIVER_VER" ] && [ "$DRIVER_VER" -ge 575 ] 2>/dev/null; then
+  log "CUDA driver $DRIVER_VER >= 575 — installing latest vLLM"
+  if ! pip install vllm >> install.log 2>&1; then
+    log "ERROR: vLLM installation failed"
+    exit 1
+  fi
 else
-  VLLM_PKG="vllm"
-fi
-if ! pip install "$VLLM_PKG" >> install.log 2>&1; then
-  log "ERROR: vLLM installation failed"
-  exit 1
+  log "CUDA driver $DRIVER_VER < 575 (or undetected) — installing pinned cu124 stack: torch 2.5.1 / vLLM 0.6.6 / transformers 4.47.1"
+  if ! pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124 >> install.log 2>&1; then
+    log "ERROR: PyTorch (cu124) installation failed"
+    exit 1
+  fi
+  if ! pip install vllm==0.6.6 transformers==4.47.1 tokenizers==0.21.0 >> install.log 2>&1; then
+    log "ERROR: vLLM installation failed"
+    exit 1
+  fi
 fi
 
 log "INSTALL_COMPLETE"
@@ -676,7 +687,7 @@ export function validateDeployParams(
 /**
  * Get default port for deployment type
  */
-export function getDefaultPort(type: DeployScriptType): number {
+export function getDefaultPort(_type: DeployScriptType): number {
   // All models now use vLLM on port 8000
   return 8000;
 }

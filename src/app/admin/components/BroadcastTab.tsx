@@ -503,7 +503,7 @@ export function BroadcastTab() {
             color: "#5b6476",
           }}
         >
-          No broadcasts sent yet. Click "New Broadcast" to send your first mass
+          No broadcasts sent yet. Click &quot;New Broadcast&quot; to send your first mass
           email.
         </div>
       ) : (

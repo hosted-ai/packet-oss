@@ -241,6 +241,7 @@ echo ""
 ADMIN_JWT_SECRET=$(openssl rand -hex 32)
 CUSTOMER_JWT_SECRET=$(openssl rand -hex 32)
 CRON_SECRET=$(openssl rand -hex 16)
+SYNC_SECRET=$(openssl rand -hex 16)
 ENCRYPTION_KEY=$(openssl rand -hex 32)
 DB_PASSWORD=$(openssl rand -hex 16)
 
@@ -326,6 +327,9 @@ if [[ -f "$ENV_FILE" ]]; then
   CRON_SECRET=$(get_existing CRON_SECRET)
   CRON_SECRET="${CRON_SECRET:-$(openssl rand -hex 16)}"
 
+  SYNC_SECRET=$(get_existing SYNC_SECRET)
+  SYNC_SECRET="${SYNC_SECRET:-$(openssl rand -hex 16)}"
+
   ENCRYPTION_KEY=$(get_existing ENCRYPTION_KEY)
   ENCRYPTION_KEY="${ENCRYPTION_KEY:-$(openssl rand -hex 32)}"
 
@@ -361,6 +365,7 @@ DATABASE_URL="${DB_URL_FINAL}"
 ADMIN_JWT_SECRET="${ADMIN_JWT_SECRET}"
 CUSTOMER_JWT_SECRET="${CUSTOMER_JWT_SECRET}"
 CRON_SECRET="${CRON_SECRET}"
+SYNC_SECRET="${SYNC_SECRET}"
 ENCRYPTION_KEY="${ENCRYPTION_KEY}"
 
 # HostedAI User Panel (port 8055)

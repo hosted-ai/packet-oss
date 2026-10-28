@@ -11,7 +11,6 @@ import {
   RotateCcw,
   Trash2,
   Clock,
-  DollarSign,
   Cpu,
   Check,
   AlertTriangle,
@@ -679,7 +678,7 @@ export function PodDetailModal({
         <div className="border-t border-[#e4e7ef] px-6 py-4 bg-[#f7f8fb]">
           <div className="flex items-center justify-between">
             <div className="text-xs text-[#5b6476]">
-              Pool ID: {pod.poolId}
+              Pool ID: {pod.poolId ? pod.poolId : "N/A"}
             </div>
             <div className="flex gap-2">
               {/* Start Button - only show when stopped */}

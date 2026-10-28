@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as teamMembers from '@/lib/team-members';
 
 // Reset mocks before each test
 beforeEach(() => {

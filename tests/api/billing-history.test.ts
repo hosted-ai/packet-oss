@@ -1,16 +1,5 @@
-/**
- * PA-269 — GET /api/billing/history permission gate.
- *
- * Bug: the route verified only that the JWT was valid (verifyCustomerToken),
- * with NO billing.view check. Any Team Member / Read-only Member could call it
- * directly and read the owner's full Stripe transaction history + all-time
- * spend aggregates — bypassing the (cosmetic) sidebar hide of the Billing tab.
- *
- * These tests pin the gate shut: billing.view required (Team Admin, Finance
- * Manager, Owner allowed; Team Member + Read-only Member denied 403 with NO
- * wallet read). The wallet that IS read for allowed roles must stay the same
- * customer the route read before the gate (auth.payload.customerId).
- */
+// billing.view gates this route, and the wallet it reads is the operating
+// account's — kept distinct from the JWT customer here so a swap back fails.
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -35,6 +24,9 @@ import { getWalletTransactions } from "@/lib/wallet";
 import type { AuthenticatedCustomer } from "@/lib/auth/helpers";
 import type { PacketRole, Permission } from "@/lib/auth/role-permissions";
 
+const JWT_CUSTOMER = "cus_jwt";
+const OPERATING_ACCOUNT = "cus_operating";
+
 function makeAuth(role: PacketRole, isOwner = false): AuthenticatedCustomer {
   const grants: Record<PacketRole, ReadonlySet<Permission>> = {
     teamAdmin: new Set<Permission>(["billing.view", "billing.manage", "gpu.access"]),
@@ -44,16 +36,17 @@ function makeAuth(role: PacketRole, isOwner = false): AuthenticatedCustomer {
   };
   const can = (perm: Permission) => isOwner || grants[role].has(perm);
   return {
-    payload: { customerId: "cus_owner", email: "u@example.com" } as never,
-    customer: { id: "cus_owner", email: "u@example.com" } as never,
+    payload: { customerId: JWT_CUSTOMER, email: "u@example.com" } as never,
+    customer: { id: OPERATING_ACCOUNT, email: "u@example.com" } as never,
     teamId: "team_1",
     allTeamIds: ["team_1"],
     stripe: {} as never,
-    accountId: "cus_owner",
+    accountId: OPERATING_ACCOUNT,
+    hourlyCustomerId: null,
     membership: {
       membershipId: "tm_1",
       userId: "user_1",
-      accountId: "cus_owner",
+      accountId: OPERATING_ACCOUNT,
       role,
       isOwner,
       revokedAt: null,
@@ -70,7 +63,7 @@ function makeReq(): NextRequest {
   });
 }
 
-describe("GET /api/billing/history — PA-269 billing.view gate", () => {
+describe("GET /api/billing/history — billing.view gate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuditCreate.mockResolvedValue({});
@@ -94,12 +87,12 @@ describe("GET /api/billing/history — PA-269 billing.view gate", () => {
     expect(getWalletTransactions).not.toHaveBeenCalled();
   });
 
-  it("allows Finance Manager (billing.view) and returns aggregates from the owner's wallet", async () => {
+  it("allows Finance Manager (billing.view) and returns aggregates from the operating wallet", async () => {
     vi.mocked(getAuthenticatedCustomer).mockResolvedValue(makeAuth("financeManager"));
     const res = await GET(makeReq());
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(getWalletTransactions).toHaveBeenCalledWith("cus_owner");
+    expect(getWalletTransactions).toHaveBeenCalledWith(OPERATING_ACCOUNT);
     expect(body.allTimeStats.transactionCount).toBe(2);
     expect(body.allTimeStats.totalSpent).toBe(50); // 5000c debit
     expect(body.allTimeStats.totalCredits).toBe(20); // 2000c credit
@@ -109,7 +102,14 @@ describe("GET /api/billing/history — PA-269 billing.view gate", () => {
     vi.mocked(getAuthenticatedCustomer).mockResolvedValue(makeAuth("teamAdmin", true));
     const res = await GET(makeReq());
     expect(res.status).toBe(200);
-    expect(getWalletTransactions).toHaveBeenCalledWith("cus_owner");
+    expect(getWalletTransactions).toHaveBeenCalledWith(OPERATING_ACCOUNT);
+  });
+
+  it("reads the operating account's wallet, never the JWT customer's", async () => {
+    vi.mocked(getAuthenticatedCustomer).mockResolvedValue(makeAuth("teamAdmin", true));
+    await GET(makeReq());
+    expect(getWalletTransactions).toHaveBeenCalledWith(OPERATING_ACCOUNT);
+    expect(getWalletTransactions).not.toHaveBeenCalledWith(JWT_CUSTOMER);
   });
 
   it("propagates the auth error (401/403/404) when getAuthenticatedCustomer rejects", async () => {
@@ -118,6 +118,15 @@ describe("GET /api/billing/history — PA-269 billing.view gate", () => {
     );
     const res = await GET(makeReq());
     expect(res.status).toBe(401);
+    expect(getWalletTransactions).not.toHaveBeenCalled();
+  });
+
+  it("refuses an account the session has no access to, with no wallet read", async () => {
+    vi.mocked(getAuthenticatedCustomer).mockResolvedValue(
+      NextResponse.json({ error: "You do not have access to this account." }, { status: 403 }) as never,
+    );
+    const res = await GET(makeReq());
+    expect(res.status).toBe(403);
     expect(getWalletTransactions).not.toHaveBeenCalled();
   });
 });

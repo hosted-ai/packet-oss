@@ -8,7 +8,7 @@ import { resolveOperatingContext } from "@/lib/auth/account-resolver";
 import { resolveMembership } from "@/lib/auth/membership";
 import { computeEffectivePermissions } from "@/lib/auth/api-key-permissions";
 import { PACKET_ROLES, type PacketRole } from "@/lib/auth/role-permissions";
-import type { ApiKeyListItem, CreateApiKeyResponse } from "@/lib/api";
+import type { CreateApiKeyResponse } from "@/lib/api";
 
 function isPacketRole(role: string): role is PacketRole {
   return (PACKET_ROLES as readonly string[]).includes(role);
@@ -107,7 +107,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
     const customer = ctx.customer;
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },

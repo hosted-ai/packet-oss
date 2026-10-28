@@ -5,7 +5,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
-import { getInstanceCredentials } from "@/lib/hostedai";
+import { getInstanceCredentials, getUnifiedInstanceDetail } from "@/lib/hostedai";
+import { resolveOperatingContext } from "@/lib/auth/account-resolver";
 import { spawn } from "child_process";
 import { validateSSHParams } from "@/lib/ssh-validation";
 import { prisma } from "@/lib/prisma";
@@ -110,11 +111,26 @@ export async function GET(
       return NextResponse.json({ error: "Invalid or expired token" }, { status: 401 });
     }
 
+    const ctx = await resolveOperatingContext({
+      email: payload.email,
+      jwtCustomerId: payload.customerId,
+      activeAccountId: payload.activeAccountId,
+    });
+    if (!ctx) {
+      return NextResponse.json({ error: "Account not found" }, { status: 404 });
+    }
+
+    // A pod is stamped with the payer for an hourly deploy and with the operating
+    // account otherwise, so those two ids are the whole set this context can own.
+    const ownerIds = [ctx.accountId, ctx.hourlyCustomerId].filter(
+      (id): id is string => !!id,
+    );
+
     // === DB MODE: Read metrics from GpuHardwareMetrics table (no SSH) ===
     if (process.env.GPU_METRICS_SOURCE === "db") {
-      // Verify subscription belongs to this customer
+      // Verify subscription belongs to this context
       const podMeta = await prisma.podMetadata.findFirst({
-        where: { subscriptionId, stripeCustomerId: payload.customerId },
+        where: { subscriptionId, stripeCustomerId: { in: ownerIds } },
       });
       if (!podMeta) {
         return NextResponse.json({ error: "Instance not found" }, { status: 404 });
@@ -149,6 +165,19 @@ export async function GET(
         metrics,
         timestamp: latest?.timestamp.toISOString() || new Date().toISOString(),
       });
+    }
+
+    // getInstanceCredentials does no scoping: settle ownership here, or any caller naming
+    // another team's id gets that team's live telemetry over SSH. 404 so existence stays hidden.
+    let owned = false;
+    try {
+      const detail = await getUnifiedInstanceDetail(subscriptionId);
+      owned = !!detail.team?.id && ctx.allTeamIds.includes(detail.team.id);
+    } catch (err) {
+      console.error(`[system-metrics] getUnifiedInstanceDetail failed for ${subscriptionId}:`, err);
+    }
+    if (!owned) {
+      return NextResponse.json({ error: "Instance not found" }, { status: 404 });
     }
 
     // HAI 2.2: fetch SSH credentials directly from the unified instance API

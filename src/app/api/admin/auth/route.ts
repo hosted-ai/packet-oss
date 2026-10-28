@@ -384,7 +384,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({ authenticated: true, email: session.email });
 }
 
-export async function DELETE(request: NextRequest) {
+export async function DELETE(_request: NextRequest) {
   // Logout - clear session cookie
   const response = NextResponse.json({ success: true });
   response.cookies.delete("admin_session");

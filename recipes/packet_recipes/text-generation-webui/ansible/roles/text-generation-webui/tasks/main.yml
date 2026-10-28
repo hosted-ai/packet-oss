@@ -34,14 +34,14 @@
     cmd: python3 -m venv /opt/text-generation-webui/venv
     creates: /opt/text-generation-webui/venv/bin/python
 
-- name: Install PyTorch (nightly, CUDA 12.8)
+- name: Install PyTorch (pinned, CUDA 12.8)
   ansible.builtin.pip:
     name:
-      - torch
-      - torchvision
-      - torchaudio
+      - torch==2.11.0+cu128
+      - torchvision==0.26.0+cu128
+      - torchaudio==2.11.0+cu128
     virtualenv: /opt/text-generation-webui/venv
-    extra_args: "--index-url https://download.pytorch.org/whl/nightly/cu128"
+    extra_args: "--index-url https://download.pytorch.org/whl/cu128"
   retries: 3
   delay: 10
 

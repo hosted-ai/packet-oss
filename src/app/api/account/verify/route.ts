@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
-import { verifyCustomerToken, type CustomerTokenPayload } from "@/lib/customer-auth";
+import { verifyCustomerToken, generateCustomerToken, type CustomerTokenPayload } from "@/lib/customer-auth";
+import { checkLoginLinkLive, consumeLoginLink } from "@/lib/auth/login-link";
+import { trackSignUp } from "@/lib/analytics/ga4";
+import { posthogTrackSignUp } from "@/lib/analytics/posthog";
 import {
   createCustomerSession,
   buildSessionCookie,
   isEphemeralToken,
   SESSION_COOKIE_NAME,
 } from "@/lib/auth/customer-session";
+import { ACCESS_TOKEN_HOURS } from "@/lib/auth/session-core";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
-import { getWalletTransactions, formatCents, formatCentsForUser } from "@/lib/wallet";
+import { getBareMetalAccessMode, resolveBareMetalEnabled } from "@/lib/baremetal/access";
+import { getWalletTransactions, formatCents, formatCentsForUser, formatCentsSigned } from "@/lib/wallet";
+import { heldByInvoiceGeneration } from "@/lib/invoice";
+import { getAutoRefillAmountCents, getAutoRefillThresholdCents } from "@/lib/pricing";
 import { createOneTimeLogin, ensureRoles } from "@/lib/hostedai";
 import { getTwoFactorStatus } from "@/lib/two-factor";
 import { logCustomerLogin } from "@/lib/admin-activity";
@@ -55,6 +62,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // PA-380: a single-use sign-in / invitation link is dead once it's expired,
+    // already used, or superseded by a newer link. Reject it early — UNLESS the
+    // browser already holds a live session cookie, in which case that cookie is
+    // the authority and this token is just a stale bearer being re-verified on
+    // load (the session-creation branch below is skipped, so the link is never
+    // consumed twice). Access tokens carry no `loginLink` claim and skip this.
+    const hasSessionCookie = !!request.cookies.get(SESSION_COOKIE_NAME)?.value;
+    if (payload.loginLink && payload.jti && !hasSessionCookie) {
+      const live = await checkLoginLinkLive(payload.jti);
+      if (!live) {
+        return NextResponse.json(
+          { error: "This sign-in link has expired or already been used. Please request a new one." },
+          { status: 401 }
+        );
+      }
+    }
+
     const stripe = await getStripe();
 
     // PA-175: unified resolution. Honors JWT.activeAccountId for the multi-team
@@ -74,9 +98,9 @@ export async function POST(request: NextRequest) {
 
     const customer = ctx.customer;
     const billingType = customer.metadata?.billing_type;
-    const teamId = customer.metadata?.hostedai_team_id;
-    const monthlyCustomerIds = ctx.monthlyCustomerIds;
-    console.log(`[Verify] Resolved ${payload.email}: account=${customer.id}, teams=[${ctx.allTeamIds.join(",")}], monthly=[${monthlyCustomerIds.join(",")}]`);
+    const teamId = ctx.teamId;
+    const subscriptionLookupIds = ctx.monthlyCustomerIds;
+    console.log(`[Verify] Resolved ${payload.email}: account=${customer.id}, teams=[${ctx.allTeamIds.join(",")}], subs=[${subscriptionLookupIds.join(",")}]`);
 
     // Block suspended customers (fraud lockout). Checks all linked customer
     // IDs since one suspended account locks the whole email out.
@@ -100,16 +124,19 @@ export async function POST(request: NextRequest) {
       type: "credit" | "debit";
     }> = [];
 
+    // getWalletBalance's arithmetic on the customer we already hold, so the sidebar
+    // cannot disagree with the deploy gate: positive = credit, held credit included.
+    const availableBalance =
+      -(customer.balance || 0) + (await heldByInvoiceGeneration(stripe, customer.id));
+
     // ── Parallel fetch: wallet, transactions, subscriptions, payments, invoices ──
-    // Use the already-retrieved customer for wallet balance (avoid duplicate Stripe call)
-    const availableBalance = -(customer.balance || 0); // Flip sign: positive = credit
 
     const [walletTxns, subsFromPrimary, payments, invoices, ...monthlySubResults] = await Promise.all([
       getWalletTransactions(customer.id, 100),
       stripe.subscriptions.list({ customer: customer.id, status: "active", limit: 10 }),
       stripe.paymentIntents.list({ customer: customer.id, limit: 50 }),
       stripe.invoices.list({ customer: customer.id, limit: 50, status: "paid" }),
-      ...monthlyCustomerIds.map((monthlyId) =>
+      ...subscriptionLookupIds.map((monthlyId) =>
         stripe.subscriptions.list({ customer: monthlyId, status: "active", limit: 10 }).catch((err) => {
           console.error(`Failed to fetch subscriptions from linked monthly customer ${monthlyId}:`, err);
           return { data: [] as Stripe.Subscription[] };
@@ -119,10 +146,14 @@ export async function POST(request: NextRequest) {
 
     // Build wallet info from already-retrieved customer
     {
-      const displayBalance = Math.max(0, availableBalance);
+      // PA-339: surface the true signed balance. Previously this clamped to
+      // Math.max(0, ...) / formatCentsForUser(), so a customer in arrears saw
+      // $0.00 with no indication of debt, and top-ups that only reduced the
+      // deficit still showed $0.00. Send the real negative value; the dashboard
+      // renders the arrears state.
       wallet = {
-        balance: displayBalance,
-        balanceFormatted: formatCentsForUser(availableBalance),
+        balance: availableBalance,
+        balanceFormatted: formatCentsSigned(availableBalance),
         currency: "usd",
       };
 
@@ -194,6 +225,8 @@ export async function POST(request: NextRequest) {
           })
           .filter((id): id is string => !!id);
 
+        // Not gated on `active`: the customer's own subscription price/product
+        // is the entitlement, and a withdrawn row must still resolve its name.
         const matchingProducts = priceIds.length > 0 || productIds.length > 0
           ? await prisma.gpuProduct.findMany({
               where: {
@@ -202,7 +235,6 @@ export async function POST(request: NextRequest) {
                   { stripeProductId: { in: productIds } },
                 ],
                 billingType: "monthly",
-                active: true,
               },
             })
           : [];
@@ -392,19 +424,57 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // GA4 + PostHog — detect first-ever login for the sign_up_complete event.
+    // We read firstLoginAt BEFORE recordFirstLogin writes it so the comparison
+    // is correct.  Only fires for account owners on non-impersonated sessions.
+    // Known V1 limitation: users with 2FA have recordFirstLogin called on the
+    // pre-TOTP verify call, so firstLoginAt is already set by the post-TOTP
+    // call and isNewSignup will be false for them.
+    let isNewSignup = false;
+    if (isOwner && !payload.impersonator) {
+      const lc = await prisma.customerLifecycle.findUnique({
+        where: { stripeCustomerId: customer.id },
+        select: { firstLoginAt: true },
+      }).catch(() => null);
+
+      if (lc !== null) {
+        // Lifecycle record exists — new signup if never logged in before
+        isNewSignup = !lc.firstLoginAt;
+      } else {
+        // No lifecycle record — fallback: treat as new signup if the Stripe
+        // customer was created within the last 24 hours (lifecycle creation
+        // may have failed silently during signup).
+        const ageMs = Date.now() - (customer.created * 1000);
+        isNewSignup = ageMs < 24 * 60 * 60 * 1000;
+      }
+    }
+
+    // Server-side analytics: fire sign_up_complete on the first-ever login.
+    // Client-side gtag/posthog-js also fires, but server-side is the reliable path
+    // (no dependency on browser PostHog initialization timing).
+    if (isNewSignup) {
+      trackSignUp(customer.id).catch(() => {});
+      posthogTrackSignUp(customer.id, payload.email).catch(() => {});
+    }
+
     // Track lifecycle milestone (first login)
     recordFirstLogin(customer.id).catch(() => {});
 
-    // Check if bare metal is enabled for this customer + load teamName
+    // Check if bare metal is enabled for this customer + load teamName.
+    // The effective entitlement layers the global BAREMETAL_ACCESS_MODE
+    // (off/allowlist/on) over this per-account flag.
     const customerSettings = await prisma.customerSettings.findUnique({
       where: { stripeCustomerId: customer.id },
       select: { bareMetalEnabled: true, teamName: true },
     });
+    const bareMetalEnabled = resolveBareMetalEnabled(
+      await getBareMetalAccessMode(),
+      customerSettings?.bareMetalEnabled,
+    );
 
     // PA-175 PR 3: surface the user's Packet role + can() map. The
     // membership was already resolved above (otlMembership) so HAI's
     // /create-otl gets the correct role; reuse that result here.
-    const membership = otlMembership;
     const role: PacketRole | null = otlPacketRole;
     const membershipIsOwner = otlMembershipIsOwner;
     const canMap = Object.fromEntries(
@@ -429,11 +499,28 @@ export async function POST(request: NextRequest) {
     // still pending its TOTP step (the magic-link token before verification).
     const twoFactorSatisfied = !twoFactorStatus.enabled || payload.twoFactorVerified === true;
     let sessionRefreshToken: string | null = null;
+    let sessionAccessToken: string | null = null;
     if (
       !isEphemeralToken(payload) &&
       twoFactorSatisfied &&
       !request.cookies.get(SESSION_COOKIE_NAME)?.value
     ) {
+      // PA-380: single-use — this is the "successful authentication" moment. Burn
+      // the sign-in link atomically BEFORE minting the session; if it was used,
+      // superseded, or expired since the early check (or in a concurrent
+      // request), refuse rather than mint a session from a dead link. A rare
+      // transient failure burns the link (the user requests a fresh one), which
+      // is the safe trade for a security fix. Access tokens carry no jti/loginLink
+      // and skip this entirely.
+      if (payload.loginLink && payload.jti) {
+        const consumed = await consumeLoginLink(payload.jti);
+        if (!consumed) {
+          return NextResponse.json(
+            { error: "This sign-in link has expired or already been used. Please request a new one." },
+            { status: 401 }
+          );
+        }
+      }
       try {
         sessionRefreshToken = await createCustomerSession({
           customerId: payload.customerId,
@@ -446,7 +533,28 @@ export async function POST(request: NextRequest) {
       } catch (err) {
         console.error("[Verify] Failed to create customer session (non-fatal):", err);
       }
+      // PA-380: hand the client a normal 12h access token so the dashboard runs
+      // on it instead of the short-lived sign-in link — otherwise SessionGuard
+      // would force a full-page reload the moment the 15-min link expired.
+      if (sessionRefreshToken) {
+        sessionAccessToken = generateCustomerToken(payload.email, payload.customerId, {
+          userId: payload.userId,
+          activeAccountId: payload.activeAccountId,
+          expiresInHours: ACCESS_TOKEN_HOURS,
+        });
+      }
     }
+
+    // PA-195: per-customer auto-refill settings (opt-in), read from Stripe metadata.
+    // Gated with the rest of billing below. Falls back to the global defaults as the
+    // UI's suggested starting values when the customer hasn't set their own yet.
+    const arMeta = customer.metadata || {};
+    const autoRefill = {
+      enabled: arMeta.auto_refill_enabled === "true",
+      amountCents: parseInt(arMeta.auto_refill_amount_cents ?? "", 10) || getAutoRefillAmountCents(),
+      thresholdCents: parseInt(arMeta.auto_refill_threshold_cents ?? "", 10) || getAutoRefillThresholdCents(),
+      hasPaymentMethod: !!customer.invoice_settings?.default_payment_method,
+    };
 
     const res = NextResponse.json({
       customer: {
@@ -458,6 +566,8 @@ export async function POST(request: NextRequest) {
         created: customer.created,
         teamName: customerSettings?.teamName ?? null,
       },
+      // PA-195: billing config — only for users who can see billing.
+      autoRefill: canMap["billing.view"] ? autoRefill : null,
       // PA-271: redact billing data to []/null for users without billing.view.
       // The verify response is what the whole dashboard reads from, so gating
       // it here (server-side) is the real boundary — a Read-only/Team Member
@@ -480,7 +590,7 @@ export async function POST(request: NextRequest) {
       can: canMap,
       userEmail: payload.email, // The logged-in user's email (may differ from customer email for team members)
       userDisplayName, // PA-224: logged-in user's display name (User.displayName), used for sidebar greeting
-      bareMetalEnabled: customerSettings?.bareMetalEnabled ?? false,
+      bareMetalEnabled,
       twoFactor: twoFactorStatus, // 2FA status for the user
       skipTwoFactor, // Admin bypass flag
       impersonator: payload.impersonator ?? null, // admin "Login as" marker → impersonation banner
@@ -490,6 +600,12 @@ export async function POST(request: NextRequest) {
       // PA-267: signals the client a 15-day cookie session was set, so it can
       // safely strip the one-time token from the URL (kills token-in-URL leak).
       sessionPersisted: !!sessionRefreshToken,
+      // PA-380: a fresh 12h access token to use as the live Bearer, so the client
+      // stops relying on the short-lived single-use sign-in link. Null unless a
+      // session was just persisted (repeat loads keep their existing token).
+      accessToken: sessionAccessToken,
+      // GA4: triggers sign_up_complete on the client when true (first-ever login)
+      isNewSignup,
       tosConsent: {
         required: !tosResult.accepted,
         currentVersion: tosResult.version,

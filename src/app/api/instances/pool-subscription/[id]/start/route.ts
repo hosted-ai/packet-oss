@@ -18,7 +18,7 @@ export async function POST(
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, allTeamIds } = auth;
+    const { allTeamIds, accountId } = auth;
 
     if (!allTeamIds.length) {
       return NextResponse.json({ error: "No team associated with this account" }, { status: 400 });
@@ -46,7 +46,7 @@ export async function POST(
     // Clear installed apps
     try {
       await prisma.installedApp.deleteMany({
-        where: { subscriptionId: id, stripeCustomerId: payload.customerId },
+        where: { subscriptionId: id, stripeCustomerId: accountId },
       });
     } catch { /* ignore */ }
 
@@ -59,7 +59,7 @@ export async function POST(
       });
       displayNameForLog = meta?.displayName || undefined;
     } catch { /* ignore */ }
-    await logGPUStarted(payload.customerId, "GPU Instance", displayNameForLog, id);
+    await logGPUStarted(accountId, "GPU Instance", displayNameForLog, id);
 
     // Schedule SSH key injection after boot
     setTimeout(async () => {

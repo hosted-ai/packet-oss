@@ -1,138 +1,47 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
-import type { PoolSubscription } from "./types";
 
-interface MetricDataPoint {
-  time: string;
-  timestamp: number;
-  tflops: number;  // Delta TFLOPs (rate per interval)
-  vram: number;
+// One bucket of HAI's GPU telemetry (from /api/instances/gpu-metrics, which
+// proxies HAI's Prometheus-backed team_metrics). tflops + VRAM only.
+interface GpuMetricsPoint {
+  unix_timestamp: number;
+  formatted_time: string;
+  tflops: number | null;
+  vram_mib: number | null;
 }
 
+// null for anything that is not a real reading, so a gap stays a gap. Recharts
+// breaks the line on null; a 0 would claim the GPU measurably did nothing.
+const reading = (v: number | null | undefined) =>
+  typeof v === "number" && Number.isFinite(v) ? Math.max(0, v) : null;
+
 interface GPUUsageChartProps {
-  token: string;
-  subscriptions: PoolSubscription[];
-  podMetadata: Record<string, { displayName: string | null; notes: string | null }>;
+  /** Time series from /api/instances/gpu-metrics (already team-aggregated).
+   *  This is account-wide overall usage, shown whether or not a GPU is currently
+   *  running, so there is no "no active GPUs" gate. */
+  data: GpuMetricsPoint[];
   metricType?: "tflops" | "vram" | "both";
 }
 
-export function GPUUsageChart({
-  token,
-  subscriptions,
-  podMetadata,
-  metricType = "both"
-}: GPUUsageChartProps) {
-  const [history, setHistory] = useState<MetricDataPoint[]>([]);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const initializedRef = useRef<boolean>(false);
-  const lastAccumulatedRef = useRef<{ tflops: number; vram: number; timestamp: number } | null>(null);
-
-  // Fetch fresh metrics from API and calculate delta
-  useEffect(() => {
-    const fetchAndUpdateMetrics = async () => {
-      try {
-        const response = await fetch("/api/instances?include_metrics=true", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!response.ok) return;
-
-        const data = await response.json();
-        const subs = data.poolSubscriptions || [];
-
-        // Calculate current accumulated totals
-        let currentTflops = 0;
-        let currentVram = 0;
-        subs.forEach((sub: PoolSubscription) => {
-          if (sub.status === "subscribed" || sub.status === "active" || sub.status === "running") {
-            currentTflops += sub.metrics?.tflops_usage || 0;
-            currentVram += sub.metrics?.vram_usage || 0;
-          }
-        });
-
-        const now = new Date();
-        const nowTimestamp = now.getTime();
-
-        // If we have a previous reading, calculate delta
-        if (lastAccumulatedRef.current) {
-          const deltaTime = (nowTimestamp - lastAccumulatedRef.current.timestamp) / 1000; // seconds
-          const deltaTflops = currentTflops - lastAccumulatedRef.current.tflops;
-
-          // Only add point if there's meaningful time difference (> 10 seconds)
-          if (deltaTime > 10) {
-            // Calculate rate: TFLOPs per minute (scale for readability)
-            const tflopsPerMinute = deltaTime > 0 ? (deltaTflops / deltaTime) * 60 : 0;
-
-            const newPoint: MetricDataPoint = {
-              time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-              timestamp: nowTimestamp,
-              tflops: Math.max(0, tflopsPerMinute), // Ensure non-negative
-              vram: currentVram / (1024 * 1024), // Convert KB to GB (API returns KB)
-            };
-
-            setHistory((prev) => {
-              // Keep last 30 data points
-              const updated = [...prev, newPoint].slice(-30);
-              return updated;
-            });
-            setLastUpdate(now);
-          }
-        }
-
-        // Update last reading
-        lastAccumulatedRef.current = {
-          tflops: currentTflops,
-          vram: currentVram,
-          timestamp: nowTimestamp,
-        };
-      } catch (error) {
-        console.error("Failed to fetch GPU metrics:", error);
-      }
-    };
-
-    // Initial fetch
-    if (!initializedRef.current) {
-      initializedRef.current = true;
-      fetchAndUpdateMetrics();
-    }
-
-    // Poll every 30 seconds for more responsive updates
-    const interval = setInterval(fetchAndUpdateMetrics, 30 * 1000);
-
-    return () => clearInterval(interval);
-  }, [token]);
-
-  // Map subscription IDs to names
-  const getGpuName = (key: string) => {
-    const subId = key.replace("gpu_", "");
-    if (podMetadata[subId]?.displayName) {
-      return podMetadata[subId].displayName;
-    }
-    const sub = subscriptions.find((s) => String(s.id) === subId);
-    return sub?.pool_name || `GPU ${subId}`;
-  };
-
-  const activeGpus = subscriptions.filter(
-    (s) => s.status === "subscribed" || s.status === "active" || s.status === "running"
-  );
-
-  if (activeGpus.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center text-zinc-400 text-sm">
-        No active GPUs
-      </div>
-    );
-  }
-
-  if (history.length < 2) {
+export function GPUUsageChart({ data, metricType = "both" }: GPUUsageChartProps) {
+  if (!data || data.length < 2) {
     return (
       <div className="h-full flex flex-col items-center justify-center text-zinc-400 text-sm">
         <div>Collecting metrics...</div>
-        <div className="text-xs mt-1">Updates every 2 minutes</div>
+        <div className="text-xs mt-1">Updates every minute</div>
       </div>
     );
   }
+
+  // A bucket with no reading stays null so the line breaks there. Math.max(0, null)
+  // is 0, which rendered "no telemetry" as a confident zero across a whole week.
+  const history = data.map((p) => ({
+    time: p.formatted_time,
+    timestamp: p.unix_timestamp * 1000,
+    tflops: reading(p.tflops),
+    vram: reading(p.vram_mib === null || p.vram_mib === undefined ? null : p.vram_mib / 1024),
+  }));
 
   const showTflops = metricType === "tflops" || metricType === "both";
   const showVram = metricType === "vram" || metricType === "both";
@@ -195,15 +104,17 @@ export function GPUUsageChart({
                   padding: "8px 12px",
                 }}
                 formatter={(value, name) => {
-                  const numValue = typeof value === "number" ? value : 0;
-                  if (name === "tflops") return [`${numValue.toFixed(2)} TFLOPs/min`, "Compute Rate"];
-                  return [`${numValue.toFixed(2)} GB`, "VRAM"];
+                  const label = name === "tflops" ? "Compute" : "VRAM";
+                  if (typeof value !== "number" || !Number.isFinite(value)) {
+                    return ["No data", label];
+                  }
+                  return [name === "tflops" ? `${value.toFixed(2)} TFLOPs` : `${value.toFixed(2)} GB`, label];
                 }}
               />
             )}
             {!isSingleMetric && (
               <Legend
-                formatter={(value) => value === "tflops" ? "TFLOPs/min" : "VRAM (GB)"}
+                formatter={(value) => value === "tflops" ? "TFLOPs" : "VRAM (GB)"}
                 wrapperStyle={{ fontSize: "10px", paddingTop: "4px" }}
               />
             )}
@@ -230,11 +141,6 @@ export function GPUUsageChart({
           </AreaChart>
         </ResponsiveContainer>
       </div>
-      {!isSingleMetric && lastUpdate && (
-        <div className="text-[10px] text-zinc-500 text-right mt-1">
-          Updated {lastUpdate.toLocaleTimeString()}
-        </div>
-      )}
     </div>
   );
 }

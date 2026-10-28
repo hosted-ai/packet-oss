@@ -3,7 +3,7 @@ import { getStripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { getSetting } from "@/lib/settings";
 import { rateLimit, getClientIp } from "@/lib/ratelimit";
-import { generateCustomerToken } from "@/lib/customer-auth";
+import { createLoginLink } from "@/lib/customer-auth";
 import { generateApiKey } from "@/lib/api";
 import { sendEmail, escapeHtml } from "@/lib/email";
 import { loadTemplate } from "@/lib/email/template-loader";
@@ -219,7 +219,16 @@ export async function POST(request: NextRequest) {
       limit: 1,
     });
 
-    if (existingCustomers.data.length > 0) {
+    // Stripe not knowing an address does not make it new: an account minted while
+    // Stripe was unconfigured has a local id and no Stripe customer to find.
+    const mirroredAccount =
+      existingCustomers.data.length === 0
+        ? await prisma.customerCache.findFirst({
+            where: { email: customerEmail, isDeleted: false },
+          })
+        : null;
+
+    if (existingCustomers.data.length > 0 || mirroredAccount) {
       // Customer already exists — send them a login link instead of creating
       // a duplicate account. The response is deliberately identical to the
       // new-account path so we don't leak account existence.
@@ -382,7 +391,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate dashboard URL with token (carry deep-link intent in the signed claim)
-    const token = generateCustomerToken(customerEmail, stripeCustomer.id, {
+    const token = await createLoginLink({
+      email: customerEmail,
+      customerId: stripeCustomer.id,
       next: typeof next === "string" ? next : undefined,
     });
     const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${token}${inviteSuffix}`;

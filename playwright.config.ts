@@ -12,7 +12,6 @@ import { defineConfig, devices } from "@playwright/test";
  * - TEST_AUTH_TOKEN: JWT token for authentication
  */
 
-const testToken = process.env.TEST_AUTH_TOKEN;
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -65,6 +64,10 @@ export default defineConfig({
   timeout: 60000,
   expect: {
     timeout: 10000,
+    // Visual regression (PA-264): 1% diff threshold for toHaveScreenshot().
+    // No baseline snapshots exist yet — the first `toHaveScreenshot()` call
+    // against staging creates them; review before committing.
+    toHaveScreenshot: { maxDiffPixelRatio: 0.01 },
   },
 
   // Run local dev server before tests (optional)

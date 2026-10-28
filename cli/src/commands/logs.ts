@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
-import { apiRequest, type InstanceDetail } from "../api.js";
+import { apiRequest, type Instance, type InstanceDetail } from "../api.js";
 import { getApiKey } from "../config.js";
 
 export const logsCommand = new Command("logs")
@@ -17,7 +17,7 @@ export const logsCommand = new Command("logs")
     const fetchAndDisplay = async (): Promise<boolean> => {
       try {
         const data = await apiRequest<InstanceDetail>(`/instances/${id}`);
-        const inst = data.instance;
+        const inst: Instance = data.instance ?? {};
 
         // Clear screen if following
         if (options.follow) {
@@ -75,7 +75,7 @@ export const logsCommand = new Command("logs")
     }
   });
 
-function formatStatus(status: string): string {
+function formatStatus(status?: string): string {
   const s = (status || "").toLowerCase();
   if (s === "running" || s === "active") {
     return chalk.green("running");

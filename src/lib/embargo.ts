@@ -16,23 +16,21 @@
 
 import { getSetting } from "./settings";
 import { prisma } from "./prisma";
+import { DEFAULT_EMBARGOED_COUNTRIES } from "./countries";
+
+// Single source of truth lives in countries.ts (client-safe); re-export here for
+// server callers (platform-settings, etc.). Seeds the DB on first enable; not
+// used at runtime when DB is available (DB is the source of truth).
+export { DEFAULT_EMBARGOED_COUNTRIES };
 
 /**
- * Default embargoed country codes. Seeds the DB on first enable.
- * Not used at runtime when DB is available — DB is single source of truth.
- *
- * Comprehensive sanctions (primary): CU, IR, KP, SY
- * Targeted sector sanctions: RU, BY, MM
+ * The currently-effective embargoed country codes — the DB-configured set, or an
+ * empty array when embargo is disabled. Lets client UIs (e.g. the billing country
+ * dropdown) eliminate the same jurisdictions the server-side gate blocks.
  */
-export const DEFAULT_EMBARGOED_COUNTRIES = [
-  "CU", // Cuba          — OFAC (US)
-  "IR", // Iran          — OFAC (US), UN, EU
-  "KP", // North Korea   — OFAC (US), UN, EU
-  "SY", // Syria         — OFAC (US), EU
-  "RU", // Russia        — OFAC (US), EU, UK (targeted sectors)
-  "BY", // Belarus       — EU, UK (targeted)
-  "MM", // Myanmar/Burma — OFAC (US) (targeted)
-];
+export async function getEmbargoedCountryCodes(): Promise<string[]> {
+  return Array.from(await getEmbargoedCountries());
+}
 
 /**
  * Returns the two-letter ISO country code from the Cloudflare CF-IPCountry

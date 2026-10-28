@@ -5,7 +5,6 @@ import {
   getGPUSpec,
   checkVRAMCompatibility,
   getCompatibilityMessage,
-  type GPUSpec,
 } from '@/lib/gpu-specs';
 
 describe('GPU Specs Module', () => {

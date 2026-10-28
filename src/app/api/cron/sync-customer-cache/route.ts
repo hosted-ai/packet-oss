@@ -15,12 +15,17 @@ export async function POST(request: NextRequest) {
   try {
     console.log("[Customer Cache Sync] Starting full sync...");
     const result = await fullSyncCustomerCache();
-    console.log(`[Customer Cache Sync] Done: ${result.synced} synced, ${result.deleted} marked deleted`);
+    if (result.refused) {
+      console.error(`[Customer Cache Sync] Refused: ${result.synced} customers listed is too few to sweep against`);
+    } else {
+      console.log(`[Customer Cache Sync] Done: ${result.synced} synced, ${result.deleted} marked deleted`);
+    }
 
     return NextResponse.json({
       success: true,
       synced: result.synced,
       deleted: result.deleted,
+      refused: result.refused,
     });
   } catch (error) {
     console.error("[Customer Cache Sync] Failed:", error);

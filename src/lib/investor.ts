@@ -8,6 +8,7 @@ export {
   updateInvestorLogin,
   getInvestorAssignedNodes,
   setInvestorAssignedNodes,
+  parseAssignedRegionIds,
   getInvestorRevenueShare,
   setInvestorRevenueShare,
   generateInvestorToken,

@@ -24,7 +24,6 @@ function SubscribedContent() {
     let stopped = false;
     let attempts = 0;
     const maxAttempts = 15; // 30s @ 2s
-    let intervalId: ReturnType<typeof setInterval>;
 
     const poll = async () => {
       if (stopped) return;
@@ -56,8 +55,8 @@ function SubscribedContent() {
       }
     };
 
+    const intervalId = setInterval(poll, 2000);
     poll();
-    intervalId = setInterval(poll, 2000);
 
     return () => {
       stopped = true;

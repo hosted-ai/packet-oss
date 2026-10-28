@@ -5,14 +5,13 @@ import { resolveOperatingContext } from "@/lib/auth/account-resolver";
 import {
   searchModels,
   searchSpaces,
-  searchAll,
   HFSearchResult,
   ModelSearchFilters,
   TASK_FILTERS,
   LIBRARY_FILTERS,
   PARAM_SIZE_RANGES,
 } from "@/lib/huggingface-api";
-import { searchCatalog, HFCatalogItem } from "@/lib/huggingface-catalog";
+import { searchCatalog } from "@/lib/huggingface-catalog";
 import { getCompatibilityMessage } from "@/lib/gpu-specs";
 import { getAllPools } from "@/lib/hostedai";
 

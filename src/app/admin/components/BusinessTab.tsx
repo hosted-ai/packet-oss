@@ -77,6 +77,34 @@ interface BusinessMetrics {
     byBalance: CustomerInfo[];
     bySpending: CustomerInfo[];
   };
+  marketplace?: {
+    gmv: {
+      totalCents: number;
+      usageCents: number;
+      stoppedCents: number;
+      billedGpuHours: number;
+    };
+    netRevenue: { cents: number; takeRate: number };
+    utilization: {
+      windowDays: number;
+      headline: UtilizationBlock | null;
+      dedicated: UtilizationBlock | null;
+      dynamicLogical: UtilizationBlock | null;
+      vramAvgPct: number | null;
+      bareMetal: {
+        rentedServerHours: number;
+        onlineServers: number;
+        capacityServerHours: number;
+        pct: number;
+      } | null;
+    };
+  } | null;
+}
+
+interface UtilizationBlock {
+  billedGpuHours: number;
+  capacityGpuHours: number;
+  pct: number;
 }
 
 type DrillDownType = "revenue" | "customers" | "gpu" | "providers" | "marketing" | "topCustomers" | null;
@@ -101,7 +129,7 @@ export function BusinessTab() {
       } else {
         setError(data.error || "Failed to load metrics");
       }
-    } catch (err) {
+    } catch {
       setError("Failed to fetch business metrics");
     } finally {
       setLoading(false);
@@ -339,6 +367,92 @@ export function BusinessTab() {
           <p className="text-xs text-[#5b6476]">{metrics.marketing.referralConversions} converted</p>
         </div>
       </div>
+
+      {/* Marketplace KPIs — GMV, Net Revenue (modeled take), per-SKU utilization */}
+      {metrics.marketplace && (
+        <div className="bg-white rounded-xl border border-[var(--line)] p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-[var(--ink)]">Marketplace</h3>
+            <span className="text-xs text-[var(--muted)]">
+              utilization over {metrics.marketplace.utilization.windowDays}d · capacity = current fleet
+            </span>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+              <span className="text-sm text-[var(--muted)]">GMV</span>
+              <p className="text-xl font-bold text-[var(--ink)] mt-1">
+                {formatCurrency(metrics.marketplace.gmv.totalCents / 100)}
+              </p>
+              <p className="text-xs text-[var(--muted)]">
+                {formatNumber(metrics.marketplace.gmv.billedGpuHours)} GPU-hrs billed
+              </p>
+            </div>
+            <div>
+              <span className="text-sm text-[var(--muted)]">Net Revenue</span>
+              <p className="text-xl font-bold text-teal-600 mt-1">
+                {formatCurrency(metrics.marketplace.netRevenue.cents / 100)}
+              </p>
+              <p className="text-xs text-[var(--muted)]">
+                {Math.round(metrics.marketplace.netRevenue.takeRate * 100)}% take (modeled)
+              </p>
+            </div>
+            <div>
+              <span className="text-sm text-[var(--muted)]">GPU Utilization</span>
+              <p className="text-xl font-bold text-[var(--ink)] mt-1">
+                {metrics.marketplace.utilization.headline
+                  ? `${metrics.marketplace.utilization.headline.pct.toFixed(1)}%`
+                  : "—"}
+              </p>
+              <p className="text-xs text-[var(--muted)]">
+                {metrics.marketplace.utilization.headline
+                  ? `${formatNumber(metrics.marketplace.utilization.headline.billedGpuHours)} / ${formatNumber(metrics.marketplace.utilization.headline.capacityGpuHours)} GPU-hrs`
+                  : "no capacity data"}
+                {metrics.marketplace.utilization.vramAvgPct !== null &&
+                  ` · VRAM avg ${metrics.marketplace.utilization.vramAvgPct.toFixed(0)}%`}
+              </p>
+            </div>
+            <div>
+              <span className="text-sm text-[var(--muted)]">Bare Metal Utilization</span>
+              <p className="text-xl font-bold text-[var(--ink)] mt-1">
+                {metrics.marketplace.utilization.bareMetal
+                  ? `${metrics.marketplace.utilization.bareMetal.pct.toFixed(1)}%`
+                  : "—"}
+              </p>
+              <p className="text-xs text-[var(--muted)]">
+                {metrics.marketplace.utilization.bareMetal
+                  ? `${formatNumber(metrics.marketplace.utilization.bareMetal.rentedServerHours)} srv-hrs · ${metrics.marketplace.utilization.bareMetal.onlineServers} online`
+                  : "node list unavailable"}
+              </p>
+            </div>
+            <div>
+              <span className="text-sm text-[var(--muted)]">Dedicated Utilization</span>
+              <p className="text-xl font-bold text-[var(--ink)] mt-1">
+                {metrics.marketplace.utilization.dedicated
+                  ? `${metrics.marketplace.utilization.dedicated.pct.toFixed(1)}%`
+                  : "—"}
+              </p>
+              <p className="text-xs text-[var(--muted)]">
+                {metrics.marketplace.utilization.dedicated
+                  ? `${formatNumber(metrics.marketplace.utilization.dedicated.billedGpuHours)} / ${formatNumber(metrics.marketplace.utilization.dedicated.capacityGpuHours)} GPU-hrs · 1:1 pools`
+                  : "no capacity data"}
+              </p>
+            </div>
+            <div>
+              <span className="text-sm text-[var(--muted)]">Dynamic Utilization</span>
+              <p className="text-xl font-bold text-[var(--ink)] mt-1">
+                {metrics.marketplace.utilization.dynamicLogical
+                  ? `${metrics.marketplace.utilization.dynamicLogical.pct.toFixed(1)}%`
+                  : "—"}
+              </p>
+              <p className="text-xs text-[var(--muted)]">
+                {metrics.marketplace.utilization.dynamicLogical
+                  ? `${formatNumber(metrics.marketplace.utilization.dynamicLogical.billedGpuHours)} / ${formatNumber(metrics.marketplace.utilization.dynamicLogical.capacityGpuHours)} slot-hrs · overcommit pools`
+                  : "no overcommit pools"}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Customer Breakdown */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

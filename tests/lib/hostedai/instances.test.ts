@@ -19,6 +19,9 @@ import {
   getImagePolicies,
   getGPUaaSImages,
   getStorageBlocks,
+  getUnifiedInstances,
+  UnifiedInstancesUnavailableError,
+  createScenario,
 } from '@/lib/hostedai/instances';
 import type {
   Instance,
@@ -38,6 +41,14 @@ vi.mock('@/lib/hostedai/client', () => ({
   hostedaiRequest: vi.fn(),
 }));
 
+// Mock the region-maintenance resolver (createInstance gates on it). Keep the
+// real RegionMaintenanceError so the thrown type is genuine.
+const { mockIsRegionInMaintenance } = vi.hoisted(() => ({ mockIsRegionInMaintenance: vi.fn() }));
+vi.mock('@/lib/maintenance/regions', async (orig) => {
+  const actual = (await orig()) as Record<string, unknown>;
+  return { ...actual, isRegionInMaintenance: mockIsRegionInMaintenance };
+});
+
 import { hostedaiRequest } from '@/lib/hostedai/client';
 
 const mockRequest = vi.mocked(hostedaiRequest);
@@ -45,6 +56,7 @@ const mockRequest = vi.mocked(hostedaiRequest);
 describe('Instance Management', () => {
   beforeEach(() => {
     mockRequest.mockReset();
+    mockIsRegionInMaintenance.mockResolvedValue({ inMaintenance: false, message: '' });
   });
 
   describe('getInstance', () => {
@@ -97,12 +109,51 @@ describe('Instance Management', () => {
 
       const result = await createInstance(params);
 
+      // createInstance defaults pod_opts.rootfs_enabled = true (Ariel rootfs
+      // persistence, on by default for every provision).
       expect(mockRequest).toHaveBeenCalledWith(
         'POST',
         '/service/i/create-instance',
-        params
+        { ...params, pod_opts: { rootfs_enabled: true } }
       );
       expect(result).toEqual(mockInstance);
+    });
+
+    it('defaults rootfs_enabled=true and merges into existing pod_opts', async () => {
+      mockRequest.mockResolvedValueOnce({ id: 'i-1', name: 'x', status: 'creating' });
+      await createInstance({
+        name: 'x', service_id: 's', instance_type_id: 't',
+        image_hash: 'h', root_storage_type_id: 'r', team_id: 'tm',
+        pod_opts: { pool_id: 21, vgpus: 1, shared_volumes: [] },
+      });
+      expect(mockRequest).toHaveBeenCalledWith('POST', '/service/i/create-instance',
+        expect.objectContaining({
+          pod_opts: { pool_id: 21, vgpus: 1, shared_volumes: [], rootfs_enabled: true },
+        }),
+      );
+    });
+
+    it('respects an explicit rootfs_enabled=false (override wins)', async () => {
+      mockRequest.mockResolvedValueOnce({ id: 'i-2', name: 'y', status: 'creating' });
+      await createInstance({
+        name: 'y', service_id: 's', instance_type_id: 't',
+        image_hash: 'h', root_storage_type_id: 'r', team_id: 'tm',
+        pod_opts: { vgpus: 1, rootfs_enabled: false },
+      });
+      expect(mockRequest).toHaveBeenCalledWith('POST', '/service/i/create-instance',
+        expect.objectContaining({ pod_opts: { vgpus: 1, rootfs_enabled: false } }),
+      );
+    });
+
+    it('blocks (throws) when the region is in maintenance — gate for snapshot/HF/v1 paths', async () => {
+      mockIsRegionInMaintenance.mockResolvedValueOnce({ inMaintenance: true, message: 'Ariel upgrade' });
+      await expect(
+        createInstance({
+          name: 'z', service_id: 's', instance_type_id: 't',
+          image_hash: 'h', root_storage_type_id: 'r', team_id: 'tm', region_id: 6,
+        }),
+      ).rejects.toThrow('Ariel upgrade');
+      expect(mockRequest).not.toHaveBeenCalled(); // never hits HAI
     });
 
     it('should handle validation errors', async () => {
@@ -316,6 +367,24 @@ describe('Instance Management', () => {
       expect(result).toEqual(mockScenarios);
     });
 
+    it('passes an extended timeout to scenario-compatible-services (PA-407)', async () => {
+      // HAI takes 12-19s to answer this endpoint for the B200 scenario — the
+      // default 15s GET timeout sat inside that band, so availability checks
+      // timed out and surfaced as "No GPUs available". The call must opt out
+      // of the default with an explicit longer timeout.
+      const { getScenarioCompatibleServices } = await import('@/lib/hostedai/instances');
+      mockRequest.mockResolvedValueOnce({ services: [], has_more_batches: false, next_offset: 0 });
+
+      await getScenarioCompatibleServices('scenario-b200', 'team-123');
+
+      expect(mockRequest).toHaveBeenCalledWith(
+        'GET',
+        '/service/i/scenario-compatible-services?scenario_id=scenario-b200&team_id=team-123&limit=50&offset=0',
+        undefined,
+        45_000
+      );
+    });
+
     it('should get instance types', async () => {
       const mockTypes: InstanceType[] = [
         {
@@ -447,6 +516,116 @@ describe('Instance Management', () => {
       const result = await getGPUaaSImages('team-123');
 
       expect(result).toEqual([]);
+    });
+  });
+
+  // HAI answers /instances/unified with a null "items" in two very different
+  // situations, and the pagination envelope is the only thing that separates
+  // them: a team with nothing running still carries total_items, an upstream
+  // hiccup does not. Coercing the hiccup to [] renders a false-empty dashboard
+  // and makes the deploy-flow stale-pod cleanup delete live pods' metadata
+  // (PA-422); throwing on the empty team turns an idle account into a 503.
+  // hostedai-user's ScenarioNameRegex — a name failing it is rejected outright,
+  // so the coercion belongs here, where every caller goes through.
+  describe('createScenario — HAI name rule', () => {
+    const HAI_SCENARIO_NAME = /^[A-Za-z0-9 _-]+$/;
+
+    it.each([
+      ['Packet GPU: Inference', 'Packet GPU- Inference'],
+      ['Packet GPU - A100 (80GB)', 'Packet GPU - A100 -80GB-'],
+      ['  Packet Apps  ', 'Packet Apps'],
+      ['Packet GPU - H100', 'Packet GPU - H100'],
+    ])('coerces %s before sending it', async (input, expected) => {
+      mockRequest.mockResolvedValue({ id: 'scn_1' });
+      await createScenario({ name: input, description: 'd' });
+      const sent = (mockRequest.mock.calls[0][2] as { name: string }).name;
+      expect(sent).toBe(expected);
+      expect(sent).toMatch(HAI_SCENARIO_NAME);
+    });
+  });
+
+  describe('getUnifiedInstances — null-items guard', () => {
+    it('returns the response when items is an array', async () => {
+      const payload = { items: [{ id: 'inst-1' }], total_items: 1 };
+      mockRequest.mockResolvedValueOnce(payload);
+
+      const result = await getUnifiedInstances('team-1');
+
+      expect(mockRequest).toHaveBeenCalledWith(
+        'GET',
+        '/instances/unified?page=0&per_page=100&team_id=team-1',
+        undefined,
+        60000
+      );
+      expect(result).toEqual(payload);
+    });
+
+    it('returns an empty result untouched (genuinely no instances)', async () => {
+      mockRequest.mockResolvedValueOnce({ items: [], total_items: 0 });
+
+      const result = await getUnifiedInstances('team-1');
+
+      expect(result.items).toEqual([]);
+    });
+
+    // PA-883 regression: this is the byte-for-byte body HAI returns for a team
+    // with no instances, and the shape the old guard misread as an outage.
+    it('reads the empty-team body as an empty list, not a failure', async () => {
+      mockRequest.mockResolvedValueOnce({
+        items: null,
+        status_counts: null,
+        page: 0,
+        per_page: 100,
+        total_items: 0,
+        total_pages: 0,
+      });
+
+      const result = await getUnifiedInstances('team-1');
+
+      expect(result.items).toEqual([]);
+      expect(result.total_items).toBe(0);
+    });
+
+    it('reads a missing items with a pagination envelope as an empty list', async () => {
+      mockRequest.mockResolvedValueOnce({ total_items: 0, total_pages: 0 });
+
+      await expect(getUnifiedInstances('team-1')).resolves.toMatchObject({ items: [] });
+    });
+
+    it('throws when items is null and there is no pagination envelope', async () => {
+      mockRequest.mockResolvedValueOnce({ items: null });
+
+      await expect(getUnifiedInstances('team-1')).rejects.toBeInstanceOf(
+        UnifiedInstancesUnavailableError
+      );
+    });
+
+    it('throws on a null total_items (envelope present in name only)', async () => {
+      mockRequest.mockResolvedValueOnce({ items: null, total_items: null });
+
+      await expect(getUnifiedInstances('team-1')).rejects.toBeInstanceOf(
+        UnifiedInstancesUnavailableError
+      );
+    });
+
+    // The client turns an empty body into {} and a non-JSON body into
+    // { success: true }; neither carries an envelope, so both stay failures.
+    it.each([
+      ['an empty response body', {}],
+      ['an unparseable response body', { success: true }],
+      ['an error object', { error: 'upstream unavailable' }],
+    ])('throws on %s', async (_label, payload) => {
+      mockRequest.mockResolvedValueOnce(payload);
+
+      await expect(getUnifiedInstances('team-1')).rejects.toBeInstanceOf(
+        UnifiedInstancesUnavailableError
+      );
+    });
+
+    it('propagates a non-2xx upstream error rather than reporting empty', async () => {
+      mockRequest.mockRejectedValueOnce(new Error('Hosted.ai API error (502): bad gateway'));
+
+      await expect(getUnifiedInstances('team-1')).rejects.toThrow('(502)');
     });
   });
 });

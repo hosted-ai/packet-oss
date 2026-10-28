@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth/audit";
 import {
   getConnectionInfo,
   getInstanceCredentials,
-  getTeamInstances,
+  getUnifiedInstanceDetail,
   SubscriptionConnectionInfo,
   PodConnectionInfo,
 } from "@/lib/hostedai";
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, allTeamIds } = auth;
+    const { allTeamIds } = auth;
 
     // PA-202 gate: SSH credentials require gpu.access.
     // Read-only Member: allowed (gpu.access ✓). Finance Manager: denied (no gpu.access).
@@ -127,6 +127,15 @@ export async function GET(request: NextRequest) {
     // === HAI 2.2: Single instance credentials ===
     if (instanceId) {
       try {
+        // PA-298: ownership check. Without this, any gpu.access member could read
+        // another team's live SSH credentials by passing an arbitrary instance_id
+        // (IDOR). The owning team comes straight from HAI, so the caller can't
+        // spoof it. 404 (not 403) so we don't confirm the instance exists.
+        const detail = await getUnifiedInstanceDetail(instanceId);
+        if (!detail.team?.id || !allTeamIds.includes(detail.team.id)) {
+          return NextResponse.json({ error: "Instance not found" }, { status: 404 });
+        }
+
         const creds = await getInstanceCredentials(instanceId);
         // Format as SubscriptionConnectionInfo for frontend compatibility
         const sshCmd = creds.ip && creds.port && creds.username
@@ -208,12 +217,12 @@ export async function GET(request: NextRequest) {
     );
 
     // Merge and deduplicate by subscription ID
-    const seenIds = new Set<number>();
+    const seenIds = new Set<string>();
     const connectionInfo: SubscriptionConnectionInfo[] = [];
     for (const teamResult of allConnectionInfo) {
       for (const sub of teamResult) {
-        if (!seenIds.has(sub.id)) {
-          seenIds.add(sub.id);
+        if (!seenIds.has(String(sub.id))) {
+          seenIds.add(String(sub.id));
           connectionInfo.push(sub);
         }
       }

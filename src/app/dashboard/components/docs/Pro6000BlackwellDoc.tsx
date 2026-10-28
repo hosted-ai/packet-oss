@@ -2,8 +2,7 @@
 
 export function Pro6000BlackwellDoc() {
   return (
-    <div className="prose prose-zinc prose-pre:overflow-x-auto prose-pre:max-w-full">
-      <h1>Pro 6000 Blackwell Optimized Models</h1>
+    <div>
       <p className="lead">
         One-click deploy templates for NVIDIA RTX Pro 6000 Blackwell GPUs with 96GB VRAM.
         Run 70B+ parameter models at full performance.

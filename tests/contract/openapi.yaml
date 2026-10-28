@@ -1,0 +1,1186 @@
+openapi: 3.1.0
+info:
+  title: Packet.ai internal API (contract-tested subset)
+  version: 1.0.0
+  description: A generated, partial OpenAPI spec covering the internal endpoints
+    under contract test in tests/contract/. NOT a full API reference — see
+    registry.ts for scope. Regenerate via `pnpm run generate:openapi`; CI blocks
+    unreviewed changes to this file (see
+    .bitbucket/check-openapi-breaking-change.sh).
+paths:
+  /api/branding:
+    get:
+      summary: Public branding values
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiBrandingResponse"
+  /api/analytics-config:
+    get:
+      summary: PostHog analytics config
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiAnalytics-configResponse"
+  /api/cli-config:
+    get:
+      summary: CLI bootstrap config
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiCli-configResponse"
+  /api/status:
+    get:
+      summary: Public GPU status page
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiStatusResponse"
+  /api/widget/gpu-status:
+    get:
+      summary: Embeddable GPU status widget
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiWidgetGpu-statusResponse"
+  /api/widget/pricing:
+    get:
+      summary: Embeddable pricing widget
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiWidgetPricingResponse"
+  /api/tenants/config:
+    get:
+      summary: Tenant branding for the current hostname
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiTenantsConfigResponse"
+  /api/gpu-offerings:
+    get:
+      summary: Marketing GPU offerings catalog
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiGpu-offeringsResponse"
+  /api/providers/gpu-types:
+    get:
+      summary: GPU types accepted from providers
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiProvidersGpu-typesResponse"
+  /api/banner:
+    get:
+      summary: Active campaign banner
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiBannerResponse"
+  /api/demand:
+    get:
+      summary: List active infrastructure demand requests
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiDemandResponse"
+    post:
+      summary: Submit interest in an infrastructure demand request
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiDemandResponse"
+  /api/demand/subscribe:
+    get:
+      summary: Check demand-notification subscription status
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiDemandSubscribeResponse"
+    post:
+      summary: Subscribe to demand notifications
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiDemandSubscribeResponse"
+  /api/quote/{token}:
+    get:
+      summary: Fetch a customer quote by token
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiQuoteTokenResponse"
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+    post:
+      summary: Customer responds to a quote
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiQuoteTokenResponse"
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+  /api/track:
+    post:
+      summary: Anonymous marketing page-view recorder
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiTrackResponse"
+  /api/game/play:
+    post:
+      summary: Record a marketing mini-game play
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiGamePlayResponse"
+  /api/voucher/validate:
+    post:
+      summary: Validate a voucher code (public)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiVoucherValidateResponse"
+  /api/contact:
+    post:
+      summary: Marketing contact form submission
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiContactResponse"
+  /api/providers/apply:
+    get:
+      summary: GPU types + regions for the provider application form
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiProvidersApplyResponse"
+  /api/account/activity:
+    get:
+      summary: Customer activity feed
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiAccountActivityResponse"
+  /api/account/logout:
+    post:
+      summary: Log out (revoke session)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiAccountLogoutResponse"
+  /api/account/session:
+    post:
+      summary: Refresh the customer session
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiAccountSessionResponse"
+  /api/account/budget:
+    get:
+      summary: Get budget/alert settings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiAccountBudgetResponse"
+    put:
+      summary: Update budget/alert settings
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PutApiAccountBudgetResponse"
+  /api/account/voucher/validate:
+    post:
+      summary: Validate a voucher code (authed)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiAccountVoucherValidateResponse"
+  /api/account/voucher/redeem:
+    post:
+      summary: Redeem a voucher code
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PostApiAccountVoucherRedeemResponse"
+  /api/support/unread:
+    get:
+      summary: Unread support-reply badge
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiSupportUnreadResponse"
+  /api/instances/snapshots:
+    get:
+      summary: List pod snapshots
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetApiInstancesSnapshotsResponse"
+components:
+  schemas:
+    GetApiBrandingResponse:
+      type: object
+      properties:
+        brandName:
+          type: string
+        appUrl:
+          type: string
+        dashboardUrl:
+          type: string
+        supportEmail:
+          type: string
+        logoUrl:
+          type: string
+      required:
+        - brandName
+        - appUrl
+        - dashboardUrl
+        - supportEmail
+      additionalProperties: {}
+    GetApiAnalytics-configResponse:
+      type: object
+      properties:
+        key:
+          anyOf:
+            - type: string
+            - type: "null"
+        host:
+          anyOf:
+            - type: string
+            - type: "null"
+      required:
+        - key
+        - host
+      additionalProperties: false
+    GetApiCli-configResponse:
+      type: object
+      properties:
+        brandName:
+          type: string
+        apiBaseUrl:
+          type: string
+        dashboardUrl:
+          type: string
+        docsUrl:
+          type: string
+        statusUrl:
+          type: string
+        supportEmail:
+          type: string
+        version:
+          type: string
+      required:
+        - brandName
+        - apiBaseUrl
+        - dashboardUrl
+        - docsUrl
+        - statusUrl
+        - supportEmail
+        - version
+      additionalProperties: false
+    GetApiStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - operational
+            - degraded
+        gpus:
+          type: array
+          items:
+            type: object
+            properties:
+              gpuType:
+                type: string
+              name:
+                type: string
+              status:
+                type: string
+            required:
+              - gpuType
+              - name
+              - status
+            additionalProperties: false
+        uptime:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties:
+            type: number
+        lastChecked:
+          type: string
+      required:
+        - status
+        - gpus
+        - uptime
+        - lastChecked
+      additionalProperties: false
+    GetApiWidgetGpu-statusResponse:
+      type: array
+      items:
+        type: object
+        properties:
+          gpuType:
+            type: string
+          name:
+            type: string
+          status:
+            type: string
+        required:
+          - gpuType
+          - name
+          - status
+        additionalProperties: false
+    GetApiWidgetPricingResponse:
+      type: array
+      items:
+        type: object
+        properties:
+          gpuType:
+            type: string
+          name:
+            type: string
+          hourlyRateCents:
+            type: number
+          monthlyRateCents:
+            anyOf:
+              - type: number
+              - type: "null"
+          specs:
+            anyOf:
+              - type: object
+                properties:
+                  vram:
+                    type: string
+                  architecture:
+                    type: string
+                required:
+                  - vram
+                  - architecture
+                additionalProperties: false
+              - type: "null"
+        required:
+          - gpuType
+          - name
+          - hourlyRateCents
+          - monthlyRateCents
+          - specs
+        additionalProperties: false
+    GetApiTenantsConfigResponse:
+      type: object
+      properties:
+        brandName:
+          type: string
+        logoUrl:
+          type: string
+        primaryColor:
+          type: string
+        customStrings:
+          anyOf:
+            - type: object
+              propertyNames:
+                type: string
+              additionalProperties:
+                type: string
+            - type: "null"
+      required:
+        - brandName
+        - logoUrl
+        - primaryColor
+        - customStrings
+      additionalProperties: false
+    GetApiGpu-offeringsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          type: object
+          properties:
+            offerings:
+              type: array
+              items:
+                type: object
+                propertyNames:
+                  type: string
+                additionalProperties: {}
+            proofSection:
+              type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+            carouselSettings:
+              type: object
+              propertyNames:
+                type: string
+              additionalProperties: {}
+          required:
+            - offerings
+            - proofSection
+            - carouselSettings
+          additionalProperties: false
+      required:
+        - success
+        - data
+      additionalProperties: false
+    GetApiProvidersGpu-typesResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          type: object
+          properties:
+            gpuTypes:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    anyOf:
+                      - type: string
+                      - type: number
+                  name:
+                    type: string
+                  shortName:
+                    type: string
+                  manufacturer:
+                    type: string
+                  providerRate:
+                    type: object
+                    properties:
+                      cents:
+                        type: number
+                      formatted:
+                        type: string
+                    required:
+                      - cents
+                      - formatted
+                    additionalProperties: false
+                  customerRate:
+                    type: object
+                    properties:
+                      cents:
+                        type: number
+                      formatted:
+                        type: string
+                    required:
+                      - cents
+                      - formatted
+                    additionalProperties: false
+                  termsType:
+                    type: string
+                  revenueSharePercent:
+                    type: number
+                  payoutModelChoice:
+                    anyOf:
+                      - type: string
+                      - type: "null"
+                  minVramGb:
+                    anyOf:
+                      - type: number
+                      - type: "null"
+                  estimatedMonthly:
+                    type: object
+                    properties:
+                      at100:
+                        type: string
+                      at80:
+                        type: string
+                      at60:
+                        type: string
+                    required:
+                      - at100
+                      - at80
+                      - at60
+                    additionalProperties: false
+                required:
+                  - id
+                  - name
+                  - shortName
+                  - manufacturer
+                  - providerRate
+                  - customerRate
+                  - termsType
+                  - revenueSharePercent
+                  - payoutModelChoice
+                  - minVramGb
+                  - estimatedMonthly
+                additionalProperties: false
+            note:
+              type: string
+          required:
+            - gpuTypes
+            - note
+          additionalProperties: false
+      required:
+        - success
+        - data
+      additionalProperties: false
+    GetApiBannerResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          anyOf:
+            - type: object
+              properties:
+                id:
+                  anyOf:
+                    - type: string
+                    - type: number
+                text:
+                  type: string
+                linkUrl:
+                  anyOf:
+                    - type: string
+                    - type: "null"
+                linkText:
+                  anyOf:
+                    - type: string
+                    - type: "null"
+                backgroundColor:
+                  anyOf:
+                    - type: string
+                    - type: "null"
+                textColor:
+                  anyOf:
+                    - type: string
+                    - type: "null"
+                dismissible:
+                  type: boolean
+              required:
+                - id
+                - text
+                - linkUrl
+                - linkText
+                - backgroundColor
+                - textColor
+                - dismissible
+              additionalProperties: false
+            - type: "null"
+      required:
+        - success
+        - data
+      additionalProperties: false
+    GetApiDemandResponse:
+      type: object
+      properties:
+        requests:
+          type: array
+          items:
+            type: object
+            propertyNames:
+              type: string
+            additionalProperties: {}
+      required:
+        - requests
+      additionalProperties: false
+    PostApiDemandResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+      required:
+        - success
+        - message
+      additionalProperties: false
+    GetApiDemandSubscribeResponse:
+      type: object
+      properties:
+        subscribed:
+          type: boolean
+        subscriber:
+          anyOf:
+            - type: object
+              properties:
+                id:
+                  anyOf:
+                    - type: string
+                    - type: number
+                email:
+                  type: string
+                name:
+                  type: string
+                company:
+                  type: string
+              required:
+                - id
+                - email
+                - name
+                - company
+              additionalProperties: false
+            - type: "null"
+      required:
+        - subscribed
+        - subscriber
+      additionalProperties: false
+    PostApiDemandSubscribeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        message:
+          type: string
+        subscriber:
+          type: object
+          properties:
+            id:
+              anyOf:
+                - type: string
+                - type: number
+            email:
+              type: string
+            name:
+              type: string
+          required:
+            - id
+            - email
+            - name
+          additionalProperties: false
+      required:
+        - success
+        - message
+        - subscriber
+      additionalProperties: false
+    GetApiQuoteTokenResponse:
+      type: object
+      properties:
+        quote:
+          type: object
+          properties:
+            quoteNumber:
+              type: string
+            customerName:
+              type: string
+            customerCompany:
+              type: string
+            gpuType:
+              type: string
+            gpuCount:
+              type: number
+            gpuMemory:
+              anyOf:
+                - type: string
+                - type: "null"
+            specs:
+              anyOf:
+                - type: string
+                - type: "null"
+            pricing:
+              anyOf:
+                - type: object
+                  propertyNames:
+                    type: string
+                  additionalProperties: {}
+                - type: "null"
+            location:
+              anyOf:
+                - type: string
+                - type: "null"
+            notes:
+              anyOf:
+                - type: string
+                - type: "null"
+            startsAt:
+              anyOf:
+                - type: string
+                - type: "null"
+            expiresAt:
+              type: string
+            status:
+              type: string
+            customerResponse:
+              anyOf:
+                - {}
+                - type: "null"
+          required:
+            - quoteNumber
+            - customerName
+            - customerCompany
+            - gpuType
+            - gpuCount
+            - expiresAt
+            - status
+          additionalProperties: false
+      required:
+        - quote
+      additionalProperties: false
+    PostApiQuoteTokenResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        status:
+          type: string
+      required:
+        - success
+        - status
+      additionalProperties: false
+    PostApiTrackResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+      required:
+        - ok
+      additionalProperties: false
+    PostApiGamePlayResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        id:
+          anyOf:
+            - type: string
+            - type: number
+      required:
+        - success
+        - id
+      additionalProperties: false
+    PostApiVoucherValidateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        voucher:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+      required:
+        - success
+        - voucher
+      additionalProperties: false
+    PostApiContactResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+      required:
+        - success
+      additionalProperties: false
+    GetApiProvidersApplyResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          type: object
+          properties:
+            gpuTypes:
+              type: array
+              items:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  shortName:
+                    type: string
+                  manufacturer:
+                    type: string
+                  providerRate:
+                    type: string
+                  customerRate:
+                    type: string
+                  termsType:
+                    type: string
+                  revenueSharePercent:
+                    type: number
+                required:
+                  - name
+                  - shortName
+                  - manufacturer
+                  - providerRate
+                  - customerRate
+                  - termsType
+                  - revenueSharePercent
+                additionalProperties: false
+            regions:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  name:
+                    type: string
+                required:
+                  - id
+                  - name
+                additionalProperties: false
+          required:
+            - gpuTypes
+            - regions
+          additionalProperties: false
+      required:
+        - success
+        - data
+      additionalProperties: false
+    GetApiAccountActivityResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            type: object
+            propertyNames:
+              type: string
+            additionalProperties: {}
+      required:
+        - events
+      additionalProperties: false
+    PostApiAccountLogoutResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          const: true
+      required:
+        - ok
+      additionalProperties: false
+    PostApiAccountSessionResponse:
+      type: object
+      properties:
+        token:
+          type: string
+      required:
+        - token
+      additionalProperties: false
+    GetApiAccountBudgetResponse:
+      type: object
+      properties:
+        monthlyLimitCents:
+          anyOf:
+            - type: number
+            - type: "null"
+        dailyLimitCents:
+          anyOf:
+            - type: number
+            - type: "null"
+        alertAt50Percent:
+          type: boolean
+        alertAt80Percent:
+          type: boolean
+        alertAt100Percent:
+          type: boolean
+        autoShutdownEnabled:
+          type: boolean
+        autoShutdownThreshold:
+          type: number
+      required:
+        - monthlyLimitCents
+        - dailyLimitCents
+        - alertAt50Percent
+        - alertAt80Percent
+        - alertAt100Percent
+        - autoShutdownEnabled
+        - autoShutdownThreshold
+      additionalProperties: false
+    PutApiAccountBudgetResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        settings:
+          type: object
+          properties:
+            monthlyLimitCents:
+              anyOf:
+                - type: number
+                - type: "null"
+            dailyLimitCents:
+              anyOf:
+                - type: number
+                - type: "null"
+            alertAt50Percent:
+              type: boolean
+            alertAt80Percent:
+              type: boolean
+            alertAt100Percent:
+              type: boolean
+            autoShutdownEnabled:
+              type: boolean
+            autoShutdownThreshold:
+              type: number
+          required:
+            - monthlyLimitCents
+            - dailyLimitCents
+            - alertAt50Percent
+            - alertAt80Percent
+            - alertAt100Percent
+            - autoShutdownEnabled
+            - autoShutdownThreshold
+          additionalProperties: false
+      required:
+        - success
+        - settings
+      additionalProperties: false
+    PostApiAccountVoucherValidateResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        voucher:
+          type: object
+          propertyNames:
+            type: string
+          additionalProperties: {}
+      required:
+        - success
+        - voucher
+      additionalProperties: false
+    PostApiAccountVoucherRedeemResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        creditCents:
+          type: number
+      required:
+        - success
+        - creditCents
+      additionalProperties: false
+    GetApiSupportUnreadResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        hasUnreadReplies:
+          type: boolean
+      required:
+        - success
+        - hasUnreadReplies
+      additionalProperties: false
+    GetApiInstancesSnapshotsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          const: true
+        snapshots:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              displayName:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              notes:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              snapshotType:
+                type: string
+              poolId:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              poolName:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              vgpus:
+                anyOf:
+                  - type: number
+                  - type: "null"
+              hasStorage:
+                type: boolean
+              storage:
+                anyOf:
+                  - type: object
+                    properties:
+                      id:
+                        anyOf:
+                          - anyOf:
+                              - type: string
+                              - type: number
+                          - type: "null"
+                      name:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                      sizeGb:
+                        anyOf:
+                          - type: number
+                          - type: "null"
+                    required:
+                      - id
+                      - name
+                      - sizeGb
+                    additionalProperties: false
+                  - type: "null"
+              hfModel:
+                anyOf:
+                  - type: object
+                    properties:
+                      id:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                      name:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                      type:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                      deployScript:
+                        anyOf:
+                          - type: string
+                          - type: "null"
+                    required:
+                      - id
+                      - name
+                      - type
+                      - deployScript
+                    additionalProperties: false
+                  - type: "null"
+              createdAt:
+                type: string
+              updatedAt:
+                type: string
+            required:
+              - id
+              - displayName
+              - notes
+              - snapshotType
+              - poolId
+              - poolName
+              - vgpus
+              - hasStorage
+              - storage
+              - hfModel
+              - createdAt
+              - updatedAt
+            additionalProperties: false
+        count:
+          type: number
+      required:
+        - success
+        - snapshots
+        - count
+      additionalProperties: false

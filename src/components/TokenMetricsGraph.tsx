@@ -41,6 +41,35 @@ export default function TokenMetricsGraph({
   const pollingRef = useRef<NodeJS.Timeout | null>(null);
 
   // Collect metrics from vLLM
+  // Fetch metrics history
+  const fetchMetrics = useCallback(async () => {
+    try {
+      // Get last hour of data
+      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const res = await fetch(
+        `/api/vllm-metrics?subscriptionId=${subscriptionId}&since=${since}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        setMetrics(data.metrics || []);
+        setKpis({
+          totalTokensConsumed: 0,
+          tokensPerHour: 0,
+          estimatedCostPer1MTokens: null,
+          ...(data.kpis ?? {}),
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch metrics:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [subscriptionId, token]);
+
   const collectMetrics = useCallback(async () => {
     if (collecting) return;
     setCollecting(true);
@@ -70,36 +99,9 @@ export default function TokenMetricsGraph({
       console.error("Failed to collect metrics:", err);
     } finally {
       setCollecting(false);
-    }
-  }, [subscriptionId, token, collecting]);
-
-  // Fetch metrics history
-  const fetchMetrics = useCallback(async () => {
-    try {
-      // Get last hour of data
-      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const res = await fetch(
-        `/api/vllm-metrics?subscriptionId=${subscriptionId}&since=${since}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (res.ok) {
-        const data = await res.json();
-        setMetrics(data.metrics || []);
-        setKpis(data.kpis || {
-          totalTokensConsumed: 0,
-          tokensPerHour: 0,
-          estimatedCostPer1MTokens: null,
-        });
-      }
-    } catch (err) {
-      console.error("Failed to fetch metrics:", err);
-    } finally {
       setLoading(false);
     }
-  }, [subscriptionId, token]);
+  }, [subscriptionId, token, collecting, fetchMetrics]);
 
   // Initial fetch and polling
   useEffect(() => {
@@ -127,16 +129,13 @@ export default function TokenMetricsGraph({
   }, [isVisible, collectMetrics]);
 
   // Format numbers for display
-  const formatNumber = (num: number) => {
-    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(2)}M`;
-    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
-    return num.toString();
+  const formatNumber = (num: number | undefined) => {
+    const n = Number.isFinite(num) ? (num as number) : 0;
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+    return n.toString();
   };
 
-  const formatCurrency = (cents: number | null) => {
-    if (cents === null) return "—";
-    return `$${(cents / 100).toFixed(2)}`;
-  };
 
   // Prepare chart data
   const chartData = metrics.map((m) => ({

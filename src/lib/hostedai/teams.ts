@@ -4,6 +4,7 @@
 
 import crypto from "crypto";
 import { hostedaiRequest, getApiUrl } from "./client";
+import { getDefaultBaremetalPolicies } from "./default-policies";
 import type {
   Team,
   CreateTeamParams,
@@ -58,6 +59,19 @@ export async function createTeam(params: CreateTeamParams): Promise<Team> {
   // Sanitize team name to remove special characters that hosted.ai doesn't accept
   const sanitizedTeamName = sanitizeName(params.name);
 
+  // PA-353: ariel does NO server-side policy defaulting — assignPolicySetToTeam
+  // only runs for natures the client flags and requires all 5 IDs — so a
+  // general-only body leaves the team with zero baremetal policies (no default
+  // baremetal resource policy). Fetch the baremetal defaults and send them too.
+  // Best-effort: if they can't be fetched, create the team general-only rather
+  // than failing signup/checkout/webhook team creation.
+  const baremetalDefaults = await getDefaultBaremetalPolicies();
+  if (!baremetalDefaults) {
+    console.error(
+      "[HAI.createTeam] baremetal default policies unavailable — creating team without a baremetal policy set (PA-353)"
+    );
+  }
+
   const postData = {
     color: params.color || "#6366F1", // Must be UPPERCASE hex
     description: params.description || "",
@@ -90,6 +104,18 @@ export async function createTeam(params: CreateTeamParams): Promise<Team> {
       image_policy_id: params.image_policy_id,
       instance_type_policy_id: params.instance_type_policy_id,
     },
+    // PA-353: default baremetal policy set, gated by has_baremetal_policies.
+    // Titan ignores these unknown fields, same as the general block above.
+    ...(baremetalDefaults && {
+      has_baremetal_policies: true,
+      baremetal: {
+        resource_policy_id: baremetalDefaults.resource,
+        service_policy_id: baremetalDefaults.service,
+        pricing_policy_id: baremetalDefaults.pricing,
+        image_policy_id: baremetalDefaults.image,
+        instance_type_policy_id: baremetalDefaults.instanceType,
+      },
+    }),
   };
 
   return hostedaiRequest<Team>("POST", "/team", postData);
@@ -201,9 +227,15 @@ export async function terminateTeam(teamId: string): Promise<void> {
   await hostedaiRequest("DELETE", `/team/${teamId}`);
 }
 
-// Get team details
+// Get team details. Ariel's GET /team/{id} wraps the team in a
+// GetTeamResponse ({ team, members_count, ... }); Titan returned it flat.
+// Unwrap so callers always get the team object (name, policy_info, ...).
 export async function getTeam(teamId: string): Promise<Team> {
-  return hostedaiRequest<Team>("GET", `/team/${teamId}`);
+  const res = await hostedaiRequest<Team | { team: Team }>(
+    "GET",
+    `/team/${teamId}`
+  );
+  return (res as { team?: Team })?.team ?? (res as Team);
 }
 
 // List HAI team members. `search` narrows server-side (HAI matches against
@@ -353,13 +385,39 @@ export async function changeTeamPackage(
   // team, and send BOTH shapes: Titan reads the flat keys and ignores the
   // nested ones, Ariel reads the nested ones and ignores the flat keys (both
   // use plain json.Decode). Compatible with Titan today and Ariel post-upgrade.
-  let currentName: string | undefined;
+  let currentTeam: Team | undefined;
   try {
-    currentName = (await getTeam(teamId))?.name;
+    currentTeam = await getTeam(teamId);
   } catch (err) {
     console.warn(
-      `[HAI.changeTeamPackage] could not read current name for team ${teamId} (Ariel requires it):`,
+      `[HAI.changeTeamPackage] could not read current team ${teamId} (Ariel requires name + baremetal round-trip):`,
       err,
+    );
+  }
+  const currentName = currentTeam?.name;
+
+  // PA-353: Ariel's PUT /team/{id} hard-rejects (400 ERR_TEAM_HAS_BAREMETAL_
+  // POLICIES) a body with has_baremetal_policies=false while the team has
+  // baremetal policies assigned — so omitting the block breaks package changes
+  // for every team with a baremetal policy set. Round-trip the team's current
+  // baremetal IDs, filling gaps from the defaults (the ops cron may have
+  // assigned only the resource policy). HAI requires the full 5-ID set, so
+  // only include the block when all 5 resolve; teams with none get the
+  // defaults assigned, healing PA-353 for existing teams on package change.
+  const pi = currentTeam?.policy_info;
+  const bmDefaults = await getDefaultBaremetalPolicies();
+  const baremetal = {
+    resource_policy_id: pi?.baremetal_resource_policy?.id ?? bmDefaults?.resource,
+    service_policy_id: pi?.baremetal_service_policy?.id ?? bmDefaults?.service,
+    pricing_policy_id: pi?.baremetal_pricing_policy?.id ?? bmDefaults?.pricing,
+    image_policy_id: pi?.baremetal_image_policy?.id ?? bmDefaults?.image,
+    instance_type_policy_id:
+      pi?.baremetal_instance_type_policy?.id ?? bmDefaults?.instanceType,
+  };
+  const baremetalComplete = Object.values(baremetal).every(Boolean);
+  if (!baremetalComplete) {
+    console.error(
+      `[HAI.changeTeamPackage] incomplete baremetal policy set for team ${teamId} and defaults unavailable — omitting baremetal block (PA-353; Ariel will 400 if the team has baremetal policies)`
     );
   }
 
@@ -375,6 +433,10 @@ export async function changeTeamPackage(
       instance_type_policy_id: policies.instance_type_policy_id,
       image_policy_id: policies.image_policy_id,
     },
+    ...(baremetalComplete && {
+      has_baremetal_policies: true,
+      baremetal,
+    }),
   };
 
   await hostedaiRequest("PUT", `/team/${teamId}`, body);

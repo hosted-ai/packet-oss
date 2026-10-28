@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ConnectionInfo, PoolSubscription } from "../types";
+import { PoolSubscription } from "../types";
 
 interface PodInfo {
   pod_name: string;
@@ -32,6 +32,13 @@ export function GPUCardSSHInfo({
   onOpenTerminal,
 }: GPUCardSSHInfoProps) {
   const [showPassword, setShowPassword] = useState<Record<string, boolean>>({});
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const copy = (what: string, value: string) => {
+    navigator.clipboard.writeText(value);
+    setCopied(what);
+    setTimeout(() => setCopied((prev) => (prev === what ? null : prev)), 1500);
+  };
 
   return (
     <div className="p-4 space-y-3">
@@ -51,13 +58,23 @@ export function GPUCardSSHInfo({
                     {sshInfo.cmd}
                   </code>
                   <button
-                    onClick={() => navigator.clipboard.writeText(sshInfo.cmd)}
+                    onClick={() => copy(`${pod.pod_name}:cmd`, sshInfo.cmd)}
                     className="p-2 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-lg transition-colors"
+                    title={copied === `${pod.pod_name}:cmd` ? "Copied!" : "Copy"}
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
+                    {copied === `${pod.pod_name}:cmd` ? (
+                      <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
                   </button>
+                  {copied === `${pod.pod_name}:cmd` && (
+                    <span className="text-[10px] text-emerald-500 shrink-0">Copied!</span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-zinc-400 w-10 shrink-0">Pass</span>
@@ -80,13 +97,23 @@ export function GPUCardSSHInfo({
                     </svg>
                   </button>
                   <button
-                    onClick={() => navigator.clipboard.writeText(sshInfo.pass)}
+                    onClick={() => copy(`${pod.pod_name}:pass`, sshInfo.pass)}
                     className="p-2 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-lg transition-colors"
+                    title={copied === `${pod.pod_name}:pass` ? "Copied!" : "Copy"}
                   >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
+                    {copied === `${pod.pod_name}:pass` ? (
+                      <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                      </svg>
+                    )}
                   </button>
+                  {copied === `${pod.pod_name}:pass` && (
+                    <span className="text-[10px] text-emerald-500 shrink-0">Copied!</span>
+                  )}
                 </div>
                 {internalIP && (
                   <div className="flex items-center gap-2">
@@ -95,13 +122,23 @@ export function GPUCardSSHInfo({
                       {internalIP}
                     </code>
                     <button
-                      onClick={() => navigator.clipboard.writeText(internalIP)}
+                      onClick={() => copy(`${pod.pod_name}:ip`, internalIP)}
                       className="p-2 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-lg transition-colors"
+                      title={copied === `${pod.pod_name}:ip` ? "Copied!" : "Copy"}
                     >
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
+                      {copied === `${pod.pod_name}:ip` ? (
+                        <svg className="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                      )}
                     </button>
+                    {copied === `${pod.pod_name}:ip` && (
+                      <span className="text-[10px] text-emerald-500 shrink-0">Copied!</span>
+                    )}
                   </div>
                 )}
               </div>

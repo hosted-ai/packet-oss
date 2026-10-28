@@ -14,7 +14,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { url: `${baseUrl}/docs/api-reference`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${baseUrl}/docs/ssh`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${baseUrl}/docs/storage`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
-    { url: `${baseUrl}/docs/workspace`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
     { url: `${baseUrl}/docs/gpu-metrics`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
     { url: `${baseUrl}/docs/billing`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
     { url: `${baseUrl}/docs/budget-controls`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
@@ -28,7 +27,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   // Pro-only documentation pages
   const proDocPages: MetadataRoute.Sitemap = [
-    { url: `${baseUrl}/docs/openai-api`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${baseUrl}/docs/huggingface`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${baseUrl}/docs/token-factory`, lastModified: now, changeFrequency: "monthly", priority: 0.7 },
     { url: `${baseUrl}/docs/token-usage`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },

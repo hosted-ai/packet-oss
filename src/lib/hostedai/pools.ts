@@ -5,16 +5,18 @@
 import { hostedaiRequest, getCached, setCache, clearCache, getApiUrl, getApiKey } from "./client";
 import { prisma } from "@/lib/prisma";
 import { getDefaultResourcePolicy } from "./policies";
+import { getInstanceCredentials, getUnifiedInstanceDetail, isUnifiedInstanceId } from "./instances";
 import { validateSSHParams } from "@/lib/ssh-validation";
 import { spawn } from "child_process";
 import { readPoolOverviewCache, computePoolOverview } from "@/lib/pool-overview";
+import { getStoragePricePerGBHourCents } from "@/lib/pricing";
+import { DEPLOYABLE_ORDER_BY, DEPLOYABLE_WHERE } from "@/lib/product-availability";
 import type {
   GPURegion,
   GPUPool,
   GPUPoolExtended,
   RawGPUPool,
   PoolSubscription,
-  PoolSubscriptionResponse,
   SubscribePoolParams,
   CalculatePoolSubscriptionParams,
   PoolSubscriptionCostEstimate,
@@ -68,15 +70,27 @@ export async function getSharedVolumes(teamId: string): Promise<SharedVolume[]> 
   return teamVolumes;
 }
 
-// Get available storage blocks for creating shared volumes in a region
+// Get available storage blocks for creating shared volumes in a region.
+//
+// PA-356 (same root cause as PA-345, which fixed it for volume *listing*):
+// HAI's own `cost` on a block is unrelated to this tenant's configured storage
+// rate — it's frequently 0/unset upstream and /api/sync never reads it. Sync
+// bills size_in_gb * storagePricePerGBHourCents, so derive `cost` ($/hr) the
+// same way here. This is the single read behind every block price we show
+// (launch modal + add-storage modal), so both quote what we actually charge.
 export async function getSharedStorageBlocks(
   regionId: number,
   teamId: string
-): Promise<Array<{ id: string; name: string; size: number; cost: string }>> {
-  return hostedaiRequest<Array<{ id: string; name: string; size: number; cost: string }>>(
+): Promise<Array<{ id: string; name: string; size: number; cost: number }>> {
+  const blocks = await hostedaiRequest<Array<{ id: string; name: string; size: number }>>(
     "GET",
     `/shared-volumes/shared-storage-blocks?region_id=${regionId}&team_id=${teamId}`
   );
+  const rateCentsPerGBHour = getStoragePricePerGBHourCents();
+  return (blocks || []).map((b) => ({
+    ...b,
+    cost: (b.size * rateCentsPerGBHour) / 100,
+  }));
 }
 
 // Get shared volumes compatible with a service for attaching during provisioning
@@ -221,6 +235,7 @@ export async function getPoolSubscriptions(
     id: string;
     name: string;
     status: string;
+    nature?: string;
     ip: string[];
     service?: { id: string; name: string; type: string };
     team?: { id: string; name: string };
@@ -241,7 +256,15 @@ export async function getPoolSubscriptions(
     timeoutMs || 60000
   );
 
-  const instances = response.items || [];
+  // BILLING FENCE: drop nature="baremetal" rows BEFORE the legacy mapping.
+  // This function feeds the wallet billing sync (/api/sync), budget
+  // enforcement and negative-balance termination. Bare metal servers are
+  // TERM-PREPAID (BareMetalOrder, paid upfront by wire) — mapped here they
+  // would read as "subscribed"/billable with pool_id falling back to the
+  // REGION id, and a collision with a GPU product pool id would hourly-bill
+  // (or worse, auto-terminate) a prepaid server. The pods UI does not use
+  // this path — it reads getUnifiedInstances directly.
+  const instances = (response.items || []).filter((i) => i.nature !== "baremetal");
 
   // Map unified instances to PoolSubscription shape for backward compatibility
   const items: PoolSubscription[] = instances.map(instance => {
@@ -547,11 +570,46 @@ export async function getAllPoolsWithRegions(): Promise<RawGPUPool[]> {
   return hostedaiRequest<RawGPUPool[]>("GET", "/gpuaas/all-pools");
 }
 
+// Resolve a HAI 2.2 instance's SSH credentials into the pool-subscription shape
+// its callers expect. Fail-closed: an instance another team owns resolves to [].
+async function getUnifiedInstanceConnectionInfo(
+  teamId: string,
+  instanceId: string
+): Promise<SubscriptionConnectionInfo[]> {
+  const detail = await getUnifiedInstanceDetail(instanceId);
+  if (!detail.team?.id || detail.team.id !== teamId) {
+    console.warn(`[getConnectionInfo] Instance ${instanceId} is not owned by team ${teamId}`);
+    return [];
+  }
+
+  const creds = await getInstanceCredentials(instanceId);
+  const cmd = creds.ip && creds.port && creds.username
+    ? `ssh -p ${creds.port} ${creds.username}@${creds.ip}`
+    : undefined;
+
+  return [{
+    id: instanceId,
+    pool_name: detail.name,
+    region_id: detail.region?.id ?? 0,
+    pods: [{
+      pod_name: detail.name,
+      pod_status: (detail.status || "unknown").toLowerCase(),
+      ssh_info: cmd && creds.password ? { cmd, pass: creds.password } : undefined,
+    }],
+  }];
+}
+
 // Get connection info (SSH credentials) for pool subscriptions
 export async function getConnectionInfo(
   teamId: string,
   subscriptionId?: string | number
 ): Promise<SubscriptionConnectionInfo[]> {
+  // A unified instance has no row on the GPUaaS endpoint, which knows only
+  // numeric pool-subscription ids — resolve it from the instance API instead.
+  if (isUnifiedInstanceId(subscriptionId)) {
+    return getUnifiedInstanceConnectionInfo(teamId, subscriptionId);
+  }
+
   // Check cache first
   const cacheKey = `connection-info:${teamId}:${subscriptionId || "all"}`;
   const cached = getCached<SubscriptionConnectionInfo[]>(cacheKey);
@@ -839,7 +897,7 @@ export interface SelectOptimalPoolResult {
 export async function selectOptimalPool(
   params: SelectOptimalPoolParams
 ): Promise<SelectOptimalPoolResult> {
-  const { requestedPoolId, teamId, allPools, gpuCount = 1, productPoolIds: explicitPoolIds } = params;
+  const { requestedPoolId, teamId, allPools, productPoolIds: explicitPoolIds } = params;
 
   // 1. Determine compatible pools from the product's pool list.
   // The product defines which pools can be used — search ALL of them across all clusters.
@@ -848,8 +906,11 @@ export async function selectOptimalPool(
 
   if (!resolvedPoolIds || resolvedPoolIds.length === 0) {
     try {
+      // Deployable: this runs inside a redeploy, and a subscriber's plan may
+      // have been withdrawn from sale. On-sale rows are matched first.
       const products = await prisma.gpuProduct.findMany({
-        where: { active: true },
+        where: DEPLOYABLE_WHERE,
+        orderBy: DEPLOYABLE_ORDER_BY,
         select: { poolIds: true },
       });
       for (const product of products) {
@@ -877,7 +938,7 @@ export async function selectOptimalPool(
 
     if (!gpuaasId) {
       const err = new Error("Requested GPU pool not found or has no GPU type configured.");
-      (err as any).status = 404;
+      (err as Error & { status?: number }).status = 404;
       throw err;
     }
 
@@ -913,14 +974,13 @@ export async function selectOptimalPool(
         ? "All pools for this GPU type are in use by your account. Terminate an existing pod or wait for a terminating pod to finish."
         : "No pools available for this GPU type."
     );
-    (err as any).status = 409;
+    (err as Error & { status?: number }).status = 409;
     throw err;
   }
 
   // 5. Check GPU slot availability across eligible pools (for capacity filtering)
   // Query each unique gpuaas_id in the eligible pools
-  let availabilityMap = new Map<string, number>();
-  let availabilityCheckSucceeded = false;
+  const availabilityMap = new Map<string, number>();
 
   try {
     const gpuaasIds = [...new Set(eligiblePools.map(p => p.gpuaas_id).filter(Boolean))];
@@ -932,7 +992,6 @@ export async function selectOptimalPool(
         }
       }
     }
-    availabilityCheckSucceeded = availabilityMap.size > 0;
   } catch (err) {
     console.error("[selectOptimalPool] Failed to check availability:", err);
   }
@@ -1156,7 +1215,7 @@ export async function selectOptimalPool(
     const err = new Error(
       "No GPUs currently available. All eligible pools are at capacity. Please try again later."
     );
-    (err as any).status = 503;
+    (err as Error & { status?: number }).status = 503;
     throw err;
   }
 

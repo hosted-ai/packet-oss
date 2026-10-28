@@ -129,7 +129,7 @@ export function BillingTypeModal({
       {/* Modal */}
       <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-xl overflow-hidden">
         {/* Close button */}
-        <button
+        <button aria-label="Close dialog"
           onClick={onClose}
           className="absolute top-4 right-4 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-zinc-100 hover:bg-zinc-200 text-zinc-500 hover:text-zinc-700 transition-colors"
         >
@@ -140,7 +140,7 @@ export function BillingTypeModal({
 
         <div className="p-6 pb-2">
           <h2 className="text-lg font-semibold text-zinc-900">Choose your billing plan</h2>
-          <p className="text-sm text-zinc-500 mt-1">Select how you'd like to pay for GPU compute</p>
+          <p className="text-sm text-zinc-500 mt-1">Select how you&apos;d like to pay for GPU compute</p>
         </div>
 
         <div className="px-6 pb-6 space-y-3">

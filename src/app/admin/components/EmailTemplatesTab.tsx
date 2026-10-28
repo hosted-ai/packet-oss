@@ -89,7 +89,7 @@ const DEFAULT_TEMPLATES = [
     slug: "negative-balance",
     name: "Negative Balance",
     description: "Sent when account goes negative and resources are terminated",
-    variables: ["customerName", "balanceOwed", "dashboardUrl", "podsTerminated", "volumesDeleted"],
+    variables: ["customerName", "balanceOwed", "dashboardUrl", "podsTerminated", "volumesRetained", "retentionDays"],
     defaultSubject: "Account resources terminated — negative balance",
   },
   // ── Support ──
@@ -763,7 +763,7 @@ export function EmailTemplatesTab() {
       } else {
         setError(data.error || "Failed to save template");
       }
-    } catch (err) {
+    } catch {
       setError("Failed to save template");
     } finally {
       setSaving(false);
@@ -822,7 +822,8 @@ export function EmailTemplatesTab() {
       limitTypeLabel: "Daily",
       balanceOwed: "$12.50",
       podsTerminated: "2",
-      volumesDeleted: "1",
+      volumesRetained: "1",
+      retentionDays: "3",
       totalRequests: "1000",
       completedRequests: "998",
       quoteNumber: "Q-2026-001",

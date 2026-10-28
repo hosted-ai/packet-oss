@@ -3,6 +3,7 @@
  */
 
 import { prisma } from "./prisma";
+import { DEPLOYABLE_ORDER_BY, DEPLOYABLE_WHERE } from "./product-availability";
 
 export interface ProductPricing {
   id: string;
@@ -20,9 +21,11 @@ export async function getProductByPoolId(poolId: string | number): Promise<Produ
   try {
     const numericPoolId = typeof poolId === "string" ? parseInt(poolId, 10) : poolId;
 
-    // Get all active products
+    // Deployable, not sellable: a monthly plan withdrawn from sale still has
+    // subscribers redeploying and being billed. The ordering picks the on-sale row.
     const products = await prisma.gpuProduct.findMany({
-      where: { active: true },
+      where: DEPLOYABLE_WHERE,
+      orderBy: [...DEPLOYABLE_ORDER_BY, { displayOrder: "asc" }, { name: "asc" }],
     });
 
     // Find product that contains this pool_id in its poolIds array

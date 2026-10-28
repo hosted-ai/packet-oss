@@ -60,6 +60,7 @@ export default function InferencePlayground({
     setIsLoading(true);
 
     const startTime = Date.now();
+    let assistantBubbleAdded = false;
 
     try {
       const response = await fetch("/api/inference/chat", {
@@ -90,6 +91,7 @@ export default function InferencePlayground({
         let tokenCount = 0;
 
         // Add empty assistant message that we'll update
+        assistantBubbleAdded = true;
         setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
         while (true) {
@@ -144,8 +146,13 @@ export default function InferencePlayground({
       setError(
         err instanceof Error ? err.message : "Failed to get response"
       );
-      // Remove the empty assistant message on error
-      setMessages((prev) => prev.slice(0, -1));
+      // Remove the empty assistant message on error, but only if one was
+      // actually added — a pre-stream failure (e.g. non-ok response) throws
+      // before the placeholder exists, and slicing then would drop the
+      // user's own message instead (PA-314).
+      if (assistantBubbleAdded) {
+        setMessages((prev) => prev.slice(0, -1));
+      }
     } finally {
       setIsLoading(false);
     }
@@ -184,7 +191,7 @@ export default function InferencePlayground({
             >
               Clear
             </button>
-            <button
+            <button aria-label="Close dialog"
               onClick={onClose}
               className="text-[var(--muted)] hover:text-[var(--ink)] p-1.5 hover:bg-zinc-100 rounded-lg transition-colors"
             >
@@ -307,6 +314,7 @@ export default function InferencePlayground({
             />
             <button
               type="submit"
+              aria-label="Send message"
               disabled={isLoading || !input.trim()}
               className="px-5 py-3 bg-blue-500 text-white rounded-xl hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
             >

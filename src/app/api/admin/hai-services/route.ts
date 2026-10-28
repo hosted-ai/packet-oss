@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
     const search = request.nextUrl.searchParams.get("search") || "";
     const page = request.nextUrl.searchParams.get("page") || "0";
     const perPage = request.nextUrl.searchParams.get("per_page") || "20";
+    const serviceType = request.nextUrl.searchParams.get("type") || "";
 
     // Build query for HAI service listing API
     const params = new URLSearchParams({
@@ -27,6 +28,11 @@ export async function GET(request: NextRequest) {
     });
     if (search) {
       params.set("name[peqstr]", search);
+    }
+    // service_type is in HAI's AllowedFilters whitelist for GET /service —
+    // lets pickers show only e.g. baremetal_gpu services
+    if (serviceType) {
+      params.set("service_type[eqstr]", serviceType);
     }
 
     const data = await hostedaiRequest<{

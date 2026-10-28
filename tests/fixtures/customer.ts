@@ -36,3 +36,44 @@ export const testSSHKey = {
   createdAt: new Date('2024-01-01T00:00:00.000Z'),
   updatedAt: new Date('2024-01-01T00:00:00.000Z'),
 };
+
+// The Stripe customer baked into the JWT at login and the account the session is
+// actually operating in. Kept as different strings: a route reading the wrong
+// one cannot pass an assertion written against the other.
+export const JWT_CUSTOMER_ID = 'cus_jwt_identity';
+export const OPERATING_ACCOUNT_ID = 'cus_operating_account';
+export const OPERATING_HOURLY_ID = 'cus_operating_hourly';
+
+export interface AuthContextOverrides {
+  accountId?: string;
+  hourlyCustomerId?: string | null;
+  email?: string;
+  jwtCustomerId?: string;
+  teamId?: string | undefined;
+  customer?: Record<string, unknown>;
+  can?: boolean;
+  stripe?: unknown;
+}
+
+// Stand-in for getAuthenticatedCustomer()'s return value. `can` is a flat
+// boolean here because these routes gate through requirePermission, not can().
+export function authContext(o: AuthContextOverrides = {}) {
+  const accountId = o.accountId ?? OPERATING_ACCOUNT_ID;
+  const email = o.email ?? 'member@example.com';
+  return {
+    payload: {
+      email,
+      customerId: o.jwtCustomerId ?? JWT_CUSTOMER_ID,
+      userId: 'user_1',
+      activeAccountId: accountId,
+    },
+    customer: { id: accountId, email: 'owner@example.com', name: 'Owner', metadata: {}, ...o.customer },
+    teamId: 'teamId' in o ? o.teamId : 'team_1',
+    allTeamIds: ['team_1'],
+    stripe: o.stripe,
+    accountId,
+    hourlyCustomerId: 'hourlyCustomerId' in o ? o.hourlyCustomerId! : null,
+    membership: { userId: 'user_1', role: 'owner', isOwner: true, revokedAt: null },
+    can: () => o.can ?? true,
+  };
+}

@@ -11,6 +11,7 @@ import { getSharedVolumes, deleteSharedVolume, createSharedVolume } from "@/lib/
 import { prisma } from "@/lib/prisma";
 import { gatePermission } from "@/lib/auth/gate";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
+import { getStoragePricePerGBHourCents } from "@/lib/pricing";
 
 // GET - List all shared volumes for the customer
 export async function GET(request: NextRequest) {
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
 
-    const teamId = ctx.customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },
@@ -63,6 +64,12 @@ export async function GET(request: NextRequest) {
       return status?.toLowerCase() || "unknown";
     };
 
+    // PA-345: HAI's own `cost` field on a shared volume is unrelated to this
+    // tenant's configured storage rate (it's frequently 0/unset upstream) —
+    // the sync job never reads it either. Derive the displayed $/hr the same
+    // way /api/sync bills it: size_in_gb * storagePricePerGBHourCents (cents/GB/hr).
+    const storageRateCentsPerGBHour = getStoragePricePerGBHourCents();
+
     return NextResponse.json({
       volumes: volumes.map((v) => {
         const status = normalizeVolumeStatus(v.status);
@@ -73,8 +80,7 @@ export async function GET(request: NextRequest) {
           region_id: v.region_id,
           status,
           mount_point: v.mount_point,
-          // Ensure cost is always a number (API may return string or null)
-          cost: v.cost != null ? parseFloat(String(v.cost)) || 0 : 0,
+          cost: (v.size_in_gb * storageRateCentsPerGBHour) / 100,
           // Add helpful display info
           displaySize: `${v.size_in_gb}GB`,
           isAvailable: status === "available" || status === "attached",
@@ -112,7 +118,7 @@ export async function POST(request: NextRequest) {
     if (!ctx) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
-    const teamId = ctx.customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json({ error: "No team associated with this account" }, { status: 400 });
     }
@@ -203,7 +209,7 @@ export async function DELETE(request: NextRequest) {
     });
     if (denial) return denial;
 
-    const teamId = ctx.customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },

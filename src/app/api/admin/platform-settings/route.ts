@@ -16,6 +16,13 @@ import {
 import { clearSmtpPool } from "@/lib/email/client";
 import { DEFAULT_BLOCKED_DOMAINS } from "@/lib/email-blocklist";
 import { DEFAULT_EMBARGOED_COUNTRIES } from "@/lib/embargo";
+import {
+  DEFAULT_INTERNAL_EMAIL_DOMAINS,
+  DEFAULT_EXCLUDED_EMAILS,
+  INTERNAL_EMAIL_DOMAINS_SETTING,
+  INTERNAL_EXCLUDED_EMAILS_SETTING,
+  getInternalExclusions,
+} from "@/lib/internal-accounts";
 
 function verifyAdmin(request: NextRequest) {
   const sessionToken = request.cookies.get("admin_session")?.value;
@@ -101,7 +108,16 @@ export async function GET(request: NextRequest) {
     defaultCountries: DEFAULT_EMBARGOED_COUNTRIES,
   };
 
-  return NextResponse.json({ services, emailBlocklist, embargo });
+  // ── Internal / test-account exclusion (PA-410) ──
+  const { domains: internalDomains, emails: internalEmails } = await getInternalExclusions();
+  const internalExclusions = {
+    domains: internalDomains,
+    emails: internalEmails,
+    defaultDomains: DEFAULT_INTERNAL_EMAIL_DOMAINS,
+    defaultEmails: DEFAULT_EXCLUDED_EMAILS,
+  };
+
+  return NextResponse.json({ services, emailBlocklist, embargo, internalExclusions });
 }
 
 /**
@@ -157,6 +173,33 @@ export async function PUT(request: NextRequest) {
     // Clear cache so blocklist takes effect immediately
     clearSettingsCache();
 
+    return NextResponse.json({ success: true });
+  }
+
+  // ── Handle internal / test-account exclusion updates (PA-410) ──
+  if (body.internalExclusions !== undefined) {
+    const { domains, emails } = body.internalExclusions as { domains?: string[]; emails?: string[] };
+
+    if (Array.isArray(domains)) {
+      // Charset-restrict: these are inlined into raw SQL by the marketing funnel.
+      const cleaned = [...new Set(
+        domains
+          .map((d) => d.toLowerCase().trim())
+          .filter((d) => /^[a-z0-9.-]+$/.test(d) && d.includes("."))
+      )];
+      await setSetting(INTERNAL_EMAIL_DOMAINS_SETTING, JSON.stringify(cleaned));
+    }
+
+    if (Array.isArray(emails)) {
+      const cleaned = [...new Set(
+        emails
+          .map((e) => e.toLowerCase().trim())
+          .filter((e) => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z0-9]{2,}$/.test(e))
+      )];
+      await setSetting(INTERNAL_EXCLUDED_EMAILS_SETTING, JSON.stringify(cleaned));
+    }
+
+    clearSettingsCache();
     return NextResponse.json({ success: true });
   }
 

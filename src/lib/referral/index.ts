@@ -182,6 +182,18 @@ export async function applyReferralCode(
     return { success: false, error: "You cannot use your own referral code" };
   }
 
+  // Prevent circular referrals: you can't apply a code owned by someone you referred
+  const ownerReferredBy = await prisma.referralClaim.findUnique({
+    where: { refereeCustomerId: referralCode.stripeCustomerId },
+    include: { referralCode: true },
+  });
+  if (ownerReferredBy?.referralCode?.stripeCustomerId === refereeCustomerId) {
+    return {
+      success: false,
+      error: "You cannot use a referral code from an account you referred",
+    };
+  }
+
   // Check if referee already has a claim
   const existingClaim = await prisma.referralClaim.findUnique({
     where: { refereeCustomerId },
@@ -434,7 +446,7 @@ export async function voidReferralClaim(claimId: string): Promise<void> {
  */
 export async function validateReferralCode(
   code: string,
-  refereeEmail?: string
+  _refereeEmail?: string
 ): Promise<{
   valid: boolean;
   error?: string;

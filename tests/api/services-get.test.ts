@@ -142,11 +142,11 @@ describe("GET /api/services — PA-227", () => {
     expect(getExposedServices).not.toHaveBeenCalled();
   });
 
-  it("returns 200 with an empty list when HAI returns null (no more .map on null)", async () => {
+  it("returns 200 with an empty list when the instance has no services", async () => {
     vi.mocked(getAuthenticatedCustomer).mockResolvedValue(makeAuth("member"));
-    // Reproduces PA-227's root crash: HAI body parses to null, route used to
-    // call .map() on it and 500. Fix coerces to [] at the lib boundary.
-    vi.mocked(getExposedServices).mockResolvedValue(null as never);
+    // The lib boundary normalizes a null body and the platform's empty
+    // envelope alike — pinned in tests/lib/hostedai/services.test.ts.
+    vi.mocked(getExposedServices).mockResolvedValue([]);
 
     const res = await GET(makeReq());
     const body = await res.json();

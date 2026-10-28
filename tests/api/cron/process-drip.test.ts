@@ -67,6 +67,11 @@ vi.mock("@/lib/stripe", () => ({ getStripe: mockGetStripe }));
 vi.mock("@/lib/customer-cache", () => ({ cacheCustomer: mockCacheCustomer }));
 vi.mock("@/lib/customer-auth", () => ({
   generateCustomerToken: mockGenerateCustomerToken,
+  // PA-380: emailed sign-in links now mint via createLoginLink. Delegate to the
+  // same spy so existing email/customerId + token assertions still hold.
+  createLoginLink: vi.fn(async (o: { email: string; customerId: string }) =>
+    mockGenerateCustomerToken(o.email, o.customerId),
+  ),
   generateUnsubscribeToken: mockGenerateUnsubscribeToken,
 }));
 vi.mock("@/lib/customer-resolver", () => ({

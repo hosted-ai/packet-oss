@@ -58,7 +58,7 @@ function AdminVerifyContent() {
       .catch(() => {
         setError("Failed to verify login");
       });
-  }, [searchParams, router, token, tab]);
+  }, [searchParams, router, token, tab, adminRedirect]);
 
   // PIN input handlers
   const handlePinChange = (index: number, value: string, isConfirm: boolean) => {

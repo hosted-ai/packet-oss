@@ -8,9 +8,14 @@ export interface PricingConfig {
   // Kept for backwards compatibility but not used in billing
   hourlyRateCents: number;
   storagePricePerGBHourCents: number; // Storage rate per GB per hour in cents (e.g., 0.01 = $0.0001/GB/hr)
-  autoRefillThresholdCents: number; // Trigger refill when below this
-  autoRefillAmountCents: number; // Amount to refill
+  autoRefillThresholdCents: number; // Default refill threshold (customers can override per-account)
+  autoRefillAmountCents: number; // Default refill amount (customers can override per-account)
   stoppedInstanceRatePercent: number; // Percentage of hourly rate charged for stopped/reserved instances (default 25%)
+  // PA-339: how much debt (cents the customer OWES; Stripe balance is positive when owed)
+  // a running pod may sit in at the start of a billing cycle before /api/sync hard-stops it.
+  // 0 = stop as soon as a cycle begins in arrears. Raise it to grant grace, or set it very
+  // high to effectively disable the hard stop (ops kill-switch) without a code deploy.
+  hardStopDebtToleranceCents: number;
   updatedAt?: string;
   updatedBy?: string;
 }
@@ -18,9 +23,10 @@ export interface PricingConfig {
 const DEFAULT_PRICING: PricingConfig = {
   hourlyRateCents: 0, // DEPRECATED - GPU rates come from GpuProduct.pricePerHourCents
   storagePricePerGBHourCents: 0, // Configurable via admin Settings tab. Default 0 = no storage charges.
-  autoRefillThresholdCents: 2500, // $25 - Configurable via admin Settings tab
-  autoRefillAmountCents: 10000, // $100 - Configurable via admin Settings tab
+  autoRefillThresholdCents: 2500, // $25 - default; customers can override per-account
+  autoRefillAmountCents: 10000, // $100 - default; customers can override per-account
   stoppedInstanceRatePercent: 25, // 25% of hourly rate for stopped instances
+  hardStopDebtToleranceCents: 0, // PA-339: stop a running pod once its cycle starts in arrears
 };
 
 function ensureDataDir(): void {
@@ -79,7 +85,7 @@ export function getAutoRefillThresholdCents(): number {
   return getPricing().autoRefillThresholdCents;
 }
 
-// Get auto-refill amount in cents
+// Get auto-refill amount in cents (the per-account default; customers can override)
 export function getAutoRefillAmountCents(): number {
   return getPricing().autoRefillAmountCents;
 }
@@ -92,4 +98,9 @@ export function getStoragePricePerGBHourCents(): number {
 // Get stopped instance rate as percentage (e.g., 25 = 25%)
 export function getStoppedInstanceRatePercent(): number {
   return getPricing().stoppedInstanceRatePercent;
+}
+
+// PA-339: tolerated arrears (cents owed) before /api/sync hard-stops a running pod
+export function getHardStopDebtToleranceCents(): number {
+  return getPricing().hardStopDebtToleranceCents;
 }

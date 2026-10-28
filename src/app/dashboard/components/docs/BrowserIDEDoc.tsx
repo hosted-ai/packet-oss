@@ -2,8 +2,7 @@
 
 export function BrowserIDEDoc() {
   return (
-    <div className="prose prose-zinc max-w-none">
-      <h1>Browser-Based IDEs</h1>
+    <div>
       <p className="lead">
         Access Jupyter Lab, VS Code, and other development tools directly in your browser.
       </p>

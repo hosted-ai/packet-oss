@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { validateVoucher } from "@/lib/voucher";
-import { verifyCustomerToken } from "@/lib/customer-auth";
+import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 
 const voucherSchema = z.object({
   code: z.string().trim().min(1, "Voucher code is required").max(50),
@@ -10,23 +10,8 @@ const voucherSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    // Get customer from auth token
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const token = authHeader.substring(7);
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { success: false, error: "Invalid token" },
-        { status: 401 }
-      );
-    }
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
 
     const body = await request.json();
     const parsed = voucherSchema.safeParse(body);
@@ -41,9 +26,10 @@ export async function POST(request: NextRequest) {
 
     const { code, topupAmountCents } = parsed.data;
 
+    // Same wallet the redeem and top-up paths credit, so the preview matches.
     const result = await validateVoucher(
       code,
-      payload.customerId,
+      auth.hourlyCustomerId ?? auth.accountId,
       topupAmountCents
     );
 

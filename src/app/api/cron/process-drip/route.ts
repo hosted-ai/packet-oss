@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getStripe } from "@/lib/stripe";
 import { cacheCustomer } from "@/lib/customer-cache";
-import { generateCustomerToken, generateUnsubscribeToken } from "@/lib/customer-auth";
+import { createLoginLink, generateUnsubscribeToken } from "@/lib/customer-auth";
 import { resolvePrimaryCustomer } from "@/lib/customer-resolver";
 import {
   sendDripGpu1,
@@ -93,7 +93,6 @@ async function sendProductAwareEmail(
   stripeCustomerId: string,
   unsubscribeUrl: string,
 ): Promise<boolean> {
-  const isLastStep = stepIndex + 1 >= totalSteps;
   const isFirstStep = stepIndex === 0;
 
   // Apply $25 credit on the first email (immediate value / reciprocity)
@@ -257,7 +256,7 @@ export async function POST(request: NextRequest) {
         const dripCustomerId = primaryForDrip?.id || enrollment.stripeCustomerId;
 
         // Generate a fresh dashboard URL
-        const token = generateCustomerToken(enrollment.email, dripCustomerId);
+        const token = await createLoginLink({ email: enrollment.email, customerId: dripCustomerId });
         const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${token}`;
 
         // Generate unsubscribe URL (90-day token)

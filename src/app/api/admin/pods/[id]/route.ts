@@ -13,6 +13,7 @@ import {
   getPoolSubscriptions,
 } from "@/lib/hostedai";
 import { prisma } from "@/lib/prisma";
+import { closeSubscriptionHistory } from "@/lib/subscription-history";
 
 // GET - Get detailed pod info
 export async function GET(
@@ -155,8 +156,9 @@ export async function POST(
       result = await podAction(podName, subscriptionId, action);
     } else if (action === "terminate") {
       result = await unsubscribeFromPool(subscriptionId, teamId, subscription.pool_id);
-      // Clean up our metadata
+      // Clean up our metadata (close the PA-354 history window first)
       try {
+        await closeSubscriptionHistory({ subscriptionId });
         await prisma.podMetadata.delete({
           where: { subscriptionId },
         });

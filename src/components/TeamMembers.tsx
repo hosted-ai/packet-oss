@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PACKET_ROLES, ROLE_PERMISSIONS, type PacketRole } from "@/lib/auth/role-permissions";
+import { trackEvent } from "@/lib/analytics/track-event";
 
 interface MemberRow {
   id: string;
@@ -47,6 +48,11 @@ const ROLE_ORDER: PacketRole[] = [
   "financeManager",
 ];
 
+// PA-228: invite Name length cap. Mirrors the server's MAX_INVITEE_NAME_LEN
+// (src/app/api/accounts/[accountId]/invitations/route.ts) so the input's
+// maxLength, the live counter, and the at-limit message never drift apart.
+const INVITE_NAME_MAX_LENGTH = 100;
+
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString("en-US", {
     month: "short",
@@ -86,10 +92,17 @@ export default function TeamMembers({
 
   async function handleRename(e: React.FormEvent) {
     e.preventDefault();
+    const trimmed = renameValue.trim();
+    // PA-460: an empty field with no existing team name is a no-op (nothing
+    // to clear), so don't submit it and claim success.
+    if (trimmed === "" && !teamName) {
+      setSuccess(null);
+      setError("Please enter a team name.");
+      return;
+    }
     setRenaming(true);
     setError(null);
     try {
-      const trimmed = renameValue.trim();
       const res = await fetch("/api/account/team-name", {
         method: "PATCH",
         headers,
@@ -174,6 +187,9 @@ export default function TeamMembers({
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to send invitation");
+
+      // GA4: team invite sent successfully
+      trackEvent("team_invite_sent");
 
       setSuccess(`Invitation sent to ${inviteEmail.trim()}.`);
       setInviteEmail("");
@@ -344,9 +360,26 @@ export default function TeamMembers({
                 value={inviteName}
                 onChange={(e) => setInviteName(e.target.value)}
                 placeholder="Colleague's name"
-                maxLength={100}
+                maxLength={INVITE_NAME_MAX_LENGTH}
+                aria-describedby="invite-name-counter"
                 className="w-full px-3 py-2 border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               />
+              {/* PA-228: give live feedback so the field no longer stops accepting
+                  input silently — a counter that turns into an at-limit message. */}
+              <div id="invite-name-counter" className="mt-1 flex items-center justify-between gap-2">
+                <p className="text-xs text-red-600" role="alert">
+                  {inviteName.length >= INVITE_NAME_MAX_LENGTH
+                    ? `Name cannot exceed ${INVITE_NAME_MAX_LENGTH} characters`
+                    : " "}
+                </p>
+                <p
+                  className={`text-xs tabular-nums ${
+                    inviteName.length >= INVITE_NAME_MAX_LENGTH ? "text-red-600" : "text-zinc-500"
+                  }`}
+                >
+                  {inviteName.length}/{INVITE_NAME_MAX_LENGTH}
+                </p>
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-zinc-700 mb-1">

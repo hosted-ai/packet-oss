@@ -150,7 +150,7 @@ export function DripTab() {
           <Mail className="w-12 h-12 mx-auto text-[#5b6476] mb-4" />
           <h3 className="text-lg font-semibold text-[#0b0f1c] mb-2">No drip sequences yet</h3>
           <p className="text-[#5b6476] mb-6 max-w-md mx-auto">
-            Click "Create Default Sequence" to set up the free-signup onboarding campaign. This sends 4 emails over 14 days to guide new developers from first API call to GPU deployment.
+            Click &quot;Create Default Sequence&quot; to set up the free-signup onboarding campaign. This sends 4 emails over 14 days to guide new developers from first API call to GPU deployment.
           </p>
           <button
             onClick={handleSeed}

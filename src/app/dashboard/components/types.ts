@@ -64,6 +64,13 @@ export interface AccountData {
   }>;
   gpuDashboardUrl: string | null;
   billingPortalUrl: string;
+  /** PA-195: per-customer opt-in auto-refill settings. null when the user lacks billing.view. */
+  autoRefill?: {
+    enabled: boolean;
+    amountCents: number;
+    thresholdCents: number;
+    hasPaymentMethod: boolean;
+  } | null;
   bareMetalEnabled?: boolean;
   /** Legacy field — true when JWT email matches Stripe customer email. Kept for back-compat. Use `can` for new gating. */
   isOwner: boolean;
@@ -133,14 +140,42 @@ export interface PoolSubscription {
   pool_name?: string;
   pool_label?: string;
   status: string;
+  // HAI 2.2 unified `nature` ("vm" | "pod" | "baremetal"). Baremetal rows are
+  // term-prepay servers: read-only in the pods grid (no start/stop/terminate —
+  // those endpoints 400 on baremetal ids), managed via the Bare Metal tab.
+  // Unified baremetal statuses: requested | online | offline | rebooting | deleting.
+  nature?: string;
+  ip?: string[];
+  // Linked term-prepay order (matched by haiSubscriptionId, fallback
+  // invoiceNumber === instance name). orderId null = no order found
+  // (e.g. a sub created by hand on the HAI panel).
+  baremetal?: {
+    orderId: string | null;
+    gpuType?: string;
+    gpuCount?: number;
+    contractMonths?: number;
+    orderStatus?: string;
+  };
   region?: {
+    id?: number; // HAI region id — used to stamp region-maintenance status
     region_name?: string;
     city?: string;
+  };
+  // Set by GET /api/instances when this instance's region is under maintenance.
+  // The card hides all actions and shows the message in an amber banner.
+  maintenance?: {
+    active: boolean;
+    message?: string;
   };
   // Hourly rate in dollars (e.g., 0.66 for $0.66/hr) - from GpuProduct pricing
   hourlyRate?: number;
   storage_details?: {
     ephemeral_storage_gb?: number;
+    // PA-80: latest local/ephemeral (root disk) usage from GpuHardwareMetrics,
+    // set by GET /api/instances. Drives the 80%/90% "storage almost full"
+    // warning banner on the card. Absent when there are no recent metrics.
+    ephemeral_storage_used_gb?: number;
+    ephemeral_storage_percent?: number;
     persistent_storage_block_id?: string;
     persistent_storage_gb?: number;
     shared_volumes?: Array<{

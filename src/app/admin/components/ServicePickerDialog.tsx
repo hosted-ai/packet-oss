@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 interface HAIService {
   id: string;
@@ -19,21 +19,24 @@ interface ServicePickerDialogProps {
   onClose: () => void;
   onSelect: (serviceId: string, serviceName: string) => void;
   currentServiceId?: string | null;
+  /** Restrict the list to one HAI service_type (e.g. "baremetal_gpu") */
+  serviceType?: string;
 }
 
-export function ServicePickerDialog({ open, onClose, onSelect, currentServiceId }: ServicePickerDialogProps) {
+export function ServicePickerDialog({ open, onClose, onSelect, currentServiceId, serviceType }: ServicePickerDialogProps) {
   const [services, setServices] = useState<HAIService[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [error, setError] = useState<string | null>(null);
   const searchTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchServices = async (query: string) => {
+  const fetchServices = useCallback(async (query: string) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({ per_page: "50" });
       if (query) params.set("search", query);
+      if (serviceType) params.set("type", serviceType);
       const res = await fetch(`/api/admin/hai-services?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch");
       const data = await res.json();
@@ -44,13 +47,13 @@ export function ServicePickerDialog({ open, onClose, onSelect, currentServiceId 
     } finally {
       setLoading(false);
     }
-  };
+  }, [serviceType]);
 
   useEffect(() => {
     if (open) {
       fetchServices("");
     }
-  }, [open]);
+  }, [open, fetchServices]);
 
   const handleSearchChange = (value: string) => {
     setSearch(value);

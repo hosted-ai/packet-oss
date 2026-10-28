@@ -28,7 +28,17 @@ export type AdminActivityType =
   | "pod_restart"
   | "pod_terminate"
   | "wallet_adjustment"
-  | "admin_pin_set";
+  | "admin_pin_set"
+  // Bare-metal admin overrides (PA-819/PA-824/PA-828). These get precise types
+  // rather than the catch-all "settings_updated" because each one either touches
+  // money or moves investor-reported revenue between periods, so "why does this
+  // order read as paid / why did last month's number change" has to be
+  // answerable from the trail alone.
+  | "baremetal_payment_override"
+  | "baremetal_backfill_mapped"
+  | "baremetal_dates_edited"
+  | "baremetal_node_retired"
+  | "baremetal_node_unretired";
 
 export interface AdminActivity {
   id: string;

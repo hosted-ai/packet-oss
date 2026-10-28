@@ -13,6 +13,7 @@ import path from "path";
 import { prisma } from "@/lib/prisma";
 import { getStripeTeamMap, getResourcePolicyTeams } from "@/lib/admin-cache";
 import { gpuaasAdmin, type GPUaaSPool, type GPUaaSNode, type ClusterPoolGPU } from "@/lib/gpuaas-admin";
+import { getAllUnifiedInstances } from "@/lib/hostedai";
 
 // Types (shared with frontend)
 export interface PoolGPU {
@@ -95,6 +96,8 @@ export interface PoolOverviewResponse {
     activePods: number;
   };
   _cachedAt?: string;
+  /** True if any GPUaaS API call errored this run (vs. legitimately returning fewer results). */
+  hadApiFailures?: boolean;
 }
 
 // Cache config
@@ -131,15 +134,48 @@ export function writePoolOverviewCache(data: PoolOverviewResponse): void {
 /** Compute full pool overview from live API data.
  *  When existingCache is provided, per-pool pod data is preserved if the API call fails. */
 export async function computePoolOverview(existingCache?: PoolOverviewResponse | null): Promise<PoolOverviewResponse> {
-  const [regions, clusters, stripeTeamMap, policyTeams] = await Promise.all([
+  let hadApiFailures = false;
+
+  const [regions, clusters, stripeTeamMap, policyTeams, unifiedInstances] = await Promise.all([
     gpuaasAdmin.listRegions(),
     gpuaasAdmin.listClusters(),
     getStripeTeamMap(),
     getResourcePolicyTeams(),
+    getAllUnifiedInstances().catch((err) => {
+      console.warn("[Pool Overview] Failed to fetch unified instances:", err instanceof Error ? err.message : err);
+      hadApiFailures = true;
+      return null;
+    }),
   ]);
 
   // Build region map
   const regionMap = new Map(regions.map((r) => [r.id, r]));
+
+  // Pool Overview must list every real pod/instance per team (PA-330), not one
+  // aggregate row per team — group actual instances by pool_id, same source the
+  // Pods tab uses (getAllUnifiedInstances), instead of the team-subscription summary.
+  const instancesByPool = new Map<number, PoolPod[]>();
+  if (unifiedInstances) {
+    for (const inst of unifiedInstances) {
+      const poolId = inst.pod_info?.pool_id;
+      if (!poolId) continue;
+      const teamId = inst.team?.id || "";
+      const stripeInfo = teamId ? stripeTeamMap.get(teamId) : undefined;
+      const policyTeam = policyTeams.find((t) => t.id === teamId);
+      const pod: PoolPod = {
+        subscriptionId: inst.id,
+        podName: inst.name,
+        status: inst.status?.toLowerCase() || "unknown",
+        vgpuCount: inst.pod_info?.vgpu_count || 1,
+        customerEmail: stripeInfo?.email || policyTeam?.name || null,
+        customerName: stripeInfo?.name || policyTeam?.name || null,
+        teamId,
+        teamName: inst.team?.name || policyTeam?.name || null,
+      };
+      if (!instancesByPool.has(poolId)) instancesByPool.set(poolId, []);
+      instancesByPool.get(poolId)!.push(pod);
+    }
+  }
 
   // Get provider nodes for mapping
   const providerNodes = await prisma.providerNode.findMany({
@@ -166,13 +202,13 @@ export async function computePoolOverview(existingCache?: PoolOverviewResponse |
       let allPoolGPUs: ClusterPoolGPU[] = [];
 
       try { pools = await gpuaasAdmin.listPools(cluster.id); }
-      catch { pools = []; }
+      catch { pools = []; hadApiFailures = true; }
 
       try { nodes = await gpuaasAdmin.listNodes(cluster.region_id); }
-      catch { nodes = []; }
+      catch { nodes = []; hadApiFailures = true; }
 
       try { allPoolGPUs = await gpuaasAdmin.getAllPoolGPUs(cluster.id); }
-      catch { allPoolGPUs = []; }
+      catch { allPoolGPUs = []; hadApiFailures = true; }
 
       if (pools.length === 0 && nodes.length === 0) continue;
 
@@ -187,48 +223,14 @@ export async function computePoolOverview(existingCache?: PoolOverviewResponse |
         if (gpu.gpuaas_node_id) nodesByPool.get(gpu.pool_id)!.add(gpu.gpuaas_node_id);
       }
 
-      // Fetch subscribed teams for all pools in this cluster (parallel)
-      // Build a map of existing cache pods by pool ID for fallback
+      // Build a map of existing cache pods by pool ID — used only as a fallback if
+      // the unified-instances fetch above failed entirely.
       const existingPoolPods = new Map<number, PoolPod[]>();
       if (existingCache?.pools) {
         for (const p of existingCache.pools) {
           if (p.pods.length > 0) existingPoolPods.set(p.id, p.pods);
         }
       }
-
-      const poolSubscriberMap = new Map<number, PoolPod[]>();
-      await Promise.all(
-        pools.map(async (pool) => {
-          try {
-            const result = await gpuaasAdmin.getPoolSubscribedTeams(pool.id);
-            const pods: PoolPod[] = result.data.filter((team) => team.team_id).map((team) => {
-              const stripeInfo = stripeTeamMap.get(team.team_id);
-              const policyTeam = policyTeams.find((t) => t.id === team.team_id);
-              return {
-                subscriptionId: `${pool.id}-${team.team_id}`,
-                podName: team.team_name || `team-${team.team_id.substring(0, 8)}`,
-                status: team.status === "subscribed" ? "active" : team.status,
-                vgpuCount: 1,
-                customerEmail: stripeInfo?.email || policyTeam?.name || null,
-                customerName: stripeInfo?.name || policyTeam?.name || null,
-                teamId: team.team_id,
-                teamName: team.team_name || policyTeam?.name || null,
-              };
-            });
-            poolSubscriberMap.set(pool.id, pods);
-          } catch (err) {
-            console.warn(`[Pool Overview] Failed to fetch subscribers for pool ${pool.id}:`, err instanceof Error ? err.message : err);
-            // Preserve existing cache data for this pool instead of writing empty
-            const cached = existingPoolPods.get(pool.id);
-            if (cached && cached.length > 0) {
-              console.log(`[Pool Overview] Using cached ${cached.length} pods for pool ${pool.id}`);
-              poolSubscriberMap.set(pool.id, cached);
-            } else {
-              poolSubscriberMap.set(pool.id, []);
-            }
-          }
-        })
-      );
 
       let clusterTotalGpus = 0;
       let clusterAllocatedGpus = 0;
@@ -237,7 +239,9 @@ export async function computePoolOverview(existingCache?: PoolOverviewResponse |
       for (const pool of pools) {
         const poolGPUs = gpusByPool.get(pool.id) || [];
         const poolNodeIds = nodesByPool.get(pool.id) || new Set();
-        const poolPods = poolSubscriberMap.get(pool.id) || [];
+        const poolPods = unifiedInstances
+          ? instancesByPool.get(pool.id) || []
+          : existingPoolPods.get(pool.id) || [];
 
         const gpuDetails: PoolGPU[] = poolGPUs.map((gpu) => {
           const node = nodeMap.get(gpu.gpuaas_node_id);
@@ -275,7 +279,15 @@ export async function computePoolOverview(existingCache?: PoolOverviewResponse |
         });
 
         const totalGpus = poolGPUs.length || pool.total_gpus;
-        const allocatedGpus = poolGPUs.filter((g) => g.assignment_status === "assigned").length || pool.allocated_gpus;
+        // assignment_status is a GPU->pool attachment flag, not a customer-occupancy signal:
+        // it's always "assigned" for any GPU already scoped to this pool (pool_id and
+        // assignment_status are set atomically), so filtering by it is a near no-op and made
+        // utilization read ~100% for any populated pool (PA-369). Real occupancy is the
+        // active customer subscriptions already fetched into poolPods.
+        const overcommitRatio = pool.overcommit_ratio || 1;
+        const allocatedGpus = poolGPUs.length > 0
+          ? Math.min(totalGpus, Math.round(poolPods.length / overcommitRatio))
+          : pool.allocated_gpus;
         const availableGpus = totalGpus - allocatedGpus;
 
         clusterTotalGpus += totalGpus;
@@ -312,6 +324,7 @@ export async function computePoolOverview(existingCache?: PoolOverviewResponse |
       });
     } catch (err) {
       console.error(`[Pool Overview] Error for cluster ${cluster.id}:`, err);
+      hadApiFailures = true;
     }
   }
 
@@ -329,5 +342,5 @@ export async function computePoolOverview(existingCache?: PoolOverviewResponse |
     ? Math.round((summary.allocatedGpus / summary.totalGpus) * 100)
     : 0;
 
-  return { clusters: clusterSummaries, pools: poolDetails, summary };
+  return { clusters: clusterSummaries, pools: poolDetails, summary, hadApiFailures };
 }

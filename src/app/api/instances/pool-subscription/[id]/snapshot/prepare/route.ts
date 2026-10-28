@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
-import { getStripe } from "@/lib/stripe";
+import { gatePermission } from "@/lib/auth/gate";
+import { resolveOperatingContext } from "@/lib/auth/account-resolver";
 import { getPoolSubscriptions, getConnectionInfo, getAllPools, getStorageBlocks } from "@/lib/hostedai";
 import { getStoragePricePerGBHourCents } from "@/lib/pricing";
-import Stripe from "stripe";
 import { spawn } from "child_process";
 import { validateSSHParams } from "@/lib/ssh-validation";
 
@@ -98,14 +98,34 @@ export async function GET(
 
     const { id: subscriptionId } = await params;
 
-    // Get customer to find team ID
-    const stripe = await getStripe();
-    const customer = (await stripe.customers.retrieve(payload.customerId)) as Stripe.Customer;
-    const teamId = customer.metadata?.hostedai_team_id;
+    // PA-175: resolve operating account.
+    const ctx = await resolveOperatingContext({
+      email: payload.email,
+      jwtCustomerId: payload.customerId,
+      activeAccountId: payload.activeAccountId,
+    });
+    if (!ctx) {
+      return NextResponse.json({ error: "Account not found" }, { status: 404 });
+    }
+    const customer = ctx.customer;
+    const teamId = ctx.teamId;
 
     if (!teamId) {
       return NextResponse.json({ error: "No team associated with this account" }, { status: 400 });
     }
+
+    // PA-296: this GET feeds the snapshot-creation flow (data size + storage
+    // options) gated by snapshots.manage on the sibling POST — same managed
+    // read as PA-295's add-storage GET.
+    const denial = await gatePermission({
+      payload,
+      accountId: ctx.accountId,
+      customerEmail: typeof customer.email === "string" ? customer.email : null,
+      permission: "snapshots.manage",
+      request,
+      extra: { subscriptionId, action: "prepare-snapshot" },
+    });
+    if (denial) return denial;
 
     // Get subscription details
     const subscriptions = await getPoolSubscriptions(teamId);

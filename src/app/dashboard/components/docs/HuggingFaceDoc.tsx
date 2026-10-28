@@ -2,27 +2,26 @@
 
 export function HuggingFaceDoc() {
   return (
-    <div className="prose prose-zinc max-w-none">
-      <h1>HuggingFace Model Deployment</h1>
+    <div>
       <p className="lead">
         Deploy HuggingFace models with one click. Get an OpenAI-compatible API
         endpoint in minutes.
       </p>
 
       {/* Table of Contents */}
-      <nav className="not-prose my-8 p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">On this page</h4>
-        <ul className="space-y-1.5 text-sm">
-          <li><a href="#overview" className="text-blue-600 dark:text-blue-400 hover:underline">Overview</a></li>
-          <li><a href="#quick-start" className="text-blue-600 dark:text-blue-400 hover:underline">Quick Start</a></li>
-          <li><a href="#recommended-models" className="text-blue-600 dark:text-blue-400 hover:underline">Recommended Models</a></li>
-          <li><a href="#deployment-options" className="text-blue-600 dark:text-blue-400 hover:underline">Deployment Options</a></li>
-          <li><a href="#gated-models" className="text-blue-600 dark:text-blue-400 hover:underline">Gated Models</a></li>
-          <li><a href="#using-your-model" className="text-blue-600 dark:text-blue-400 hover:underline">Using Your Deployed Model</a></li>
-          <li><a href="#api-endpoints" className="text-blue-600 dark:text-blue-400 hover:underline">API Endpoints</a></li>
-          <li><a href="#gpu-sizing" className="text-blue-600 dark:text-blue-400 hover:underline">GPU Sizing Guide</a></li>
-          <li><a href="#monitoring" className="text-blue-600 dark:text-blue-400 hover:underline">Monitoring</a></li>
-          <li><a href="#troubleshooting" className="text-blue-600 dark:text-blue-400 hover:underline">Troubleshooting</a></li>
+      <nav className="docs-toc">
+        <h4>On this page</h4>
+        <ul>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#quick-start">Quick Start</a></li>
+          <li><a href="#recommended-models">Recommended Models</a></li>
+          <li><a href="#deployment-options">Deployment Options</a></li>
+          <li><a href="#gated-models">Gated Models</a></li>
+          <li><a href="#using-your-model">Using Your Deployed Model</a></li>
+          <li><a href="#api-endpoints">API Endpoints</a></li>
+          <li><a href="#gpu-sizing">GPU Sizing Guide</a></li>
+          <li><a href="#monitoring">Monitoring</a></li>
+          <li><a href="#troubleshooting">Troubleshooting</a></li>
         </ul>
       </nav>
 
@@ -35,9 +34,9 @@ export function HuggingFaceDoc() {
         <li>Exposes an OpenAI-compatible API endpoint</li>
       </ol>
 
-      <div className="not-prose bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 my-6">
-        <h4 className="text-blue-800 dark:text-blue-200 font-semibold mb-2 text-base">Why vLLM?</h4>
-        <p className="text-blue-700 dark:text-blue-300 text-sm mb-0">
+      <div className="docs-callout docs-callout-info">
+        <h4>Why vLLM?</h4>
+        <p>
           vLLM is the fastest open-source LLM inference engine, with PagedAttention for efficient memory management
           and continuous batching for maximum throughput. Your deployed models run 2-4x faster than naive implementations.
         </p>
@@ -220,9 +219,9 @@ export function HuggingFaceDoc() {
         </li>
       </ol>
 
-      <div className="not-prose bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 my-6">
-        <h4 className="text-amber-800 dark:text-amber-200 font-semibold mb-2 text-base">Token Security</h4>
-        <p className="text-amber-700 dark:text-amber-300 text-sm mb-0">
+      <div className="docs-callout docs-callout-warning">
+        <h4>Token Security</h4>
+        <p>
           Your HuggingFace token is only used during model download and is never stored permanently.
           It&apos;s transmitted securely and deleted after the model is loaded.
         </p>
@@ -422,9 +421,9 @@ console.log(response.choices[0].message.content);`}</code>
         </tbody>
       </table>
 
-      <div className="not-prose bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 my-6">
-        <h4 className="text-green-800 dark:text-green-200 font-semibold mb-2 text-base">Memory Calculation</h4>
-        <p className="text-green-700 dark:text-green-300 text-sm mb-0">
+      <div className="docs-callout docs-callout-success">
+        <h4>Memory Calculation</h4>
+        <p>
           Rule of thumb: Each billion parameters needs ~2GB in FP16. A 7B model needs ~14GB, plus overhead
           for KV cache. Start with the minimum and scale up if you hit out-of-memory errors.
         </p>

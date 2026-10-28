@@ -10,7 +10,6 @@ import { prisma } from "@/lib/prisma";
 import { verifyCustomerToken } from "@/lib/auth";
 import { gatePermission } from "@/lib/auth/gate";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
-import { getStripe } from "@/lib/stripe";
 import { getAppsScenarioId } from "@/lib/scenarios";
 import { getScenarioCompatibleServices } from "@/lib/hostedai";
 
@@ -56,7 +55,7 @@ export async function GET(request: NextRequest) {
     const installations = await prisma.installedApp.findMany({
       where: {
         subscriptionId,
-        stripeCustomerId: payload.customerId,
+        stripeCustomerId: ctx.accountId,
         status: { not: "uninstalled" },
       },
       include: {
@@ -97,20 +96,16 @@ export async function GET(request: NextRequest) {
   });
 
   // Check which app services are deployable via HAI scenario compatibility
-  let deployableServiceIds = new Set<string>();
+  const deployableServiceIds = new Set<string>();
   try {
-    const stripe = await getStripe();
-    const customer = await stripe.customers.retrieve(payload.customerId);
-    if (customer && !customer.deleted) {
-      const teamId = (customer as { metadata?: Record<string, string> }).metadata?.hostedai_team_id;
-      if (teamId) {
-        const appsScenarioId = await getAppsScenarioId();
-        const compatible = await getScenarioCompatibleServices(appsScenarioId, teamId, 100);
-        const services = Array.isArray(compatible) ? compatible : compatible?.services;
-        if (Array.isArray(services)) {
-          for (const svc of services) {
-            deployableServiceIds.add(svc.id);
-          }
+    const teamId = ctx.teamId;
+    if (teamId) {
+      const appsScenarioId = await getAppsScenarioId();
+      const compatible = await getScenarioCompatibleServices(appsScenarioId, teamId, 100);
+      const services = Array.isArray(compatible) ? compatible : compatible?.services;
+      if (Array.isArray(services)) {
+        for (const svc of services) {
+          deployableServiceIds.add(svc.id);
         }
       }
     }
@@ -224,7 +219,7 @@ export async function DELETE(request: NextRequest) {
   const deleted = await prisma.installedApp.deleteMany({
     where: {
       subscriptionId,
-      stripeCustomerId: payload.customerId,
+      stripeCustomerId: ctx.accountId,
       app: { slug: appSlug },
     },
   });

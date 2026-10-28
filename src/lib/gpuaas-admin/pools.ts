@@ -171,7 +171,7 @@ export function formatPoolCapacity(pool: GPUaaSPool): string {
  * @deprecated Use gpuaasAdmin.getClusterByRegion instead
  */
 export async function getGpuaasIdForRegion(
-  regionId: number
+  _regionId: number
 ): Promise<number | null> {
   // This function is deprecated - use getClusterByRegion from regions.ts
   console.warn("getGpuaasIdForRegion is deprecated - use gpuaasAdmin.getClusterByRegion");

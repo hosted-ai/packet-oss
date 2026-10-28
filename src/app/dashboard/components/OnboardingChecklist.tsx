@@ -12,29 +12,32 @@ interface OnboardingStep {
   actionLabel?: string;
 }
 
+// hasLaunchedGpu is "has EVER launched one", not how many are up now: launching
+// a first GPU is a milestone, so stopping that pod must not un-complete it.
 interface OnboardingChecklistProps {
   walletBalance: number;
-  hasGpuRunning: boolean;
+  hasLaunchedGpu: boolean;
   hasPoolSubscriptions: boolean;
-  onNavigateToTab: (tab: string) => void;
   onAddFunds: () => void;
   onExploreGPUs: () => void;
+  onLaunchGpu: () => void;
 }
 
 const DISMISSED_KEY = "packet_onboarding_dismissed";
 
 export function OnboardingChecklist({
   walletBalance,
-  hasGpuRunning,
+  hasLaunchedGpu,
   hasPoolSubscriptions,
-  onNavigateToTab,
   onAddFunds,
   onExploreGPUs,
+  onLaunchGpu,
 }: OnboardingChecklistProps) {
   const [dismissed, setDismissed] = useState(true); // Default true to prevent flash
   const [exploredInventory, setExploredInventory] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is client-only; reading it in an effect is the SSR-safe pattern
     setDismissed(localStorage.getItem(DISMISSED_KEY) === "true");
     setExploredInventory(localStorage.getItem("packet_explored_inventory") === "true");
   }, []);
@@ -60,7 +63,7 @@ export function OnboardingChecklist({
       id: "explore",
       label: "Explore GPU inventory",
       description: "See what's available",
-      completed: exploredInventory || hasPoolSubscriptions || hasGpuRunning,
+      completed: exploredInventory || hasPoolSubscriptions || hasLaunchedGpu,
       action: () => {
         markExplored();
         onExploreGPUs();
@@ -79,8 +82,8 @@ export function OnboardingChecklist({
       id: "gpu",
       label: "Launch your first GPU",
       description: "SSH in and start building",
-      completed: hasPoolSubscriptions || hasGpuRunning,
-      action: () => onNavigateToTab("dashboard"),
+      completed: hasPoolSubscriptions || hasLaunchedGpu,
+      action: onLaunchGpu,
       actionLabel: "Launch GPU",
     },
   ];

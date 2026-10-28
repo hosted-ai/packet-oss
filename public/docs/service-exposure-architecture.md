@@ -12,7 +12,7 @@
                                 │ HTTPS
                                 ▼
                     ┌───────────────────────┐
-                    │   packet.ai      │
+                    │   dash.packet.ai      │
                     │   (Next.js Frontend)  │
                     └───────────┬───────────┘
                                 │
@@ -37,7 +37,7 @@
         │         Kubernetes Cluster                 │
         │                                            │
         │  ┌──────────────────────────────────┐     │
-        │  │  Service (NodePort/LoadBalancer) │     │
+        │  │  Kubernetes Service              │     │
         │  │                                  │     │
         │  │  External IP: 34.123.45.67       │     │
         │  │  External Port: 31234            │     │
@@ -99,28 +99,29 @@
      │                   │                     │                       │ 8. Allocate
      │                   │                     │                       │ External IP
      │                   │                     │                       │
-     │                   │                     │ 9. Return operation_id│
+     │                   │                     │ 9. Return service     │
+     │                   │                     │ record                │
      │                   │                     │<──────────────────────│
      │                   │                     │                       │
-     │                   │ 10. Return success  │                       │
+     │                   │ 10. Return service  │                       │
      │                   │<────────────────────┤                       │
      │                   │                     │                       │
      │ 11. Show success  │                     │                       │
-     │ & start polling   │                     │                       │
      │<──────────────────┤                     │                       │
      │                   │                     │                       │
-     │                   │ 12. Poll            │                       │
-     │                   │ /api/services/status│                       │
+     │                   │ 12. Refresh list    │                       │
+     │                   │ GET /api/services   │                       │
      │                   ├────────────────────>│                       │
      │                   │                     │                       │
-     │                   │                     │ 13. GET status        │
+     │                   │                     │ 13. Fetch exposed     │
+     │                   │                     │ services              │
      │                   │                     ├──────────────────────>│
      │                   │                     │                       │
-     │                   │                     │ 14. Return external   │
-     │                   │                     │ URL when ready        │
+     │                   │                     │ 14. Return services   │
+     │                   │                     │ with external IP/port │
      │                   │                     │<──────────────────────│
      │                   │                     │                       │
-     │                   │ 15. Return URL      │                       │
+     │                   │ 15. Return list     │                       │
      │                   │<────────────────────┤                       │
      │                   │                     │                       │
      │ 16. Display       │                     │                       │
@@ -150,12 +151,12 @@ Problems:
 ❌ Requires SSH access
 ```
 
-### With Service Exposure (NodePort)
+### With Service Exposure
 ```
 Internet                 Kubernetes Cluster              GPU Pod
 ┌─────────┐         ┌─────────────────────────┐    ┌──────────────┐
 │         │         │                         │    │              │
-│  Client ├────────>│  NodePort Service       ├───>│  vLLM :8000  │
+│  Client ├────────>│  Exposed Service        ├───>│  vLLM :8000  │
 │         │  HTTP   │  External: 34.45.67:31234│    │              │
 │         │         │  Internal: pod:8000     │    │  GPU Server  │
 └─────────┘         └─────────────────────────┘    └──────────────┘
@@ -167,22 +168,7 @@ Benefits:
 ✅ Team can access
 ```
 
-### With Service Exposure (LoadBalancer)
-```
-Internet            Load Balancer          Kubernetes           GPU Pod
-┌─────────┐      ┌──────────────┐      ┌─────────────┐    ┌──────────┐
-│         │      │              │      │             │    │          │
-│  Client ├─────>│  Cloud LB    ├─────>│  Service    ├───>│vLLM :8000│
-│         │ HTTP │  35.45.67:80 │      │  Internal   │    │          │
-│         │      │              │      │  Routing    │    │GPU Server│
-└─────────┘      └──────────────┘      └─────────────┘    └──────────┘
-
-Benefits (over NodePort):
-✅ Standard ports (80, 443)
-✅ Stable IP address
-✅ Production-ready
-✅ SSL/TLS termination
-```
+UDP services can additionally be routed through a LoadBalancer service type (selected in the expose form when the protocol is UDP).
 
 ---
 
@@ -251,7 +237,7 @@ Benefits (over NodePort):
 │  │  1. Verify JWT token                                       │  │
 │  │  2. Extract serviceName, poolSubscriptionId, operationId   │  │
 │  │  3. Call getExposeServiceStatus(...)                       │  │
-│  │  4. Return { status: "completed", external_url: "..." }   │  │
+│  │  4. Return { status: { status, node_port, ... } }         │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └───────────────────────────────────┬───────────────────────────────┘
                                     │
@@ -288,9 +274,10 @@ Benefits (over NodePort):
 │                     hosted.ai GPUaaS API                          │
 │                                                                   │
 │  POST /pods/expose-service                                        │
+│  GET  /pods/expose-service/status                                │
 │  GET  /instances/unified/{id}/exposed-services                   │
-│  PUT  /pods/expose-service/{id}                                  │
-│  DELETE /pods/expose-service/{id}                                │
+│  PUT  /pods/update-exposed-service                               │
+│  DELETE /pods/delete-exposed-service/{id}                        │
 │                                                                   │
 │  ┌────────────────────────────────────────────────────────────┐  │
 │  │  Kubernetes Service Creation Logic                         │  │
@@ -298,7 +285,7 @@ Benefits (over NodePort):
 │  │  2. Create Service manifest                                │  │
 │  │  3. Apply to cluster                                       │  │
 │  │  4. Wait for external IP assignment                        │  │
-│  │  5. Return operation_id for polling                        │  │
+│  │  5. Return the service record                              │  │
 │  └────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -311,24 +298,26 @@ Benefits (over NodePort):
 Frontend Form Data
 ┌──────────────────────────────────┐
 │ {                                │
+│   pod_name: "gpu-pool-abc-0"     │ ← From the instance card
+│   pool_subscription_id: 456      │ ← Instance/subscription ID
 │   service_name: "vllm-api"       │
 │   port: 8000                     │
 │   protocol: "TCP"                │
-│   service_type: "NodePort"       │
+│   service_type: "http"           │
 │ }                                │
 └────────────┬─────────────────────┘
              │
              ▼
-Backend Enrichment
+Backend Normalisation
 ┌──────────────────────────────────┐
 │ {                                │
-│   pod_name: "gpu-pool-abc-0"     │ ← Added from subscription data
-│   pool_subscription_id: 456      │ ← Added from subscription
+│   pod_name: "gpu-pool-abc-0"     │ ← Instance ID used for i-… pods
+│   pool_subscription_id: 456      │
 │   port: 8000                     │
 │   service_name: "vllm-api"       │
-│   protocol: "TCP"                │
-│   service_type: "NodePort"       │
-│ }                                │
+│   protocol: "TCP"                │ ← Normalised to TCP or UDP
+│   service_type: "http"           │ ← http/https/none (TCP) or
+│ }                                │   NodePort/loadbalancer (UDP)
 └────────────┬─────────────────────┘
              │
              ▼
@@ -368,14 +357,16 @@ Kubernetes Cluster
 Response to Frontend
 ┌──────────────────────────────────┐
 │ {                                │
-│   id: 123                        │
-│   service_name: "vllm-api"       │
-│   port: 8000                     │
-│   protocol: "TCP"                │
-│   service_type: "NodePort"       │
-│   external_url:                  │
-│     "http://34.123.45.67:31234"  │
-│   status: "completed"            │
+│   service: {                     │
+│     id: 123                      │
+│     service_name: "vllm-api"     │
+│     ip: "34.123.45.67"           │
+│     node_port: 31234             │
+│     pod_port: 8000               │
+│     protocol: "TCP"              │
+│     service_type: "http"         │
+│     status: "ready"              │
+│   }                              │
 │ }                                │
 └──────────────────────────────────┘
 ```
@@ -400,19 +391,20 @@ Layer 1: Authentication
                             ▼
 Layer 2: Authorization
 ┌──────────────────────────────────────────────────────────────┐
-│  ✓ User can only expose services on their own pods          │
-│  ✓ Subscription ID validated against user's account         │
-│  ✓ Pod name must belong to user's pool subscription         │
+│  ✓ Team-role permission checks on every request:            │
+│    viewing services requires GPU access; exposing,          │
+│    updating, and deleting require provisioning permission   │
+│  ✓ Services are resolved through your team's instances      │
 └──────────────────────────────────────────────────────────────┘
                             │
                             ▼
 Layer 3: Input Validation
 ┌──────────────────────────────────────────────────────────────┐
-│  ✓ Service name: alphanumeric + hyphens only                │
-│  ✓ Port number: 1-65535, validated                          │
-│  ✓ Protocol: TCP or UDP only                                │
-│  ✓ Service type: NodePort or LoadBalancer only              │
-│  ✓ Prevent injection attacks                                │
+│  ✓ Required fields checked (pod name, port, service name,   │
+│    protocol, service type)                                   │
+│  ✓ Protocol normalised to TCP or UDP                        │
+│  ✓ Service type normalised per protocol: http/https/none    │
+│    for TCP; NodePort/loadbalancer for UDP                   │
 └──────────────────────────────────────────────────────────────┘
                             │
                             ▼
@@ -438,59 +430,27 @@ Layer 5: Application Security (User's Responsibility)
 ## Deployment Architecture
 
 ```
-Production Environment
-
+Client Browser
+      │ HTTPS
+      ▼
 ┌────────────────────────────────────────────────────────────────┐
-│                          Nginx (Port 80/443)                    │
+│              dash.packet.ai (Next.js dashboard)                 │
 │                                                                 │
-│  packet.ai                                                │
-│  ├─ HTTPS termination                                          │
-│  ├─ SSL certificates                                           │
-│  └─ Proxy to → localhost:3001                                  │
+│  ├─ /dashboard (GPU instance cards, Exposed Services UI)       │
+│  ├─ /api/services (CRUD endpoints)                             │
+│  └─ /api/services/status (status checks)                       │
 └────────────┬────────────────────────────────────────────────────┘
-             │
+             │ HTTPS
              ▼
 ┌────────────────────────────────────────────────────────────────┐
-│                    PM2 Process Manager                          │
+│                     hosted.ai GPUaaS API                        │
 │                                                                 │
-│  Process: packet-dash                                          │
-│  ├─ User: webapp                                               │
-│  ├─ Port: 3001                                                 │
-│  ├─ Auto-restart on crash                                      │
-│  └─ Log management                                             │
-└────────────┬────────────────────────────────────────────────────┘
-             │
-             ▼
-┌────────────────────────────────────────────────────────────────┐
-│               Next.js Application (Production Build)            │
-│                                                                 │
-│  /var/www/packet/                                              │
-│  ├─ .next/ (compiled)                                          │
-│  ├─ src/                                                       │
-│  │  ├─ app/api/services/                                       │
-│  │  │  ├─ route.ts (CRUD endpoints)                            │
-│  │  │  └─ status/route.ts (polling)                            │
-│  │  ├─ app/dashboard/page.tsx (UI)                             │
-│  │  └─ lib/hostedai.ts (API client)                            │
-│  ├─ prisma/                                                    │
-│  │  └─ data/packet.db (SQLite)                                 │
-│  └─ docs/ (documentation)                                      │
-│     ├─ service-exposure.md                                     │
-│     ├─ service-exposure-use-cases.md                           │
-│     ├─ service-exposure-quickstart.md                          │
-│     └─ service-exposure-architecture.md                        │
-└────────────┬────────────────────────────────────────────────────┘
-             │
-             ▼
-┌────────────────────────────────────────────────────────────────┐
-│                External Services                                │
-│                                                                 │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐         │
-│  │  Stripe API  │  │ hosted.ai    │  │  SMTP Server │         │
-│  │  (Billing)   │  │ (GPUaaS)     │  │  (Email)     │         │
-│  └──────────────┘  └──────────────┘  └──────────────┘         │
+│  Manages the Kubernetes services that route external           │
+│  traffic to your GPU pods                                      │
 └────────────────────────────────────────────────────────────────┘
 ```
+
+The dashboard's `/api/services/*` routes proxy service-exposure requests to the hosted.ai platform, which creates and manages the underlying Kubernetes services.
 
 ---
 
@@ -532,7 +492,7 @@ Component Lifecycle:
    │ Render service list       │
    │ - Show each service       │
    │ - Show external URLs      │
-   │ - Show edit/delete btns   │
+   │ - Show delete button      │
    └───────────────────────────┘
 
 5. User Actions
@@ -554,14 +514,6 @@ Component Lifecycle:
    │  │ setSubmittingService(false│
    │  │ setShowExposeServiceForm  │
    │  │ (false)                   │
-   │  └───────────────────────────┘
-   │
-   ├─ Click Edit
-   │  ┌───────────────────────────┐
-   │  │ setEditingServiceId(id)   │
-   │  │ setServiceForm(data)      │
-   │  │ setShowExposeServiceForm  │
-   │  │ (true)                    │
    │  └───────────────────────────┘
    │
    └─ Click Delete
@@ -636,9 +588,10 @@ hosted.ai Library
 │    const response = await fetch(url, options)               │
 │                                                              │
 │    if (!response.ok) {                                       │
-│      const errorData = await response.text()                │
+│      const errorMessage = await response.text()             │
 │      throw new Error(                                        │
-│        `hosted.ai API error: ${response.status} - ${errorData}`│
+│        `Hosted.ai API error (${response.status}): ` +       │
+│          errorMessage                                        │
 │      )                                                       │
 │    }                                                         │
 │                                                              │
@@ -649,7 +602,7 @@ hosted.ai Library
 
 ---
 
-**Diagrams Version**: 1.0
-**Last Updated**: January 2025
+**Diagrams Version**: 1.1
+**Last Updated**: July 2026
 
 These diagrams are designed to be copy-pasted into documentation, wikis, or converted to visual diagrams using tools like draw.io, Lucidchart, or Mermaid.

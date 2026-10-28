@@ -2,8 +2,7 @@
 
 export function BudgetControlsDoc() {
   return (
-    <div className="prose prose-zinc max-w-none">
-      <h1>Budget Controls & Auto-Shutdown</h1>
+    <div>
       <p className="lead">
         Set spending limits, receive alerts, and automatically stop instances to prevent unexpected charges.
       </p>

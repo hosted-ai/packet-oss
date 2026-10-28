@@ -1,15 +1,16 @@
 // Tests for src/app/api/cron/refresh-pool-overview/route.ts.
 //
 // Every-2-minutes cron that recomputes the pool overview disk cache. The
-// load-bearing contract is the stale-cache guard: when the GPUaaS API is
-// partially down, computed pod counts crater, and blindly writing that would
-// make the admin pools page show mass terminations that never happened. We
-// pin:
+// load-bearing contract is the stale-cache guard: when a GPUaaS API call
+// actually errors, computed data is unreliable, and blindly writing it would
+// clobber good cache with a partial result. The guard must NOT trip on a
+// legitimate pod-count drop (e.g. a real team deletion) just because it's a
+// big percentage of a small pool — that was PA-633. We pin:
 //   * Auth gating
 //   * Normal path: compute (seeded with existing cache) → write → summary
-//   * Guard: >50% active-pod drop keeps the existing cache (no write)
-//   * Guard boundary: exactly 50% drop still writes
-//   * Guard only arms when an existing cache has activePods > 0
+//   * Guard: hadApiFailures keeps the existing cache (no write)
+//   * PA-633 regression: a legitimate large drop with no API failures writes through
+//   * No existing cache to preserve → always writes, even if hadApiFailures
 //   * Compute failure → 500
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -45,10 +46,11 @@ function makeRequest(secret?: string) {
   });
 }
 
-function overview(activePods: number, poolCount = 2) {
+function overview(activePods: number, poolCount = 2, hadApiFailures = false) {
   return {
     pools: Array.from({ length: poolCount }, (_, i) => ({ id: `pool-${i}` })),
     summary: { activePods },
+    hadApiFailures,
   };
 }
 
@@ -90,9 +92,9 @@ describe("GET /api/cron/refresh-pool-overview", () => {
     expect(body.keptExistingCache).toBeUndefined();
   });
 
-  it("keeps the existing cache when active pods drop more than 50%", async () => {
+  it("keeps the existing cache when a GPUaaS API call errored this run", async () => {
     mockReadPoolOverviewCache.mockReturnValue(overview(100));
-    mockComputePoolOverview.mockResolvedValue(overview(40)); // 60% drop
+    mockComputePoolOverview.mockResolvedValue(overview(40, 2, true)); // errored, count unreliable
 
     const res = await GET(makeRequest(SECRET));
     const body = await res.json();
@@ -101,12 +103,11 @@ describe("GET /api/cron/refresh-pool-overview", () => {
     expect(mockWritePoolOverviewCache).not.toHaveBeenCalled();
     expect(body.keptExistingCache).toBe(true);
     expect(body.existingActivePods).toBe(100);
-    expect(body.dropPercent).toBe(60);
   });
 
-  it("still writes when the drop is exactly 50% (guard is strictly >50)", async () => {
+  it("PA-633: writes through a legitimate large drop with no API failures (a real deletion, not an outage)", async () => {
     mockReadPoolOverviewCache.mockReturnValue(overview(100));
-    const fresh = overview(50); // exactly 50% drop
+    const fresh = overview(0); // a real 100% drop, e.g. the pool's only team was deleted
     mockComputePoolOverview.mockResolvedValue(fresh);
 
     const res = await GET(makeRequest(SECRET));
@@ -114,11 +115,12 @@ describe("GET /api/cron/refresh-pool-overview", () => {
 
     expect(mockWritePoolOverviewCache).toHaveBeenCalledWith(fresh);
     expect(body.keptExistingCache).toBeUndefined();
+    expect(body.activePods).toBe(0);
   });
 
-  it("does not arm the guard when the existing cache has zero active pods", async () => {
-    mockReadPoolOverviewCache.mockReturnValue(overview(0));
-    const fresh = overview(0);
+  it("writes through even with API failures when there is no existing cache to preserve", async () => {
+    mockReadPoolOverviewCache.mockReturnValue(null);
+    const fresh = overview(0, 2, true);
     mockComputePoolOverview.mockResolvedValue(fresh);
 
     const res = await GET(makeRequest(SECRET));

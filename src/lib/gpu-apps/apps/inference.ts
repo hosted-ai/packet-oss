@@ -59,7 +59,7 @@ source "$VLLM_DIR/venv/bin/activate"
 
 # Install vLLM via pip
 echo "Installing vLLM (this may take a few minutes)..."
-pip install --quiet vllm
+pip install --quiet vllm==0.26.0 --index-url https://pypi.org/simple
 
 echo "vLLM installed successfully"
 
@@ -165,7 +165,7 @@ source "$VLLM_DIR/venv/bin/activate"
 
 # Install vLLM via pip
 echo "Installing vLLM (this may take a few minutes)..."
-pip install --quiet vllm
+pip install --quiet vllm==0.26.0 --index-url https://pypi.org/simple
 
 echo "vLLM installed successfully"
 
@@ -285,7 +285,7 @@ fi
 source venv/bin/activate
 
 # Install PyTorch
-pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 # Install requirements - use the full requirements from the requirements/full directory
 # The repo structure changed - requirements.txt is no longer in root
@@ -419,8 +419,8 @@ mkdir -p ~/tgi-data
 # Install text-generation-inference Python client and server dependencies
 pip install --quiet text-generation
 
-# Install PyTorch nightly for Blackwell (sm_120) support
-pip install --quiet --pre torch torchvision --index-url https://download.pytorch.org/whl/nightly/cu128
+# Install PyTorch (pinned, stable cu128) for Blackwell (sm_120) support
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 # Install transformers and accelerate for model loading
 pip install --quiet transformers accelerate safetensors sentencepiece protobuf
@@ -545,8 +545,8 @@ sudo chown ubuntu:ubuntu /opt/triton-env
 create_venv /opt/triton-env
 source /opt/triton-env/bin/activate
 
-# Install PyTorch (nightly for Blackwell sm_120 support) and Triton client
-pip install --quiet --pre torch --index-url https://download.pytorch.org/whl/nightly/cu128
+# Install PyTorch (pinned, stable cu128 — Blackwell sm_120) and Triton client
+pip install --quiet torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 pip install --quiet tritonclient[all] fastapi uvicorn
 
 # Create a simple PyTorch model server as Triton alternative

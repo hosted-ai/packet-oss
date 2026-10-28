@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   const authResult = await getAuthenticatedCustomer(request);
   if (authResult instanceof NextResponse) return authResult;
 
-  const customerId = authResult.payload.customerId;
+  const accountId = authResult.accountId;
   const customerEmail = authResult.payload.email;
   const customerName = (authResult.customer.name || authResult.payload.email.split("@")[0]);
 
@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
         subject: finalSubject,
         message: message.trim(),
         priority: validPriority,
-        stripeCustomerId: customerId,
+        stripeCustomerId: accountId,
       },
     });
 

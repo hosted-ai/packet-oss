@@ -56,23 +56,25 @@ function mapPolicyType(type: string): keyof DefaultPolicies | null {
  * Fetches default policies from hosted.ai API
  * Returns null if fetch fails
  */
-async function fetchDefaultPoliciesFromAPI(): Promise<DefaultPolicies | null> {
+async function fetchDefaultPoliciesFromAPI(
+  nature: "general" | "baremetal" = "general"
+): Promise<DefaultPolicies | null> {
   try {
-    console.log("[DefaultPolicies] Fetching from hosted.ai API...");
+    console.log(`[DefaultPolicies] Fetching ${nature} defaults from hosted.ai API...`);
 
-    // Scope to the `general` nature. The ariel HAI release split policies into
+    // Scope to a single nature. The ariel HAI release split policies into
     // general/baremetal natures, so the unscoped /policy/defaults now returns
     // TWO defaults per type (general + baremetal). This parser maps purely by
     // `type` ("last wins"), which would silently resolve a mix of general and
     // baremetal IDs depending on response order — and a baremetal policy ID
     // sent into a team's general policy set is rejected by ariel
     // (400 "invalid policy id general resource policy"), which surfaced as a
-    // 500 on signup/checkout/webhook team creation (PA-279). The `?nature=general`
-    // filter returns only the five general-nature defaults. Titan (pre-ariel)
+    // 500 on signup/checkout/webhook team creation (PA-279). The `?nature=`
+    // filter returns only that nature's five defaults. Titan (pre-ariel)
     // returns one default per type and ignores the unknown query param.
     const response = await hostedaiRequest<PolicyDefault[]>(
       "GET",
-      "/policy/defaults?nature=general"
+      `/policy/defaults?nature=${nature}`
     );
 
     if (!response || !Array.isArray(response)) {
@@ -96,11 +98,11 @@ async function fetchDefaultPoliciesFromAPI(): Promise<DefaultPolicies | null> {
     const missingKeys = requiredKeys.filter(key => !policies[key]);
 
     if (missingKeys.length > 0) {
-      console.error(`[DefaultPolicies] Missing required policies: ${missingKeys.join(", ")}`);
+      console.error(`[DefaultPolicies] Missing required ${nature} policies: ${missingKeys.join(", ")}`);
       return null;
     }
 
-    console.log("[DefaultPolicies] ✅ Successfully fetched all default policies");
+    console.log(`[DefaultPolicies] ✅ Successfully fetched all default ${nature} policies`);
     return policies as DefaultPolicies;
 
   } catch (error) {
@@ -179,6 +181,28 @@ export function getDefaultPoliciesSync(): DefaultPolicies {
   return cachedPolicies || FALLBACK_POLICIES;
 }
 
+// PA-353 — baremetal-nature defaults, used to give new teams the default
+// baremetal policy set (ariel does no server-side defaulting). Deliberately
+// NO hardcoded fallback: a wrong baremetal ID would 400 the whole team
+// creation, so callers must treat null as "skip the baremetal block".
+let cachedBaremetalPolicies: DefaultPolicies | null = null;
+let lastBaremetalFetchTime = 0;
+
+export async function getDefaultBaremetalPolicies(): Promise<DefaultPolicies | null> {
+  const now = Date.now();
+  if (cachedBaremetalPolicies && now - lastBaremetalFetchTime < CACHE_DURATION_MS) {
+    return cachedBaremetalPolicies;
+  }
+  const fetched = await fetchDefaultPoliciesFromAPI("baremetal");
+  if (fetched) {
+    cachedBaremetalPolicies = fetched;
+    lastBaremetalFetchTime = now;
+    return fetched;
+  }
+  // API failed: stale cache beats nothing; null if never fetched
+  return cachedBaremetalPolicies;
+}
+
 /**
  * Clears the cache and forces a fresh fetch on next call
  * Useful for testing or manual refresh
@@ -186,6 +210,8 @@ export function getDefaultPoliciesSync(): DefaultPolicies {
 export function clearDefaultPoliciesCache(): void {
   cachedPolicies = null;
   lastFetchTime = 0;
+  cachedBaremetalPolicies = null;
+  lastBaremetalFetchTime = 0;
   console.log("[DefaultPolicies] Cache cleared");
 }
 

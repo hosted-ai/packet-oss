@@ -38,13 +38,13 @@ import {
   DollarSign,
   Megaphone,
   BarChart3,
-  ImageIcon,
   Clock,
   Wallet,
   Wrench,
   Boxes,
   Bell,
   Send,
+  HardDrive,
 } from "lucide-react";
 
 interface AdminSidebarProps {
@@ -100,10 +100,12 @@ const navGroups: NavGroup[] = [
     items: [
       { id: "payouts", label: "Investor Payouts", icon: Wallet },
       { id: "node-revenue", label: "Node Revenue", icon: DollarSign },
-      { id: "pixel-factory", label: "Pixel Factory", icon: ImageIcon },
       { id: "marketing", label: "Marketing", icon: BarChart3 },
       { id: "business", label: "Business Metrics", icon: TrendingUp },
+      { id: "ops-summary", label: "Daily Ops Summary", icon: BarChart3 },
+      { id: "packet-health", label: "Packet Health Metrics", icon: Activity },
       { id: "products", label: "Products", icon: Package },
+      { id: "baremetal", label: "Bare Metal", icon: HardDrive },
       { id: "gpu-apps", label: "GPU Apps", icon: Boxes },
       { id: "landing", label: "Landing Page", icon: LayoutDashboard },
       { id: "clusters", label: "Clusters", icon: Server },

@@ -82,6 +82,7 @@ export function ProductsTab() {
     vramGb: "",
     cudaCores: "",
     gpuFamily: "",
+    supportsSharedStorage: true,
     serviceId: "" as string,
     categoryIds: [] as string[],
   });
@@ -383,6 +384,7 @@ export function ProductsTab() {
       vramGb: "",
       cudaCores: "",
       gpuFamily: "",
+      supportsSharedStorage: true,
       serviceId: "",
       categoryIds: [],
     });
@@ -405,6 +407,7 @@ export function ProductsTab() {
       vramGb: product.vramGb?.toString() || "",
       cudaCores: product.cudaCores?.toString() || "",
       gpuFamily: product.gpuFamily || "",
+      supportsSharedStorage: product.supportsSharedStorage,
       serviceId: product.serviceId || "",
       categoryIds: product.categoryIds || [],
     });
@@ -455,23 +458,30 @@ export function ProductsTab() {
         vramGb: formData.vramGb ? parseInt(formData.vramGb) : null,
         cudaCores: formData.cudaCores ? parseInt(formData.cudaCores) : null,
         gpuFamily: formData.gpuFamily || null,
+        supportsSharedStorage: formData.supportsSharedStorage,
         serviceId: formData.serviceId || null,
         categoryIds: formData.categoryIds,
       };
 
-      const res = await fetch("/api/admin/gpu-products", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const post = (body: Record<string, unknown>) =>
+        fetch("/api/admin/gpu-products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).then((r) => r.json());
 
-      const data = await res.json();
+      let data = await post(payload);
+      // The server refuses to withdraw a monthly product its subscribers still pay
+      // for. Confirming here is the only way an intended withdrawal gets through.
+      if (data.requiresForce && confirm(`${data.error}\n\nWithdraw it anyway?`)) {
+        data = await post({ ...payload, force: true });
+      }
       if (data.success) {
         setShowCreateModal(false);
         setEditingId(null);
         resetForm();
         loadData();
-      } else {
+      } else if (!data.requiresForce) {
         alert(data.error || "Failed to save product");
       }
     } catch (error) {
@@ -995,7 +1005,7 @@ export function ProductsTab() {
                 </td>
               </tr>
             ) : (
-              products.map((product, index) => (
+              products.map((product) => (
                 <tr key={product.id} className="hover:bg-[#f7f8fb]/50">
                   <td className="px-4 py-3">
                     <GripVertical className="w-4 h-4 text-[#5b6476]/50" />
@@ -1429,6 +1439,17 @@ export function ProductsTab() {
                     className="w-4 h-4 rounded border-[#e4e7ef] text-[#1a4fff] focus:ring-[#1a4fff]"
                   />
                   <span className="text-sm text-[#0b0f1c]">Featured</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formData.supportsSharedStorage}
+                    onChange={(e) =>
+                      setFormData({ ...formData, supportsSharedStorage: e.target.checked })
+                    }
+                    className="w-4 h-4 rounded border-[#e4e7ef] text-[#1a4fff] focus:ring-[#1a4fff]"
+                  />
+                  <span className="text-sm text-[#0b0f1c]">Supports Shared Storage</span>
                 </label>
               </div>
 

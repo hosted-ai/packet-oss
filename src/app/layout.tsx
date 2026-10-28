@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import { isPro } from "@/lib/edition";
+import { PostHogProvider } from "@/components/PostHogProvider";
+import { CrispChat } from "@/components/CrispChat";
 import { getBrandName, getAppUrl, getLogoUrl, getFaviconUrl } from "@/lib/branding";
 import { BrandStyles } from "@/components/BrandStyles";
 import "./globals.css";
@@ -136,7 +138,7 @@ export default async function RootLayout({
               strategy="afterInteractive"
             />
             <Script id="google-ads-gtag" strategy="afterInteractive">
-              {`gtag('js',new Date());gtag('config','AW-17978041064');gtag('config','G-KT2GT6JC01');`}
+              {`gtag('js',new Date());gtag('config','AW-17978041064');gtag('config','${process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID || "G-KT2GT6JC01"}');`}
             </Script>
             {/* End Google Ads + GA4 */}
 
@@ -148,6 +150,7 @@ export default async function RootLayout({
               }}
             />
             <script
+              async
               src="https://cdn.growify.ai/pixel.min.js"
               data-website-id="baa085dff1d66ae50ac0a03d9942dc2d:85ff45616aab7ed7c09d7a0af4edcb109c202edea66962c723b7ad8650797f9725a2a8146922bb167147a47534bc1d90"
               data-endpoint="api_v2"
@@ -206,6 +209,12 @@ t.async = true;
 t.onload = function(){ new Reveal.default };
 c.parentNode.insertBefore(t,c)}();`}
             </Script>
+
+            {/* Reo.dev — company/account intent tracking */}
+            <Script id="reo-tracking" strategy="afterInteractive">
+              {`!function(){var e="static.reo.dev/sites/734d3030ff72ad8/js/reo.js",t=window,n=document;function i(e,t){var n=document.createElement("script");n.type="text/javascript",n.readyState?n.onreadystatechange=function(){"loaded"!=n.readyState&&"complete"!=n.readyState||(n.onreadystatechange=null,t())}:n.onload=function(){t()},n.src="https://"+e,document.getElementsByTagName("head")[0].appendChild(n)}i(e,function(){try{Reo.init({clientID:"734d3030ff72ad8",enableThirdPartyTracking:true})}catch(e){}})}();`}
+            </Script>
+            {/* End Reo.dev */}
           </>
         )}
         {proMode && !tenant.isDefault && tenant.analyticsId && (
@@ -312,11 +321,13 @@ c.parentNode.insertBefore(t,c)}();`}
             }}
           />
         )}
-        {children}
+        <PostHogProvider>{children}</PostHogProvider>
+        <CrispChat />
         {proMode && tenant.isDefault && PlerdyBeacons && CookieConsent && (
           <>
             {/* LinkedIn noscript fallback */}
             <noscript>
+              {/* eslint-disable-next-line @next/next/no-img-element -- a tracking pixel inside noscript, where a React component cannot run */}
               <img
                 height="1"
                 width="1"

@@ -2,8 +2,7 @@
 
 export function ServiceExposureDoc() {
   return (
-    <div className="prose prose-zinc max-w-none">
-      <h1>Service Exposure Guide</h1>
+    <div>
       <p className="lead">
         Expose network ports from your GPU instances to the internet for APIs,
         web UIs, and other services.
@@ -129,6 +128,16 @@ python -m vllm.entrypoints.openai.api_server \\
               <code>TCP</code>
             </td>
           </tr>
+          <tr>
+            <td>Service Type</td>
+            <td>
+              For TCP: HTTP (default), HTTPS, or Raw TCP (no prefix). For UDP:
+              NodePort or LoadBalancer
+            </td>
+            <td>
+              <code>HTTP</code>
+            </td>
+          </tr>
         </tbody>
       </table>
 
@@ -233,8 +242,7 @@ ssh -p <ssh-port> -L 8000:localhost:8000 ubuntu@<host>`}</code>
 
       <h2>Need Help?</h2>
       <p>
-        Contact us at{" "}
-        our support team via the <strong>Support</strong> tab
+        Contact our support team via the <strong>Support</strong> tab.
       </p>
     </div>
   );

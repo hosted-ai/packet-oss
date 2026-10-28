@@ -307,6 +307,14 @@ migrate_env_var "GPUAAS_ADMIN_URL"      "HOSTEDAI_ADMIN_URL"
 migrate_env_var "GPUAAS_ADMIN_USER"     "HOSTEDAI_ADMIN_USERNAME"
 migrate_env_var "GPUAAS_ADMIN_PASSWORD" "HOSTEDAI_ADMIN_PASSWORD"
 
+# Older installs have no SYNC_SECRET, so /api/sync (recurring billing) never ran
+SYNC_ENABLED=false
+if ! grep -q "^SYNC_SECRET=" "$ENV_FILE"; then
+  echo "SYNC_SECRET=\"$(openssl rand -hex 16)\"" >> "$ENV_FILE"
+  SYNC_ENABLED=true
+  success "Generated SYNC_SECRET (enables recurring billing)"
+fi
+
 if $MIGRATED; then
   # Also update the comment line if present
   sed -i 's/# HostedAI Admin Panel.*cookie-based.*/# HostedAI Admin Panel (port 8999) — cookie-based login auth/' "$ENV_FILE" 2>/dev/null || true
@@ -330,6 +338,13 @@ success "Prisma client generated"
 log "Pushing database schema..."
 sudo -u "$APP_USER" env DATABASE_URL="${DB_URL}" npx prisma db push --skip-generate
 success "Database schema applied"
+
+if $SYNC_ENABLED; then
+  # /api/sync bills one period per run from prepaid_until; start billing now, not from deploy
+  echo "UPDATE pod_metadata SET prepaid_until = NOW(3) WHERE prepaid_until < NOW(3);" |
+    sudo -u "$APP_USER" env DATABASE_URL="${DB_URL}" npx prisma db execute --stdin --schema prisma/schema.prisma
+  success "Started recurring billing from now (no back-billing since deploy)"
+fi
 
 log "Seeding database..."
 sudo -u "$APP_USER" env DATABASE_URL="${DB_URL}" npx prisma db seed 2>/dev/null && success "Database seeded" || warn "Seed skipped (no seed script or already up to date)"

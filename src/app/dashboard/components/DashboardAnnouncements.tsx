@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { AnnouncementMessage } from "@/components/AnnouncementMessage";
 
 interface Announcement {
   id: string;
@@ -16,9 +17,13 @@ interface DashboardAnnouncementsProps {
 
 const DISMISSED_KEY = "dismissed_announcements";
 
-function getDismissedIds(): string[] {
+// A "both" announcement's modal and its banner retire independently, so the two are stored
+// apart: closing the modal must not take the banner with it.
+const MODAL_SHOWN_KEY = "shown_announcement_modals";
+
+function getStoredIds(key: string): string[] {
   try {
-    const stored = localStorage.getItem(DISMISSED_KEY);
+    const stored = localStorage.getItem(key);
     if (!stored) return [];
     const parsed = JSON.parse(stored);
     return Array.isArray(parsed) ? parsed : [];
@@ -27,10 +32,13 @@ function getDismissedIds(): string[] {
   }
 }
 
-function addDismissedId(id: string): void {
-  const current = getDismissedIds();
-  if (!current.includes(id)) {
-    localStorage.setItem(DISMISSED_KEY, JSON.stringify([...current, id]));
+function addStoredId(key: string, id: string): void {
+  const current = getStoredIds(key);
+  if (current.includes(id)) return;
+  try {
+    localStorage.setItem(key, JSON.stringify([...current, id]));
+  } catch {
+    // A full or blocked store costs a repeated modal, never a blank dashboard.
   }
 }
 
@@ -40,7 +48,9 @@ export function DashboardAnnouncements({ token }: DashboardAnnouncementsProps) {
   const [modalShownIds, setModalShownIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setDismissedIds(getDismissedIds());
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage is client-only, so it must be read in an effect
+    setDismissedIds(getStoredIds(DISMISSED_KEY));
+    setModalShownIds(new Set(getStoredIds(MODAL_SHOWN_KEY)));
   }, []);
 
   useEffect(() => {
@@ -63,14 +73,17 @@ export function DashboardAnnouncements({ token }: DashboardAnnouncementsProps) {
   }, [token]);
 
   const handleDismiss = useCallback((id: string) => {
-    addDismissedId(id);
+    addStoredId(DISMISSED_KEY, id);
     setDismissedIds((prev) => [...prev, id]);
   }, []);
 
+  // Closing the modal retires the modal. An announcement that also has a banner keeps it
+  // until that banner's own dismiss, so the admin's message survives being read once.
   const handleModalClose = useCallback(
     (announcement: Announcement) => {
+      addStoredId(MODAL_SHOWN_KEY, announcement.id);
       setModalShownIds((prev) => new Set(prev).add(announcement.id));
-      if (announcement.dismissible) {
+      if (announcement.dismissible && announcement.displayType === "modal") {
         handleDismiss(announcement.id);
       }
     },
@@ -119,7 +132,7 @@ export function DashboardAnnouncements({ token }: DashboardAnnouncementsProps) {
               {announcement.title}
             </div>
             <div style={{ fontSize: "13px", opacity: 0.9, marginTop: "2px" }}>
-              {announcement.message}
+              <AnnouncementMessage text={announcement.message} />
             </div>
           </div>
           {announcement.dismissible && (
@@ -173,9 +186,14 @@ export function DashboardAnnouncements({ token }: DashboardAnnouncementsProps) {
               color: "#0b0f1c",
               borderRadius: "12px",
               padding: "24px",
-              maxWidth: "480px",
+              maxWidth: "640px",
               width: "90%",
-              textAlign: "center",
+              // Long release notes must scroll inside the modal rather than
+              // overflow the viewport (PA-309). Title + button stay pinned; the
+              // body scrolls.
+              maxHeight: "85vh",
+              display: "flex",
+              flexDirection: "column",
             }}
           >
             <h3
@@ -183,24 +201,31 @@ export function DashboardAnnouncements({ token }: DashboardAnnouncementsProps) {
                 margin: "0 0 12px 0",
                 fontSize: "18px",
                 fontWeight: 700,
+                textAlign: "center",
               }}
             >
               {modalAnnouncements[0].title}
             </h3>
-            <p
+            <div
               style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: "auto",
                 margin: "0 0 20px 0",
                 fontSize: "14px",
                 lineHeight: 1.5,
                 color: "#3a3f4b",
+                textAlign: "left",
               }}
             >
-              {modalAnnouncements[0].message}
-            </p>
+              <AnnouncementMessage text={modalAnnouncements[0].message} />
+            </div>
             {modalAnnouncements[0].dismissible && (
               <button
                 onClick={() => handleModalClose(modalAnnouncements[0])}
                 style={{
+                  alignSelf: "center",
+                  flexShrink: 0,
                   background: "#1a4fff",
                   color: "white",
                   border: "none",

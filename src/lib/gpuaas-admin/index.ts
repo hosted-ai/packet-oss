@@ -47,6 +47,8 @@ export type {
   GPUaaSCluster,
   GPUaaSNode,
   AddNodeInput,
+  BaremetalNode,
+  BaremetalNodeGpuType,
   GPUaaSPool,
   CreatePoolInput,
   APIError,
@@ -76,6 +78,8 @@ import {
 
 import {
   listNodes,
+  listBaremetalNodes,
+  listAllBaremetalNodes,
   getNode,
   addNode,
   getNodeSSHKeys,
@@ -142,6 +146,8 @@ export const gpuaasAdmin = {
 
   // Nodes
   listNodes,
+  listBaremetalNodes,
+  listAllBaremetalNodes,
   getNode,
   addNode,
   getNodeSSHKeys,

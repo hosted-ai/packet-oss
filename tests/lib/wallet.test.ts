@@ -8,24 +8,41 @@ import {
   getWalletTransactions,
   calculateCost,
   formatCents,
+  formatCentsSigned,
+  refundDeployment,
   WALLET_CONFIG,
 } from '@/lib/wallet';
-import { createInvoiceForPayment } from '@/lib/invoice';
+import { createInvoiceForPayment, heldByInvoiceGeneration } from '@/lib/invoice';
+
+const { mockWalletTxnCreate } = vi.hoisted(() => ({ mockWalletTxnCreate: vi.fn() }));
 
 // Mock dependencies
 vi.mock('@/lib/stripe', () => ({
   getStripe: vi.fn(() => mockStripe),
 }));
 
+vi.mock('@/lib/prisma', () => ({
+  prisma: { walletTransaction: { create: mockWalletTxnCreate } },
+}));
+
 vi.mock('@/lib/pricing', () => ({
   getHourlyRateCents: vi.fn(() => 200), // $2/hour
   getAutoRefillThresholdCents: vi.fn(() => 2000), // $20
-  getAutoRefillAmountCents: vi.fn(() => 10000), // $100
+  getAutoRefillAmountCents: vi.fn(() => 10000), // $100 default
 }));
 
 // Mock the invoice module - use the real Stripe mock to verify invoice API calls
 vi.mock('@/lib/invoice', () => ({
   createInvoiceForPayment: vi.fn().mockResolvedValue({ id: 'inv_mock' }),
+  heldByInvoiceGeneration: vi.fn().mockResolvedValue(0),
+}));
+
+vi.mock('@/lib/analytics/ga4', () => ({
+  trackPurchase: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/lib/analytics/posthog', () => ({
+  posthogTrackPurchase: vi.fn().mockResolvedValue(undefined),
 }));
 
 // Create mock Stripe instance
@@ -53,6 +70,7 @@ const mockStripe = {
 describe('Wallet Module', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(heldByInvoiceGeneration).mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -89,6 +107,21 @@ describe('Wallet Module', () => {
       const result = await getWalletBalance('cus_test123');
 
       expect(Math.abs(result.availableBalance)).toBe(0);
+    });
+
+    // A credited/coupon wallet reads $0.00 on customer.balance while invoice
+    // generation holds it, which blocked funded customers from deploying.
+    it('counts credit that an invoice hold is sitting on', async () => {
+      vi.mocked(mockStripe.customers.retrieve).mockResolvedValue({
+        id: 'cus_coupon',
+        balance: 0,
+      } as Stripe.Customer);
+      vi.mocked(heldByInvoiceGeneration).mockResolvedValue(10000);
+
+      const result = await getWalletBalance('cus_coupon');
+
+      expect(result.availableBalance).toBe(10000);
+      expect(heldByInvoiceGeneration).toHaveBeenCalledWith(mockStripe, 'cus_coupon');
     });
 
     it('should handle customer with debt (positive balance)', async () => {
@@ -140,6 +173,11 @@ describe('Wallet Module', () => {
       vi.mocked(mockStripe.paymentIntents.create).mockResolvedValue(mockPaymentIntent);
       vi.mocked(mockStripe.customers.listBalanceTransactions).mockResolvedValue(mockTransactions);
       vi.mocked(mockStripe.customers.createBalanceTransaction).mockResolvedValue({} as Stripe.CustomerBalanceTransaction);
+      vi.mocked(mockStripe.customers.retrieve).mockResolvedValue({
+        id: 'cus_test123',
+        email: 'test@example.com',
+        balance: -5000,
+      } as unknown as Stripe.Customer);
 
       const result = await fundWallet('cus_test123', 5000, 'pm_test456');
 
@@ -375,6 +413,28 @@ describe('Wallet Module', () => {
       });
     });
 
+    // The HF/GPU deploy charge runs straight after the balance gate, so held
+    // credit has to satisfy the guard too or the deploy fails at the charge.
+    it('charges against credit that an invoice hold is sitting on', async () => {
+      vi.mocked(mockStripe.customers.listBalanceTransactions).mockResolvedValue({
+        data: [],
+      } as Stripe.ApiList<Stripe.CustomerBalanceTransaction>);
+      vi.mocked(mockStripe.customers.createBalanceTransaction).mockResolvedValue({} as Stripe.CustomerBalanceTransaction);
+      vi.mocked(mockStripe.customers.retrieve).mockResolvedValue({
+        id: 'cus_coupon',
+        balance: 0,
+      } as Stripe.Customer);
+      vi.mocked(heldByInvoiceGeneration).mockResolvedValue(10000);
+
+      const result = await deductUsage('cus_coupon', 0.5, 'HF deploy pre-charge', 143);
+
+      expect(result.success).toBe(true);
+      expect(mockStripe.customers.createBalanceTransaction).toHaveBeenCalledWith(
+        'cus_coupon',
+        expect.objectContaining({ amount: 72 }),
+      );
+    });
+
     it('should handle zero hours gracefully', async () => {
       const result = await deductUsage('cus_test123', 0, 'No usage', 200);
 
@@ -501,7 +561,7 @@ describe('Wallet Module', () => {
         invoice_settings: {
           default_payment_method: 'pm_default',
         },
-        metadata: {},
+        metadata: { auto_refill_enabled: "true" },
       } as unknown as Stripe.Customer;
 
       const mockTransactions = {
@@ -534,7 +594,8 @@ describe('Wallet Module', () => {
       const mockCustomer = {
         id: 'cus_test123',
         balance: -3000, // Customer has $30 credit (above $20 threshold)
-      } as Stripe.Customer;
+        metadata: { auto_refill_enabled: "true" },
+      } as unknown as Stripe.Customer;
 
       vi.mocked(mockStripe.customers.retrieve).mockResolvedValue(mockCustomer);
 
@@ -545,12 +606,82 @@ describe('Wallet Module', () => {
       expect(mockStripe.paymentIntents.create).not.toHaveBeenCalled();
     });
 
+    it('does NOT refill when auto-refill is not enabled (opt-in default off)', async () => {
+      // No auto_refill_enabled flag → balance is low but we must never charge.
+      const mockCustomer = {
+        id: 'cus_test123',
+        balance: 1500, // $15 credit, well below threshold
+        invoice_settings: { default_payment_method: 'pm_default' },
+        metadata: {},
+      } as unknown as Stripe.Customer;
+
+      vi.mocked(mockStripe.customers.retrieve).mockResolvedValue(mockCustomer);
+
+      const result = await checkAndRefillWallet('cus_test123');
+
+      expect(result.refilled).toBe(false);
+      expect(mockStripe.customers.update).not.toHaveBeenCalled();
+      expect(mockStripe.paymentIntents.create).not.toHaveBeenCalled();
+    });
+
+    it("uses the customer's configured amount, not the global default", async () => {
+      const mockCustomer = {
+        id: 'cus_test123',
+        balance: 1500, // $15, below the customer's $100 threshold
+        invoice_settings: { default_payment_method: 'pm_default' },
+        metadata: {
+          auto_refill_enabled: "true",
+          auto_refill_amount_cents: "50000", // $500
+          auto_refill_threshold_cents: "10000", // $100
+        },
+      } as unknown as Stripe.Customer;
+
+      vi.mocked(mockStripe.customers.retrieve).mockResolvedValue(mockCustomer);
+      vi.mocked(mockStripe.customers.listBalanceTransactions).mockResolvedValue({
+        data: [],
+      } as unknown as Stripe.ApiList<Stripe.CustomerBalanceTransaction>);
+      vi.mocked(mockStripe.customers.update).mockResolvedValue(mockCustomer);
+      vi.mocked(mockStripe.paymentIntents.create).mockResolvedValue({ id: 'pi_x', status: 'succeeded' } as Stripe.PaymentIntent);
+      vi.mocked(mockStripe.paymentIntents.list).mockResolvedValue({ data: [] } as unknown as Stripe.ApiList<Stripe.PaymentIntent>);
+
+      const result = await checkAndRefillWallet('cus_test123');
+
+      expect(result.refilled).toBe(true);
+      expect(result.amount).toBe(50000); // the customer's $500, NOT the $100 default
+      expect(mockStripe.paymentIntents.create).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 50000 })
+      );
+    });
+
+    it('respects the customer threshold (no refill when above their chosen threshold)', async () => {
+      // Customer set a $100 threshold; they have $30 credit which is below the
+      // global $20 default but ABOVE their own $100... wait — $30 < $100 → refills.
+      // Here give them $150 credit (above their $100 threshold) → no refill.
+      const mockCustomer = {
+        id: 'cus_test123',
+        balance: -15000, // $150 credit
+        invoice_settings: { default_payment_method: 'pm_default' },
+        metadata: {
+          auto_refill_enabled: "true",
+          auto_refill_amount_cents: "50000",
+          auto_refill_threshold_cents: "10000", // $100 threshold
+        },
+      } as unknown as Stripe.Customer;
+
+      vi.mocked(mockStripe.customers.retrieve).mockResolvedValue(mockCustomer);
+
+      const result = await checkAndRefillWallet('cus_test123');
+
+      expect(result.refilled).toBe(false);
+      expect(mockStripe.paymentIntents.create).not.toHaveBeenCalled();
+    });
+
     it('should skip refill if recent refill exists', async () => {
       const now = Math.floor(Date.now() / 1000);
       const mockCustomer = {
         id: 'cus_test123',
         balance: 1500,
-        metadata: {},
+        metadata: { auto_refill_enabled: "true" },
       } as unknown as Stripe.Customer;
 
       const mockTransactions = {
@@ -579,6 +710,7 @@ describe('Wallet Module', () => {
         id: 'cus_test123',
         balance: 1500,
         metadata: {
+          auto_refill_enabled: "true",
           wallet_refill_lock: (now - 60).toString(), // Locked 1 minute ago
         },
       } as unknown as Stripe.Customer;
@@ -606,6 +738,7 @@ describe('Wallet Module', () => {
           default_payment_method: 'pm_default',
         },
         metadata: {
+          auto_refill_enabled: "true",
           wallet_refill_lock: (now - 200).toString(), // Locked 3+ minutes ago (stale)
         },
       } as unknown as Stripe.Customer;
@@ -639,7 +772,7 @@ describe('Wallet Module', () => {
       const mockCustomer = {
         id: 'cus_test123',
         balance: 1500,
-        metadata: {},
+        metadata: { auto_refill_enabled: "true" },
         invoice_settings: {},
       } as unknown as Stripe.Customer;
 
@@ -678,11 +811,10 @@ describe('Wallet Module', () => {
     });
 
     it('should check for recent wallet payment intents', async () => {
-      const now = Math.floor(Date.now() / 1000);
       const mockCustomer = {
         id: 'cus_test123',
         balance: 1500,
-        metadata: {},
+        metadata: { auto_refill_enabled: "true" },
       } as unknown as Stripe.Customer;
 
       const mockTransactions = {
@@ -712,11 +844,46 @@ describe('Wallet Module', () => {
       expect(result.error).toContain('Recent wallet payment already processed');
     });
 
+    it('does NOT credit the wallet when the Stripe charge fails (card declined)', async () => {
+      const mockCustomer = {
+        id: 'cus_test123',
+        balance: 1500, // $15 credit, below the $20 threshold
+        invoice_settings: { default_payment_method: 'pm_default' },
+        metadata: { auto_refill_enabled: "true" },
+      } as unknown as Stripe.Customer;
+
+      const mockTransactions = {
+        data: [],
+      } as Stripe.ApiList<Stripe.CustomerBalanceTransaction>;
+
+      // Stripe declines the card — payment intent doesn't reach "succeeded".
+      const mockDeclinedIntent = {
+        id: 'pi_declined',
+        status: 'requires_action',
+      } as Stripe.PaymentIntent;
+
+      const mockPaymentIntents = {
+        data: [],
+      } as Stripe.ApiList<Stripe.PaymentIntent>;
+
+      vi.mocked(mockStripe.customers.retrieve).mockResolvedValue(mockCustomer);
+      vi.mocked(mockStripe.customers.listBalanceTransactions).mockResolvedValue(mockTransactions);
+      vi.mocked(mockStripe.customers.update).mockResolvedValue(mockCustomer);
+      vi.mocked(mockStripe.paymentIntents.create).mockResolvedValue(mockDeclinedIntent);
+      vi.mocked(mockStripe.paymentIntents.list).mockResolvedValue(mockPaymentIntents);
+
+      const result = await checkAndRefillWallet('cus_test123');
+
+      expect(result.refilled).toBe(false);
+      expect(result.error).toBe('Payment status: requires_action');
+      expect(mockStripe.customers.createBalanceTransaction).not.toHaveBeenCalled();
+    });
+
     it('should clear lock on funding failure', async () => {
       const mockCustomer = {
         id: 'cus_test123',
         balance: 1500,
-        metadata: {},
+        metadata: { auto_refill_enabled: "true" },
         invoice_settings: {},
       } as unknown as Stripe.Customer;
 
@@ -883,6 +1050,18 @@ describe('Wallet Module', () => {
     });
   });
 
+  describe('formatCentsSigned (PA-339)', () => {
+    it('formats a positive (credit) balance like formatCents', () => {
+      expect(formatCentsSigned(2000)).toBe('$20.00');
+      expect(formatCentsSigned(0)).toBe('$0.00');
+    });
+
+    it('renders a negative (arrears) balance as -$X.XX, not $-X.XX or clamped $0.00', () => {
+      expect(formatCentsSigned(-24500)).toBe('-$245.00');
+      expect(formatCentsSigned(-1)).toBe('-$0.01');
+    });
+  });
+
   describe('WALLET_CONFIG', () => {
     it('should NOT expose a static hourly rate (GPU rates come from GpuProduct)', () => {
       expect((WALLET_CONFIG as Record<string, unknown>).hourlyRateCents).toBeUndefined();
@@ -894,6 +1073,57 @@ describe('Wallet Module', () => {
 
     it('should provide access to auto-refill amount', () => {
       expect(WALLET_CONFIG.autoRefillAmountCents).toBe(10000);
+    });
+  });
+
+  // PA-693: failed-deploy refunds must land in the wallet ledger (type "refund",
+  // negative cents) so revenue and provider payout figures net them out.
+  describe('refundDeployment', () => {
+    beforeEach(() => {
+      vi.mocked(mockStripe.customers.createBalanceTransaction).mockResolvedValue(
+        {} as Stripe.Response<Stripe.CustomerBalanceTransaction>,
+      );
+      mockWalletTxnCreate.mockResolvedValue({});
+    });
+
+    it('credits Stripe AND mirrors a negative refund row into the ledger', async () => {
+      const result = await refundDeployment('cus_1', 2500, 'Deploy failed: no capacity');
+      expect(result.success).toBe(true);
+      expect(mockStripe.customers.createBalanceTransaction).toHaveBeenCalledWith(
+        'cus_1',
+        expect.objectContaining({ amount: -2500 }),
+      );
+      expect(mockWalletTxnCreate).toHaveBeenCalledWith({
+        data: {
+          stripeCustomerId: 'cus_1',
+          type: 'refund',
+          amountCents: -2500,
+          description: 'Deploy failed: no capacity',
+          metadata: JSON.stringify({ source: 'deployment_refund' }),
+        },
+      });
+    });
+
+    it('a ledger write failure never fails the refund (customer already credited)', async () => {
+      mockWalletTxnCreate.mockRejectedValue(new Error('db down'));
+      const result = await refundDeployment('cus_1', 2500, 'Deploy failed');
+      expect(result.success).toBe(true);
+    });
+
+    it('short-circuits on amountCents <= 0 — no Stripe call, no ledger row', async () => {
+      const result = await refundDeployment('cus_1', 0, 'nothing to refund');
+      expect(result.success).toBe(true);
+      expect(mockStripe.customers.createBalanceTransaction).not.toHaveBeenCalled();
+      expect(mockWalletTxnCreate).not.toHaveBeenCalled();
+    });
+
+    it('a Stripe failure returns success:false and writes NO ledger row', async () => {
+      vi.mocked(mockStripe.customers.createBalanceTransaction).mockRejectedValue(
+        new Error('stripe down'),
+      );
+      const result = await refundDeployment('cus_1', 2500, 'Deploy failed');
+      expect(result.success).toBe(false);
+      expect(mockWalletTxnCreate).not.toHaveBeenCalled();
     });
   });
 });

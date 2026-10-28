@@ -16,6 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { recordFirstWorkloadBatch, WORKLOAD_UTIL_THRESHOLD } from "@/lib/lifecycle";
 
 interface IngestRequest {
   token: string;
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let [gpuUtilization, memoryUsedMb, memoryTotalMb, temperature, powerDraw, powerLimit] = gpuValues;
+    let gpuUtilization = gpuValues[0];
+    const [, memoryUsedMb, memoryTotalMb, temperature, powerDraw, powerLimit] = gpuValues;
     const fanSpeed = gpuValues[6] || 0;
 
     // Override GPU utilization with per-process metric if available (pod-level)
@@ -142,6 +144,12 @@ export async function POST(request: NextRequest) {
       },
     });
 
+    // PA-693 activation milestone: first sample with real GPU utilization
+    // stamps CustomerLifecycle.firstWorkloadAt (write-once, never throws).
+    if ((gpuUtilization || 0) >= WORKLOAD_UTIL_THRESHOLD) {
+      await recordFirstWorkloadBatch([podMetadata.stripeCustomerId]);
+    }
+
     // Record heartbeat for uptime tracking (separate aggregation table)
     const todayUTC = new Date().toISOString().slice(0, 10);
     const now = new Date();
@@ -179,6 +187,42 @@ export async function POST(request: NextRequest) {
         }
       } catch (alertErr) {
         console.error(`[Storage Alert] Error checking alert status:`, alertErr);
+      }
+    }
+
+    // PA-80: Check if the local/ephemeral root disk (`/`) exceeds 80% / 90% —
+    // email once per tier. This is the disk k8s evicts a pod over when it fills
+    // past its limit, and is separate from the /workspace persistent-storage
+    // alert above. The highest tier already sent is tracked on
+    // rootStorageAlertPercent so 80% and 90% each fire exactly once.
+    if (diskRootPercent && diskRootPercent >= 80) {
+      try {
+        const tier: 80 | 90 = diskRootPercent >= 90 ? 90 : 80;
+        const meta = await prisma.podMetadata.findUnique({
+          where: { subscriptionId: podMetadata.subscriptionId },
+          select: { rootStorageAlertPercent: true, displayName: true },
+        });
+        if (meta && tier > meta.rootStorageAlertPercent) {
+          // Bump the tier first to avoid duplicate emails on the 60s cadence
+          await prisma.podMetadata.update({
+            where: { subscriptionId: podMetadata.subscriptionId },
+            data: { rootStorageAlertPercent: tier },
+          });
+          const { sendEphemeralStorageAlert } = await import("@/lib/email/ephemeral-storage-alert");
+          await sendEphemeralStorageAlert({
+            subscriptionId: podMetadata.subscriptionId,
+            stripeCustomerId: podMetadata.stripeCustomerId,
+            displayName: meta.displayName || "GPU Instance",
+            usedMb: diskRootUsedMb!,
+            totalMb: diskRootTotalMb!,
+            percent: diskRootPercent,
+            tier,
+          }).catch((err: Error) => {
+            console.error(`[Ephemeral Storage Alert] Failed to send email:`, err);
+          });
+        }
+      } catch (alertErr) {
+        console.error(`[Ephemeral Storage Alert] Error checking alert status:`, alertErr);
       }
     }
 

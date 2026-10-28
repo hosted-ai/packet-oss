@@ -5,7 +5,7 @@ import { getStripe } from "@/lib/stripe";
 import { getUnifiedInstances } from "@/lib/hostedai";
 import { getExposedServices } from "@/lib/hostedai/services";
 import { sendHfDeploymentEmail } from "@/lib/email";
-import { generateCustomerToken } from "@/lib/customer-auth";
+import { createLoginLink } from "@/lib/customer-auth";
 import { logActivity } from "@/lib/activity";
 import {
   executeRemoteCommand,
@@ -147,7 +147,7 @@ export async function POST(request: NextRequest) {
               // Use the legacy expose-service endpoint which still works for unified instances
               const { exposeService } = await import("@/lib/hostedai/services");
               await exposeService({
-                pod_name: instance.name || instance.id,
+                pod_name: instance.id,
                 port: 8000,
                 service_name: "vllm",
                 protocol: "TCP",
@@ -222,7 +222,7 @@ async function sendDeploymentEmail(
     const customer = await stripe.customers.retrieve(deployment.stripeCustomerId);
     if ("deleted" in customer || !customer.email) return;
 
-    const token = generateCustomerToken(customer.email.toLowerCase(), customer.id);
+    const token = await createLoginLink({ email: customer.email.toLowerCase(), customerId: customer.id });
     const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${encodeURIComponent(token)}`;
 
     await sendHfDeploymentEmail({

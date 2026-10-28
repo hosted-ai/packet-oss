@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken, generateCustomerToken } from "@/lib/customer-auth";
-import { getStripe } from "@/lib/stripe";
+import { generateCustomerToken } from "@/lib/customer-auth";
+import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
+import { requirePermission } from "@/lib/auth/audit";
 import { validateVoucher } from "@/lib/voucher";
-import { gatePermission } from "@/lib/auth/gate";
 
 const TOP_UP_AMOUNTS = [
   { value: 2500, label: "$25" },
@@ -13,16 +13,17 @@ const TOP_UP_AMOUNTS = [
 ];
 
 export async function POST(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await getAuthenticatedCustomer(request);
+  if (auth instanceof NextResponse) return auth;
+  const { payload, stripe } = auth;
 
-  const token = authHeader.substring(7);
-  const payload = verifyCustomerToken(token);
-  if (!payload) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
+  // Only Owner / Admin / Finance Manager can top up the wallet.
+  const denial = requirePermission(auth, "billing.manage", request);
+  if (denial) return denial;
+
+  // The top-up funds the wallet hourly usage is drawn from, which is the
+  // context's hourly customer when it has one.
+  const walletId = auth.hourlyCustomerId ?? auth.accountId;
 
   try {
     const { amount, voucherCode, launchProductId } = await request.json();
@@ -33,27 +34,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
     }
 
-    const stripe = await getStripe();
-
     // Verify customer exists and is hourly billing
-    const customer = await stripe.customers.retrieve(payload.customerId);
+    const customer = await stripe.customers.retrieve(walletId);
     if ("deleted" in customer && customer.deleted) {
       return NextResponse.json({ error: "Customer not found" }, { status: 404 });
     }
 
-    // PA-175 gate: only Owner / Admin / Finance Manager can top up the wallet.
-    const denial = await gatePermission({
-      payload,
-      accountId: customer.id,
-      customerEmail: typeof customer.email === "string" ? customer.email : null,
-      permission: "billing.manage",
-      request,
-    });
-    if (denial) return denial;
-
-    // NOTE: billing_type upgrade from free/free_trial to hourly now happens in the
-    // Stripe webhook (handleWalletTopup) AFTER payment succeeds. This prevents
-    // users from getting hourly billing status without actually paying.
+    // The free/free_trial -> hourly upgrade happens in the Stripe webhook
+    // (handleWalletTopup) AFTER payment succeeds, so nobody gets it unpaid.
     const bt = customer.metadata?.billing_type;
     if (bt !== "free" && bt !== "free_trial" && bt !== "hourly") {
       return NextResponse.json(
@@ -67,7 +55,7 @@ export async function POST(request: NextRequest) {
     if (voucherCode && voucherCode.trim()) {
       const voucherResult = await validateVoucher(
         voucherCode.trim(),
-        payload.customerId,
+        walletId,
         amountCents
       );
 
@@ -90,16 +78,19 @@ export async function POST(request: NextRequest) {
       description += ` + $${(validatedVoucher.creditCents / 100).toFixed(0)} bonus`;
     }
 
-    // Generate a fresh token for the return URL so the user stays authenticated
-    // after Stripe redirects back (the dashboard requires ?token= in the URL).
-    // Use 2-hour expiry to allow time for checkout completion.
-    const returnToken = generateCustomerToken(payload.email, payload.customerId, 2);
+    // The return token keeps the session on the same operating account, so the
+    // dashboard Stripe redirects back to is the one that paid.
+    const returnToken = generateCustomerToken(payload.email, payload.customerId, {
+      userId: payload.userId,
+      activeAccountId: auth.accountId,
+      expiresInHours: 2,
+    });
 
     // Create checkout session for one-time payment
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-      customer: payload.customerId,
+      customer: walletId,
       line_items: [
         {
           price_data: {
@@ -116,14 +107,15 @@ export async function POST(request: NextRequest) {
       payment_intent_data: {
         metadata: {
           type: "wallet_topup",
-          customer_id: payload.customerId,
+          customer_id: walletId,
           voucher_code: validatedVoucher?.code || "",
         },
       },
       metadata: {
         type: "wallet_topup",
-        customer_id: payload.customerId,
+        customer_id: walletId,
         voucher_code: validatedVoucher?.code || "",
+        initiated_by_email: payload.email,
       },
       success_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${returnToken}&topup=success&amount=${amountCents}${validatedVoucher ? `&bonus=${validatedVoucher.creditCents}` : ""}${launchProductId ? `&launchProduct=${encodeURIComponent(launchProductId)}` : ""}`,
       cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${returnToken}&topup=canceled`,

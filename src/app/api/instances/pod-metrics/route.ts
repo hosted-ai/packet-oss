@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, teamId } = auth;
+    const { teamId } = auth;
 
     if (!teamId) {
       return NextResponse.json(
@@ -261,7 +261,7 @@ export async function GET(request: NextRequest) {
       }
 
       // Calculate uptime (if we have start time)
-      let uptime: string | null = null;
+      const uptime: string | null = null;
       // Uptime could be calculated from subscription created_at if available
 
       pods.push({

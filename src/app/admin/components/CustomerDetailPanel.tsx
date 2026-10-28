@@ -85,6 +85,7 @@ interface CustomerData {
   voucherRedemptions: VoucherRedemption[];
   referral: Referral | null;
   bareMetalEnabled?: boolean;
+  internalNotes?: string | null;
   suspension?: SuspensionInfo;
 }
 
@@ -107,6 +108,9 @@ export function CustomerDetailPanel({ customerId, onClose, onCustomerUpdated }: 
   const [adjustReason, setAdjustReason] = useState("");
   const [adjustReasonNote, setAdjustReasonNote] = useState("");
 
+  // PA-359: internal (admin-only) account notes
+  const [notesDraft, setNotesDraft] = useState("");
+
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
@@ -114,15 +118,35 @@ export function CustomerDetailPanel({ customerId, onClose, onCustomerUpdated }: 
       const result = await res.json();
       if (result.success) {
         setData(result);
+        setNotesDraft(result.internalNotes ?? "");
       } else {
         setError(result.error || "Failed to load customer");
       }
-    } catch (err) {
+    } catch {
       setError("Failed to load customer details");
     } finally {
       setLoading(false);
     }
   }, [customerId]);
+
+  const handleSaveNotes = async () => {
+    setActionLoading("set-internal-notes");
+    try {
+      const res = await fetch(`/api/admin/customers/${customerId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set-internal-notes", internalNotes: notesDraft }),
+      });
+      const result = await res.json();
+      if (res.ok) {
+        await fetchData();
+      } else {
+        alert(result.error || "Failed to save notes");
+      }
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   useEffect(() => {
     fetchData();
@@ -578,6 +602,34 @@ export function CustomerDetailPanel({ customerId, onClose, onCustomerUpdated }: 
                       </dd>
                     </div>
                   </dl>
+                </div>
+
+                {/* Internal Notes (PA-359) — admin-only, never shown to the customer */}
+                <div className="bg-[#f7f8fb] rounded-xl p-6">
+                  <div className="flex items-center justify-between mb-1">
+                    <h2 className="font-semibold text-[#0b0f1c]">Internal Notes</h2>
+                    <span className="text-xs text-[#5b6476]">Not visible to customer</span>
+                  </div>
+                  <p className="text-xs text-[#5b6476] mb-3">
+                    For internal use only — e.g. KYC-step progress. Customers never see this.
+                  </p>
+                  <textarea
+                    value={notesDraft}
+                    onChange={(e) => setNotesDraft(e.target.value)}
+                    rows={5}
+                    maxLength={10000}
+                    placeholder="Add internal notes about this account…"
+                    className="w-full rounded-lg border border-[#e2e5ee] bg-white p-3 text-sm text-[#0b0f1c] focus:outline-none focus:ring-2 focus:ring-[#6366f1]"
+                  />
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      onClick={handleSaveNotes}
+                      disabled={actionLoading === "set-internal-notes" || notesDraft === (data.internalNotes ?? "")}
+                      className="px-3 py-1.5 bg-[#6366f1] hover:bg-[#4f46e5] disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm rounded-lg"
+                    >
+                      {actionLoading === "set-internal-notes" ? "Saving…" : "Save Notes"}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Billing Summary */}

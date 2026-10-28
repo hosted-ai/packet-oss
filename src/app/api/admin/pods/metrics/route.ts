@@ -1,203 +1,69 @@
 /**
  * Admin Pods Metrics API
  *
- * Fetches real-time GPU metrics for specific pods via SSH.
- * This is a separate endpoint because fetching metrics is expensive.
+ * GPU TFLOPs + VRAM per pod, sourced from hosted.ai's Prometheus-backed
+ * telemetry (PA-187, same source as the customer dashboard per PA-190),
+ * replacing the old per-pod SSH nvidia-smi approach. Each pod is keyed by its
+ * HAI instance id (i-…) + teamId, which the admin pods list already provides.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
-import { spawn } from "child_process";
-import { validateSSHParams } from "@/lib/ssh-validation";
+import { getPodMetricsV2 } from "@/lib/hostedai";
 
-interface GPUMetrics {
-  utilization: number;
-  memoryUsed: number;
-  memoryTotal: number;
-  memoryPercent: number;
-  temperature: number;
-  powerDraw: number;
+interface PodGpuMetrics {
+  tflops: number;
+  vramGb: number;
 }
 
 interface PodMetricsResult {
   subscriptionId: string;
-  gpu: GPUMetrics | null;
+  gpu: PodGpuMetrics | null;
   error?: string;
 }
 
-/**
- * Execute SSH command on a pod
- */
-async function executeSSHCommand(
-  host: string,
-  port: number,
-  username: string,
-  password: string,
-  command: string,
-  timeoutMs: number = 10000
-): Promise<{ success: boolean; output: string }> {
-  // Validate SSH parameters to prevent command injection
-  validateSSHParams({ host, port, username });
-
-  return new Promise((resolve) => {
-    const args = [
-      "-e",
-      "ssh",
-      "-o", "StrictHostKeyChecking=no",
-      "-o", "UserKnownHostsFile=/dev/null",
-      "-o", "LogLevel=ERROR",
-      "-o", "ConnectTimeout=8",
-      "-p", String(port),
-      `${username}@${host}`,
-      command,
-    ];
-
-    let stdout = "";
-    let stderr = "";
-    let resolved = false;
-
-    const proc = spawn("sshpass", args, {
-      timeout: timeoutMs,
-      env: { ...process.env, SSHPASS: password },
-    });
-
-    proc.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-
-    proc.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
-
-    proc.on("close", (code) => {
-      if (!resolved) {
-        resolved = true;
-        resolve({
-          success: code === 0,
-          output: stdout + (stderr ? `\nSTDERR: ${stderr}` : ""),
-        });
-      }
-    });
-
-    proc.on("error", (err) => {
-      if (!resolved) {
-        resolved = true;
-        resolve({
-          success: false,
-          output: `Error: ${err.message}`,
-        });
-      }
-    });
-
-    // Timeout handler
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        proc.kill();
-        resolve({
-          success: false,
-          output: "Command timed out",
-        });
-      }
-    }, timeoutMs);
-  });
-}
-
-/**
- * Fetch GPU metrics from a single pod via SSH using nvidia-smi
- */
-async function fetchPodGPUMetrics(
-  host: string,
-  port: number,
-  username: string,
-  password: string
-): Promise<GPUMetrics | null> {
-  // power.limit is intentionally excluded — it is not supported on Blackwell GPUs
-  // (B200, etc.) and returns "[Not Supported]", which previously caused NaN
-  // validation to reject the entire response for those cards.
-  const metricsCommand = `nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader,nounits 2>/dev/null`;
-
-  const result = await executeSSHCommand(host, port, username, password, metricsCommand);
-
-  if (!result.success) {
-    return null;
-  }
-
-  const output = result.output.trim();
-  // Convert unsupported fields to 0 rather than NaN so newer GPU architectures
-  // (e.g. B200) that don't expose every nvidia-smi field still return metrics.
-  const values = output.split(",").map(v => { const n = parseFloat(v.trim()); return isNaN(n) ? 0 : n; });
-
-  if (values.length >= 5) {
-    return {
-      utilization: values[0] || 0,
-      memoryUsed: values[1] || 0,
-      memoryTotal: values[2] || 0,
-      memoryPercent: values[2] ? (values[1] / values[2]) * 100 : 0,
-      temperature: values[3] || 0,
-      powerDraw: values[4] || 0,
-    };
-  }
-
-  return null;
-}
+// Averages the buckets that actually reported. A bucket the telemetry never
+// reported is absent, not zero, so counting it drags the figure toward zero.
+const avg = (xs: Array<number | null>) => {
+  const real = xs.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  return real.length ? real.reduce((a, b) => a + b, 0) / real.length : 0;
+};
 
 export async function POST(request: NextRequest) {
-  // Verify admin session
   const sessionToken = request.cookies.get("admin_session")?.value;
-  if (!sessionToken) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const session = verifySessionToken(sessionToken);
-  if (!session) {
+  if (!sessionToken || !verifySessionToken(sessionToken)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const body = await request.json();
     const { pods } = body as {
-      pods: Array<{
-        subscriptionId: string;
-        ssh: {
-          host: string;
-          port: number;
-          username: string;
-          password: string;
-        };
-      }>;
+      pods: Array<{ subscriptionId: string; teamId: string }>;
     };
 
     if (!pods || !Array.isArray(pods) || pods.length === 0) {
       return NextResponse.json({ error: "No pods provided" }, { status: 400 });
     }
 
-    // Limit to 20 pods at a time to avoid overwhelming the server
-    const limitedPods = pods.slice(0, 20);
+    // Cap the fan-out; each is a cheap indexed query against HAI's team_metrics.
+    const limitedPods = pods.slice(0, 50);
 
-    // Fetch metrics in parallel with concurrency limit
     const results: PodMetricsResult[] = await Promise.all(
       limitedPods.map(async (pod) => {
-        if (!pod.ssh) {
-          return {
-            subscriptionId: pod.subscriptionId,
-            gpu: null,
-            error: "No SSH credentials",
-          };
+        if (!pod.teamId) {
+          return { subscriptionId: pod.subscriptionId, gpu: null, error: "No team" };
         }
-
         try {
-          const gpu = await fetchPodGPUMetrics(
-            pod.ssh.host,
-            pod.ssh.port,
-            pod.ssh.username,
-            pod.ssh.password
-          );
-
+          const series = await getPodMetricsV2(pod.subscriptionId, pod.teamId, "last_5m");
+          if (!Array.isArray(series) || series.length === 0) {
+            return { subscriptionId: pod.subscriptionId, gpu: null, error: "No data" };
+          }
           return {
             subscriptionId: pod.subscriptionId,
-            gpu,
-            error: gpu ? undefined : "Failed to fetch metrics",
+            gpu: {
+              tflops: avg(series.map((p) => p.tflops)),
+              vramGb: avg(series.map((p) => p.vram_mib)) / 1024, // MiB -> GB
+            },
           };
         } catch (err) {
           return {

@@ -37,6 +37,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     processedStripeEvent: {
       create: mockProcessedEventCreate,
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
       findUnique: vi.fn(),
       upsert: vi.fn().mockResolvedValue({}),
     },
@@ -59,7 +60,10 @@ vi.mock("@/lib/hostedai", () => ({
   ensureRoles: vi.fn(),
 }));
 vi.mock("@/lib/email", () => ({ sendWelcomeEmail: vi.fn() }));
-vi.mock("@/lib/customer-auth", () => ({ generateCustomerToken: vi.fn() }));
+vi.mock("@/lib/customer-auth", () => ({
+  generateCustomerToken: vi.fn(),
+  createLoginLink: vi.fn(async () => "cust-token"), // PA-380
+}));
 vi.mock("@/lib/edition", () => ({ isPro: () => true }));
 vi.mock("@/lib/referral", () => ({
   checkAndProcessReferralQualification: vi.fn(),
@@ -143,6 +147,55 @@ describe("POST /api/webhooks/stripe", () => {
       expect(call[0]).toBe(rawBody); // raw body
       expect(call[1]).toBe("t=1,v1=valid"); // signature
       expect(call[2]).toBe("whsec_test_secret"); // secret
+    });
+  });
+
+  describe("observability", () => {
+    // Every non-2xx return, and every signature-verification outcome, must
+    // produce a log line — the production gap was 8 x 500 with zero matching
+    // journal entries because a failure path bypassed the router's catch.
+    it("logs a line when the signature header is missing", async () => {
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+      await POST(makeRequest("{}", null));
+      // Matched loosely: the point is that the refusal is logged at all, not
+      // how it is worded.
+      expect(errSpy).toHaveBeenCalledWith(expect.stringMatching(/signature/i));
+      errSpy.mockRestore();
+    });
+
+    it("logs the event id and type on successful signature verification", async () => {
+      mockConstructEvent.mockReturnValue({
+        id: "evt_logged_1",
+        type: "customer.created",
+        data: { object: {} },
+      });
+      mockProcessedEventCreate.mockResolvedValue({});
+      const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+      await POST(makeRequest("{}", "t=1,v1=valid"));
+
+      expect(logSpy).toHaveBeenCalledWith(
+        expect.stringContaining("evt_logged_1"),
+      );
+      logSpy.mockRestore();
+    });
+
+    it("returns 500 (not an unhandled crash) and logs when resolving the Stripe client/secret throws", async () => {
+      // This is the path that produced the production incident: a transient
+      // failure resolving getStripe()/getStripeWebhookSecret() used to run
+      // outside any try/catch and never reached the router's log line.
+      mockGetWebhookSecret.mockRejectedValue(new Error("DB unavailable"));
+      const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+      const res = await POST(makeRequest("{}", "t=1,v1=valid"));
+
+      expect(res.status).toBe(500);
+      expect(mockConstructEvent).not.toHaveBeenCalled();
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining("unresolved (pre-parse failure)"),
+        expect.any(Error),
+      );
+      errSpy.mockRestore();
     });
   });
 

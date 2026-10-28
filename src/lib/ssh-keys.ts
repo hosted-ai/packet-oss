@@ -135,7 +135,6 @@ export async function getSSHKey(
 const SERVER_KEY_CUSTOMER_ID = "__SERVER__";
 const SERVER_KEY_NAME = "gpu-cloud-server";
 
-import { generateKeyPairSync } from "crypto";
 import { execSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";

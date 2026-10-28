@@ -21,6 +21,7 @@ import {
 } from "@/lib/auth/role-permissions";
 import { randomBytes } from "crypto";
 import { sendTeamInviteEmail } from "@/lib/email/templates/team-invite";
+import { logTeamMemberInvited } from "@/lib/activity";
 
 const INVITATION_TTL_DAYS = 7;
 
@@ -195,6 +196,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       },
     })
     .catch((err) => console.error("[POST invitations] audit log failed:", err));
+
+  logTeamMemberInvited(accountId, email).catch(() => {});
 
   // Fire-and-forget invite email. If SMTP is broken the API still succeeds —
   // the full token is in the response body so the UI can show a copy-link

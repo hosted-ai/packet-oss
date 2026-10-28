@@ -44,6 +44,7 @@ const TYPE_CATEGORIES: Record<string, string[]> = {
   "Snapshots": ["snapshot_created", "snapshot_restored", "snapshot_deleted"],
   "HuggingFace": ["hf_deployment_started", "hf_deployment_running", "hf_deployment_failed", "hf_deployment_deleted"],
   "Pods (Admin)": ["pod_stop", "pod_start", "pod_restart", "pod_terminate"],
+  "Bare Metal (Admin)": ["baremetal_payment_override", "baremetal_backfill_mapped", "baremetal_dates_edited", "baremetal_node_retired", "baremetal_node_unretired"],
 };
 
 export function ActivityTab({
