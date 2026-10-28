@@ -29,6 +29,9 @@ import {
   type WaitForInstanceOptions,
 } from "./hostedai";
 
+// Length of the prepaid block charged at deploy, mirroring the deploy routes.
+const MINIMUM_BILLING_MINUTES = 30;
+
 const RUNNING_STATUSES = new Set(["running", "active"]);
 const TERMINAL_FAIL_STATUSES = new Set([
   "succeeded", "failed", "terminated", "error", "crashloopbackoff", "stopped",
@@ -146,15 +149,120 @@ export async function reconcilePendingDeploy(
   return { status: "still_provisioning" };
 }
 
-async function markDeployRunning(instanceId: string): Promise<void> {
+// PA-221: a pod can flip provisioning → running and then be deleted by HAI
+// seconds later (race observed 9-26s after the running transition). The
+// provisioning safety net never re-checks running rows, so the customer's
+// prepaid charge stands with no refund — a silent overcharge ("ghost pod").
+//
+// This reconciles a running row whose prepaid window is still open. We refund
+// ONLY on a confirmed deletion (two consecutive 404s). We deliberately do NOT
+// treat other terminal statuses as ghosts here: a customer can stop a running
+// pod (HAI status "stopped"), which is still billed at the stopped rate — and
+// any non-404 status means the instance still exists, so it's not a ghost.
+//
+// Customer-initiated early termination is unaffected: that path
+// (DELETE /api/instances/pool-subscription/[id]) deletes the PodMetadata row
+// and issues its own prorated credit, so there is no running row left for this
+// to act on. The conditional running → failed_refunded claim makes it idempotent.
+export async function reconcileRunningGhost(
+  args: {
+    instanceId: string;
+    customerId: string;
+    prechargedCents: number;
+    isMonthlyDeploy: boolean;
+    // Test injection: override the 404-recheck sleep (default 5s).
+    recheckDelayMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  }
+): Promise<{ status: "alive" | "failed_refunded" | "transient"; reason?: string }> {
+  const recheckDelayMs = args.recheckDelayMs ?? 5_000;
+  const sleep = args.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
   try {
-    await prisma.podMetadata.updateMany({
+    await getUnifiedInstanceDetail(args.instanceId);
+    return { status: "alive" }; // instance still exists (any status) — not a ghost
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!msg.includes("(404)")) {
+      console.error(`[DeployMonitor] Transient HAI error reconciling running ${args.instanceId}:`, err);
+      return { status: "transient" };
+    }
+    // Re-verify the 404 before refunding (a transient blip must not fire a refund).
+    await sleep(recheckDelayMs);
+    try {
+      await getUnifiedInstanceDetail(args.instanceId);
+      return { status: "alive" }; // recovered — not a ghost
+    } catch (err2) {
+      const msg2 = err2 instanceof Error ? err2.message : String(err2);
+      if (msg2.includes("(404)")) {
+        const reason = "instance deleted post-running by HAI";
+        await failDeploy(args, reason, { fromStatus: "running", skipDelete: true });
+        return { status: "failed_refunded", reason };
+      }
+      console.error(`[DeployMonitor] Transient HAI error reconciling running ${args.instanceId} (after 404 recheck):`, err2);
+      return { status: "transient" };
+    }
+  }
+}
+
+// The shape hostedaiRequest gives an error carrying an HTTP status; a timeout
+// or a transport failure never reaches it.
+const HAI_HTTP_ERROR = /Hosted\.ai API error \(\d{3}\)/;
+
+// Enforce that a deploy already recorded as failed_refunded leaves nothing
+// running: HAI refuses a delete in some states, so it is re-issued until 404.
+export async function terminateFailedDeploy(
+  instanceId: string
+): Promise<"gone" | "deleted" | "alive" | "unknown"> {
+  try {
+    await getUnifiedInstanceDetail(instanceId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("(404)")) return "gone";
+    // Any other probe failure proves nothing about the instance, so deleting
+    // on it would be a delete on unverified existence.
+    console.error(`[DeployMonitor] Transient HAI error probing failed instance ${instanceId}:`, err);
+    return "unknown";
+  }
+
+  try {
+    await deleteInstance(instanceId);
+    return "deleted";
+  } catch (err) {
+    // Only an HTTP status means HAI answered and refused; a timeout or a
+    // transport failure landed no attempt, so the counter must not move.
+    if (!HAI_HTTP_ERROR.test(err instanceof Error ? err.message : String(err))) {
+      console.error(`[DeployMonitor] HAI never answered the delete for failed instance ${instanceId}:`, err);
+      return "unknown";
+    }
+    console.error(`[DeployMonitor] HAI refused to delete failed instance ${instanceId}:`, err);
+    return "alive";
+  }
+}
+
+async function markDeployRunning(instanceId: string): Promise<void> {
+  const completedAt = new Date();
+  try {
+    const claim = await prisma.podMetadata.updateMany({
       where: { instanceId, deployStatus: "provisioning" },
-      data: { deployStatus: "running" },
+      data: { deployStatus: "running", provisioningCompletedAt: completedAt },
     });
+    if (claim.count > 0) await anchorPrepaidWindow(instanceId, completedAt);
   } catch (err) {
     console.error(`[DeployMonitor] Failed to mark ${instanceId} running:`, err);
   }
+}
+
+// The customer pays for a running pod, so the prepaid window starts when HAI
+// confirms the pod is up, not when the deploy was requested.
+async function anchorPrepaidWindow(instanceId: string, completedAt: Date): Promise<void> {
+  const prepaidUntil = new Date(completedAt.getTime() + MINIMUM_BILLING_MINUTES * 60 * 1000);
+  // `lt` skips a monthly row (null, and it must stay null) and any row the sync
+  // sweep has already advanced past this point — the anchor only ever moves later.
+  await prisma.podMetadata.updateMany({
+    where: { instanceId, prepaidUntil: { not: null, lt: prepaidUntil } },
+    data: { prepaidUntil },
+  });
 }
 
 // Claim the failure transition atomically, then refund + clean up. If the
@@ -162,14 +270,19 @@ async function markDeployRunning(instanceId: string): Promise<void> {
 // and we must not refund again.
 async function failDeploy(
   args: { instanceId: string; customerId: string; prechargedCents: number; isMonthlyDeploy: boolean },
-  reason: string
+  reason: string,
+  // fromStatus: which deploy_status the conditional claim requires (default
+  // "provisioning"; the PA-221 running-ghost path passes "running"). skipDelete:
+  // don't call HAI deleteInstance (the running-ghost is already gone from HAI).
+  opts: { fromStatus?: string; skipDelete?: boolean } = {},
 ): Promise<void> {
+  const fromStatus = opts.fromStatus ?? "provisioning";
   console.log(`[DeployMonitor] Instance ${args.instanceId} failed to start: ${reason}`);
 
   let claimed = 0;
   try {
     const result = await prisma.podMetadata.updateMany({
-      where: { instanceId: args.instanceId, deployStatus: "provisioning" },
+      where: { instanceId: args.instanceId, deployStatus: fromStatus },
       data: {
         deployStatus: "failed_refunded",
         deployStatusReason: reason.slice(0, 500),
@@ -197,6 +310,7 @@ async function failDeploy(
     }
   }
 
-  // Best-effort cleanup — HAI will reap this anyway after ~10min.
-  deleteInstance(args.instanceId).catch(() => {});
+  // A refunded deploy must not leave a billable instance behind. A delete HAI
+  // refuses here is re-issued by the check-pending-deploys sweep.
+  if (!opts.skipDelete) await terminateFailedDeploy(args.instanceId);
 }

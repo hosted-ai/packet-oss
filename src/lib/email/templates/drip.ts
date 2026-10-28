@@ -32,11 +32,10 @@ import {
   emailMuted,
   plainTextFooter,
 } from "../utils";
-import { getBrandName, getApiBaseUrl } from "@/lib/branding";
+import { getBrandName } from "@/lib/branding";
 
 // ── Default brand values used when no branding is supplied ──────────────────
 const DEFAULT_BRAND_NAME = getBrandName();
-const DEFAULT_API_BASE_URL = getApiBaseUrl();
 
 // ── GPU display names + pricing (kept in sync with signup route) ──
 

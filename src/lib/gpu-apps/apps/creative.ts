@@ -52,7 +52,7 @@ fi
 source venv/bin/activate
 
 # Install PyTorch and requirements
-pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 pip install --quiet -r requirements.txt
 
 # Create startup script
@@ -144,8 +144,8 @@ source venv/bin/activate
 # Upgrade pip to get prebuilt wheels when available
 pip install --quiet --upgrade pip wheel
 
-# Install PyTorch nightly for Blackwell GPU (sm_120) support
-pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+# Install PyTorch (pinned, stable cu128) for Blackwell GPU (sm_120) support
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 # Pre-install transformers and tokenizers from prebuilt wheels (avoid old pinned version that needs Rust build)
 pip install --quiet tokenizers transformers safetensors accelerate
@@ -219,7 +219,7 @@ fi
 source venv/bin/activate
 
 # Install PyTorch
-pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 # Install requirements
 pip install --quiet -r requirements_versions.txt
@@ -290,7 +290,7 @@ fi
 source venv/bin/activate
 
 # Install PyTorch
-pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 # Install requirements
 pip install --quiet -r requirements.txt

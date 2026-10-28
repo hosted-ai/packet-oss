@@ -6,7 +6,8 @@
  */
 
 import { gpuaasAdminRequest } from "./client";
-import type { GPUaaSNode, AddNodeInput } from "./types";
+import { listRegions } from "./regions";
+import type { GPUaaSNode, AddNodeInput, BaremetalNode } from "./types";
 
 /**
  * List all nodes for a region
@@ -28,6 +29,50 @@ export async function listNodes(regionId: number): Promise<GPUaaSNode[]> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const items = (response as any).items;
   return Array.isArray(items) ? items : [];
+}
+
+/**
+ * List physical BARE-METAL nodes for a region.
+ *
+ * Distinct from listNodes (GPUaaS nodes, /gpuaas/node/list). This hits the admin
+ * `/baremetal/node?region_id=` endpoint, whose rows carry gpu_count + service_status
+ * and back the Daily Ops Summary baremetal GPU count (node assignment).
+ */
+export async function listBaremetalNodes(regionId: number): Promise<BaremetalNode[]> {
+  const response = await gpuaasAdminRequest<BaremetalNode[] | { items?: BaremetalNode[] } | null>(
+    "GET",
+    `/baremetal/node?region_id=${regionId}`
+  );
+  if (Array.isArray(response)) return response;
+  // Some admin list endpoints wrap in { items: [...] } — mirror listNodes/listRegions.
+  const items = (response as { items?: BaremetalNode[] } | null)?.items;
+  return Array.isArray(items) ? items : [];
+}
+
+// A region exposes baremetal via either the top-level boolean (admin /regions
+// payload) or the nested status enum (the convention isGPUaaSEnabled/compute use).
+function regionHasBaremetal(r: { baremetal_enabled?: boolean; status?: { baremetal?: string } }): boolean {
+  return r.baremetal_enabled === true || r.status?.baremetal === "enabled";
+}
+
+/**
+ * List every bare-metal node across all baremetal-enabled regions (flat).
+ * Used by the ops summary to resolve a row's selected node ids to gpu_count.
+ * Per-region calls are cached by the admin client (2-min GET cache).
+ *
+ * Per-region failures are NOT swallowed: a partial fleet would make the ops
+ * summary render a confident-but-wrong low count. We let the error propagate so
+ * the caller renders "—" (unknown) instead of a misleading partial number.
+ */
+export async function listAllBaremetalNodes(): Promise<BaremetalNode[]> {
+  const regions = await listRegions();
+  const bmRegions = regions.filter(regionHasBaremetal);
+  const all: BaremetalNode[] = [];
+  for (const r of bmRegions) {
+    const nodes = await listBaremetalNodes(r.id);
+    all.push(...nodes);
+  }
+  return all;
 }
 
 /**

@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { AnnouncementMessage } from "@/components/AnnouncementMessage";
+import { htmlToMarkdown } from "@/lib/announcements/html-to-markdown";
 
 interface DashboardAnnouncement {
   id: string;
@@ -588,6 +590,23 @@ export function AnnouncementsTab() {
                 <textarea
                   value={form.message}
                   onChange={(e) => setForm({ ...form, message: e.target.value })}
+                  onPaste={(e) => {
+                    // PA-309: rich text pasted from a doc would lose bold +
+                    // paragraphs in a plain textarea. Read the clipboard's HTML
+                    // and convert to markdown so it survives (and renders back
+                    // via AnnouncementMessage). Plain-text pastes fall through.
+                    const html = e.clipboardData.getData("text/html");
+                    if (!html) return;
+                    e.preventDefault();
+                    const md = htmlToMarkdown(html);
+                    const ta = e.currentTarget;
+                    const start = ta.selectionStart ?? form.message.length;
+                    const end = ta.selectionEnd ?? form.message.length;
+                    setForm({
+                      ...form,
+                      message: form.message.slice(0, start) + md + form.message.slice(end),
+                    });
+                  }}
                   required
                   rows={3}
                   placeholder="We will be performing scheduled maintenance tonight from 10 PM to 2 AM UTC."
@@ -918,7 +937,11 @@ export function AnnouncementsTab() {
                               {form.title || "Announcement Title"}
                             </div>
                             <div style={{ fontSize: "13px", opacity: 0.9, marginTop: "2px" }}>
-                              {form.message || "Your announcement message will appear here."}
+                              {form.message ? (
+                                <AnnouncementMessage text={form.message} />
+                              ) : (
+                                "Your announcement message will appear here."
+                              )}
                             </div>
                           </div>
                           {form.dismissible && (
@@ -962,6 +985,10 @@ export function AnnouncementsTab() {
                               maxWidth: "400px",
                               width: "100%",
                               textAlign: "center",
+                              // Mirror the live modal: cap height + scroll so a
+                              // long preview doesn't balloon the admin form.
+                              maxHeight: "60vh",
+                              overflowY: "auto",
                             }}
                           >
                             <h4
@@ -973,16 +1000,21 @@ export function AnnouncementsTab() {
                             >
                               {form.title || "Announcement Title"}
                             </h4>
-                            <p
+                            <div
                               style={{
                                 margin: "0 0 20px 0",
                                 fontSize: "14px",
                                 lineHeight: 1.5,
                                 color: "#3a3f4b",
+                                textAlign: "left",
                               }}
                             >
-                              {form.message || "Your announcement message will appear here."}
-                            </p>
+                              {form.message ? (
+                                <AnnouncementMessage text={form.message} />
+                              ) : (
+                                "Your announcement message will appear here."
+                              )}
+                            </div>
                             {form.dismissible && (
                               <span
                                 style={{

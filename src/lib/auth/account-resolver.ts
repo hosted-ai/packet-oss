@@ -25,6 +25,7 @@ import type Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import {
+  pickHourlyCustomer,
   resolveAllTeamsForEmail,
   type ResolvedCustomer,
 } from "@/lib/customer-resolver";
@@ -32,9 +33,11 @@ import {
 export interface OperatingContext {
   customer: Stripe.Customer;
   accountId: string;
+  teamId: string | null;
   allTeamIds: string[];
   allCustomerIds: string[];
   monthlyCustomerIds: string[];
+  hourlyCustomerId: string | null;
 }
 
 async function loadCustomer(
@@ -50,34 +53,95 @@ async function loadCustomer(
   }
 }
 
-function contextFromResolved(resolved: ResolvedCustomer): OperatingContext {
+// The team a customer operates in, and the linked account it came from when the customer
+// does not own one itself. primaryCustomer is null whenever no link was followed.
+export interface ResolvedTeam {
+  teamId: string | null;
+  primaryCustomer: Stripe.Customer | null;
+}
+
+// Monthly checkout mints a billing-only customer that carries no team of its own, only a
+// primary_stripe_customer_id pointing at the account that owns one. Follow it.
+export async function resolveCustomerTeamId(
+  stripe: Stripe,
+  customer: Stripe.Customer,
+): Promise<ResolvedTeam> {
+  const own = customer.metadata?.hostedai_team_id;
+  if (own) return { teamId: own, primaryCustomer: null };
+
+  const primaryId = customer.metadata?.primary_stripe_customer_id;
+  if (!primaryId) return { teamId: null, primaryCustomer: null };
+
+  const primary = await loadCustomer(stripe, primaryId);
+  if (!primary) return { teamId: null, primaryCustomer: null };
+
+  const teamId = primary.metadata?.hostedai_team_id ?? null;
+  return { teamId, primaryCustomer: teamId ? primary : null };
+}
+
+// The operating team must appear in allTeamIds too: every downstream ownership check
+// scopes against that list, and a monthly-pinned session would otherwise scope to nothing.
+function withTeam(ctx: OperatingContext, teamId: string | null): OperatingContext {
+  if (!teamId) return { ...ctx, teamId: ctx.allTeamIds[0] ?? null };
   return {
-    customer: resolved.primaryCustomer,
-    accountId: resolved.primaryCustomer.id,
-    allTeamIds: resolved.allTeamIds,
-    allCustomerIds: resolved.allCustomerIds,
-    monthlyCustomerIds: resolved.monthlyCustomerIds,
+    ...ctx,
+    teamId,
+    allTeamIds: ctx.allTeamIds.includes(teamId) ? ctx.allTeamIds : [...ctx.allTeamIds, teamId],
   };
 }
 
-function contextFromAccount(
+async function contextFromResolved(
+  stripe: Stripe,
+  resolved: ResolvedCustomer,
+): Promise<OperatingContext> {
+  const base: OperatingContext = {
+    customer: resolved.primaryCustomer,
+    accountId: resolved.primaryCustomer.id,
+    teamId: null,
+    allTeamIds: resolved.allTeamIds,
+    allCustomerIds: resolved.allCustomerIds,
+    monthlyCustomerIds: resolved.monthlyCustomerIds,
+    hourlyCustomerId: resolved.hourlyCustomerId,
+  };
+  return withTeam(base, (await resolveCustomerTeamId(stripe, resolved.primaryCustomer)).teamId);
+}
+
+async function contextFromAccount(
+  stripe: Stripe,
   customer: Stripe.Customer,
   ownResolved: ResolvedCustomer | null,
-): OperatingContext {
-  // Monthly subs of the OPERATING account live on its own linked monthly
-  // customers (cross-referenced via metadata.monthly_stripe_customer_ids
-  // by the Stripe webhook). When a user is operating in someone else's
-  // team (e.g., a Read-only Member viewing the owner's team), we MUST
-  // read these IDs from the operating customer, not from the user's own
-  // resolution — otherwise the owner's subscriptions are invisible.
+  lowerEmail: string,
+): Promise<OperatingContext> {
+  // Written by the Stripe webhook onto whichever customer it ranked primary at the
+  // time, so it is only ever a partial record of which accounts hold subscriptions.
   const linkedMonthlyIds = (customer.metadata?.monthly_stripe_customer_ids ?? "")
     .split(",")
     .map((id) => id.trim())
     .filter(Boolean);
 
-  return {
+  // Operating one of your own accounts: every Stripe customer on the address is
+  // yours, so the address is the authority and the webhook's list is only a hint.
+  // Operating someone else's team is the opposite — the list is all we may read,
+  // or a member would see their own subscriptions inside the owner's workspace.
+  const ownsThisAccount =
+    typeof customer.email === "string" && customer.email.toLowerCase() === lowerEmail;
+  const subscriptionCustomerIds = ownsThisAccount
+    ? Array.from(
+        new Set([...linkedMonthlyIds, ...(ownResolved?.allCustomerIds ?? [])]),
+      ).filter((id) => id !== customer.id)
+    : linkedMonthlyIds;
+
+  // Hourly usage is paid from the hourly wallet on the email, which a monthly
+  // billing artefact never carries. Someone else's team pays from its own.
+  const hourlyCustomerId =
+    pickHourlyCustomer([customer])?.id ??
+    (ownsThisAccount ? (ownResolved?.hourlyCustomerId ?? null) : null);
+
+  const base: OperatingContext = {
     customer,
     accountId: customer.id,
+    teamId: null,
+    hourlyCustomerId,
     allTeamIds: customer.metadata?.hostedai_team_id
       ? [customer.metadata.hostedai_team_id]
       : (ownResolved?.allTeamIds ?? []),
@@ -86,8 +150,10 @@ function contextFromAccount(
     allCustomerIds: ownResolved
       ? Array.from(new Set([...ownResolved.allCustomerIds, customer.id]))
       : [customer.id],
-    monthlyCustomerIds: linkedMonthlyIds,
+    monthlyCustomerIds: subscriptionCustomerIds,
   };
+
+  return withTeam(base, (await resolveCustomerTeamId(stripe, customer)).teamId);
 }
 
 export async function resolveOperatingContext({
@@ -147,12 +213,12 @@ export async function resolveOperatingContext({
     }
     if (!hasAccess) return null;
 
-    return contextFromAccount(customer, ownResolved);
+    return contextFromAccount(stripe, customer, ownResolved, lower);
   }
 
   // (b) No activeAccountId, user has their own Stripe customer → primary.
   if (ownResolved) {
-    return contextFromResolved(ownResolved);
+    return contextFromResolved(stripe, ownResolved);
   }
 
   // (c) Team-only user: no Stripe customer of their own. Pick the first
@@ -172,5 +238,5 @@ export async function resolveOperatingContext({
   const customer = await loadCustomer(stripe, memberships[0].stripeCustomerId);
   if (!customer) return null;
 
-  return contextFromAccount(customer, null);
+  return contextFromAccount(stripe, customer, null, lower);
 }

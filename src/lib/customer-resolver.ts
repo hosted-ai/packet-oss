@@ -21,16 +21,46 @@ export interface ResolvedCustomer {
   allCustomerIds: string[];
   /** Monthly-only customer IDs (for subscription fetching) */
   monthlyCustomerIds: string[];
+  /** The customer holding the hourly wallet for this email, if any */
+  hourlyCustomerId: string | null;
 }
 
-/**
- * Resolve all teams and customers for an email address.
- *
- * Given any Stripe customer ID + email (from JWT), finds:
- * - The primary hourly customer (for wallet display)
- * - All team IDs (for pod fetching across all teams)
- * - All monthly customer IDs (for subscription merging)
- */
+/** Ranks a customer for primary selection: hourly, then free tiers, then the rest. */
+export const customerTier = (billingType?: string) =>
+  billingType === "hourly" ? 0 : ["free", "free_trial"].includes(billingType || "") ? 1 : 2;
+
+// Every subsystem writing or reading a cross-link must rank through this: Stripe lists
+// newest-first, so first-match-wins lets a fresh empty account outrank an established one.
+export function pickPrimaryCustomer(
+  customers: Stripe.Customer[],
+  excludeId?: string,
+): Stripe.Customer | null {
+  return (
+    customers
+      .filter((c) => c.metadata?.hostedai_team_id && c.id !== excludeId)
+      .sort(
+        (a, b) =>
+          customerTier(a.metadata?.billing_type) - customerTier(b.metadata?.billing_type) ||
+          a.created - b.created,
+      )[0] ?? null
+  );
+}
+
+// The account that pays for hourly usage on this email: hourly first, then the free
+// tiers. Monthly checkout mints a separate customer, so it is rarely the operating one.
+export function pickHourlyCustomer(customers: Stripe.Customer[]): Stripe.Customer | null {
+  return (
+    customers
+      .filter((c) => customerTier(c.metadata?.billing_type) < 2)
+      .sort(
+        (a, b) =>
+          customerTier(a.metadata?.billing_type) - customerTier(b.metadata?.billing_type) ||
+          a.created - b.created,
+      )[0] ?? null
+  );
+}
+
+/** Resolves an email to its primary customer, every team id, and every monthly customer id. */
 export async function resolveAllTeamsForEmail(
   email: string,
   jwtCustomerId?: string
@@ -64,15 +94,9 @@ export async function resolveAllTeamsForEmail(
       monthlyIds.push(cust.id);
     }
 
-    // Pick the best primary: hourly with team > free/trial with team > any with team
-    if (!primaryCustomer && teamId && billingType === "hourly") {
-      primaryCustomer = cust;
-    } else if (!primaryCustomer && teamId && ["free", "free_trial"].includes(billingType || "")) {
-      primaryCustomer = cust;
-    } else if (!primaryCustomer && teamId) {
-      primaryCustomer = cust;
-    }
   }
+
+  primaryCustomer = pickPrimaryCustomer(allCustomers.data);
 
   // If no customer has a team, fall back to the JWT customer or first one
   if (!primaryCustomer) {
@@ -99,6 +123,7 @@ export async function resolveAllTeamsForEmail(
     allTeamIds: Array.from(teamIds),
     allCustomerIds: allCustomers.data.map(c => c.id),
     monthlyCustomerIds: monthlyIds,
+    hourlyCustomerId: pickHourlyCustomer(allCustomers.data)?.id ?? null,
   };
 }
 

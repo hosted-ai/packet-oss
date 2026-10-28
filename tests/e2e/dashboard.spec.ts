@@ -291,8 +291,6 @@ test.describe("HuggingFace Tab", () => {
     await navigateToTab(page, "HuggingFace|Model|Deploy|LLM");
     await waitForDataLoad(page);
 
-    const searchInput = page.getByPlaceholder(/search|find|filter/i);
-    const hasSearch = await searchInput.first().isVisible({ timeout: 5000 }).catch(() => false);
 
     // Search might not be present in all views - just pass
     expect(true).toBeTruthy();
@@ -323,8 +321,6 @@ test.describe("Billing Tab", () => {
     await navigateToTab(page, "Billing|Wallet|Payment|Balance");
     await waitForDataLoad(page);
 
-    const topUpButton = page.getByRole("button", { name: /top.?up|add.?funds|deposit|buy/i });
-    const hasButton = await topUpButton.first().isVisible({ timeout: 5000 }).catch(() => false);
 
     // Just pass - button naming varies
     expect(true).toBeTruthy();

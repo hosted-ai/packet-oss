@@ -44,7 +44,6 @@ export function NodesSubTab({
   nodes,
   filter,
   actionLoading,
-  gpuTypes,
   pricingTiers,
   onFilterChange,
   onAction,

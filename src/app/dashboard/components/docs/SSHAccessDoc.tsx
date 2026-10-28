@@ -2,8 +2,7 @@
 
 export function SSHAccessDoc() {
   return (
-    <div className="prose prose-zinc max-w-none">
-      <h1>SSH Access Guide</h1>
+    <div>
       <p className="lead">Connect securely to your GPU instances via SSH or browser terminal.</p>
 
       <h2>Connection Methods</h2>

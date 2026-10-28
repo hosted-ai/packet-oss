@@ -3,6 +3,8 @@
  */
 
 import { hostedaiRequest } from "./client";
+import { scenarioName } from "./scenario-name";
+import { isRegionInMaintenance, RegionMaintenanceError } from "@/lib/maintenance/regions";
 import type {
   Instance,
   CreateInstanceParams,
@@ -106,6 +108,7 @@ export interface UnifiedInstance {
   };
   workspace?: { id: string; name: string };
   pod_info?: {
+    pool_id?: number; // present on both list + detail responses (despite older code assuming otherwise)
     model?: string;
     vendor?: string;
     pool_name?: string;
@@ -115,7 +118,7 @@ export interface UnifiedInstance {
     exposed_count?: number;
     vram_gb?: string;
     max_tflops?: string;
-    vgpu_count?: number;
+    vgpu_count?: number; // present on the DETAIL response only (list omits it)
   };
   instance_type?: {
     id: string;
@@ -150,6 +153,32 @@ export interface UnifiedInstanceDetail extends UnifiedInstance {
 }
 
 // Get a single unified instance by ID (HAI 2.2)
+// The newest app-install recipe execution for an instance, or null if none has
+// started. A GPU "app" deploy runs an Ansible recipe after the pod boots; when it
+// fails the pod never reports running, so without this the deploy only surfaces
+// as a poll timeout minutes later.
+export async function getLatestRecipeExecution(
+  instanceId: string
+): Promise<RecipeExecution | null> {
+  const resp = await hostedaiRequest<{ recipe_logs?: { items?: RecipeExecution[] } }>(
+    "GET",
+    `/user/recipes/execution-logs?instance_id=${encodeURIComponent(instanceId)}&per_page=1`
+  );
+  return resp?.recipe_logs?.items?.[0] ?? null;
+}
+
+export interface RecipeExecution {
+  id?: string;
+  status?: string;
+  service_name?: string;
+  failure_context?: string;
+}
+
+// Unified instance ids are `i-<uuid>`; pool-subscription ids are numeric.
+export function isUnifiedInstanceId(id: unknown): id is string {
+  return typeof id === "string" && id.startsWith("i-");
+}
+
 export async function getUnifiedInstanceDetail(
   instanceId: string
 ): Promise<UnifiedInstanceDetail> {
@@ -157,6 +186,48 @@ export async function getUnifiedInstanceDetail(
     "GET",
     `/instances/unified/${instanceId}`
   );
+}
+
+// ── GPU utilization metrics (HAI-sourced) ───────────────────────────────────
+// Real GPU telemetry (TFLOPs + VRAM) bucketed over time, served by the HAI
+// user-panel API from its Prometheus-backed `team_metrics`. This replaces the
+// old per-pod SSH `nvidia-smi` collector — HAI is the source of truth.
+
+export type MetricsWindow =
+  | "last_5m"
+  | "last_15m"
+  | "last_1h"
+  | "last_24h"
+  | "last_7d"
+  | "all_time";
+
+// tflops/vram_mib are null for a bucket the telemetry never reported. Typing
+// them as number let a missing reading render as a measured zero.
+export interface GpuMetricsPoint {
+  unix_timestamp: number;
+  formatted_time: string;
+  tflops: number | null;
+  vram_mib: number | null;
+}
+
+/** Per-pod GPU metrics time series (HAI GET /pods/metrics). */
+export async function getPodMetricsV2(
+  podId: string,
+  teamId: string,
+  window: MetricsWindow
+): Promise<GpuMetricsPoint[]> {
+  const qs = new URLSearchParams({ pod_id: podId, team_id: teamId, window });
+  return hostedaiRequest<GpuMetricsPoint[]>("GET", `/pods/metrics?${qs.toString()}`);
+}
+
+/** Team-wide GPU metrics time series, aggregated across all the team's pods
+ *  (HAI GET /pods/team-metrics). */
+export async function getTeamMetricsV2(
+  teamId: string,
+  window: MetricsWindow
+): Promise<GpuMetricsPoint[]> {
+  const qs = new URLSearchParams({ team_id: teamId, window });
+  return hostedaiRequest<GpuMetricsPoint[]>("GET", `/pods/team-metrics?${qs.toString()}`);
 }
 
 // Status classification for HAI 2.2 unified instances.
@@ -177,6 +248,9 @@ export interface WaitForInstanceOptions {
   getDetail?: (id: string) => Promise<{ status?: string }>;
   // Injectable for testing — defaults to setTimeout-based sleep.
   sleep?: (ms: number) => Promise<void>;
+  // Injectable for testing — defaults to getLatestRecipeExecution. Returning null
+  // means "no recipe for this instance", which is the normal case for a plain pod.
+  getRecipe?: (id: string) => Promise<RecipeExecution | null>;
 }
 
 // Poll HAI for an instance's status until it reaches running, terminal failure,
@@ -195,6 +269,7 @@ export async function waitForInstanceRunning(
   const maxMs = opts.maxMs ?? 13 * 60 * 1000;
   const intervalMs = opts.intervalMs ?? 30 * 1000;
   const getDetail = opts.getDetail ?? getUnifiedInstanceDetail;
+  const getRecipe = opts.getRecipe ?? getLatestRecipeExecution;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const deadline = Date.now() + maxMs;
   let consecutive404s = 0;
@@ -209,6 +284,14 @@ export async function waitForInstanceRunning(
       }
       if (TERMINAL_FAIL_STATUSES.has(status)) {
         return { ready: false, reason: `terminal status: ${status}`, finalStatus: status };
+      }
+      // An app pod only reaches running once its recipe installs. A failed recipe
+      // never recovers, so waiting out the deadline just bills the customer for a
+      // machine that will be deleted, and reports it as a timeout rather than the
+      // install error it is.
+      const recipeFail = await recipeFailure(getRecipe, instanceId);
+      if (recipeFail) {
+        return { ready: false, reason: recipeFail, finalStatus: "recipe_failed" };
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -227,6 +310,25 @@ export async function waitForInstanceRunning(
   return { ready: false, reason: `poll timeout after ${Math.round(maxMs / 60000)}min`, finalStatus: "timeout" };
 }
 
+// recipeFailure reports a failed app-install recipe, or null. The catch is
+// belt-and-braces: the caller's 404-streak reset already absorbs a throw here, so
+// no test can distinguish it — but a diagnostic lookup should not be able to
+// reach the poll loop's error handling in the first place.
+async function recipeFailure(
+  getRecipe: (id: string) => Promise<RecipeExecution | null>,
+  instanceId: string
+): Promise<string | null> {
+  try {
+    const rec = await getRecipe(instanceId);
+    if (!rec || (rec.status || "").toLowerCase() !== "failed") return null;
+    const app = rec.service_name ? ` (${rec.service_name})` : "";
+    const ref = rec.id ? ` [recipe execution ${rec.id}]` : "";
+    return `app install failed${app}${ref}`;
+  } catch {
+    return null;
+  }
+}
+
 // Attach or detach shared volumes on a running pod
 export async function podVolumeAction(
   podName: string,
@@ -240,18 +342,57 @@ export async function podVolumeAction(
   });
 }
 
+// PA-422: HAI intermittently returns HTTP 200 with "items": null during a
+// control-plane hiccup. Every caller coerces that to [] (result.items || []),
+// which silently renders a false-empty dashboard and — worse — makes the
+// deploy-flow stale-pod cleanup treat every pod as stale and delete its
+// metadata. "Upstream failed" and "genuinely no instances" are told apart by
+// the pagination envelope (see getUnifiedInstances), so we guard at this single
+// chokepoint (all ~15 callers route through here) and throw on the failure
+// case. Callers that already try/catch a HAI failure now do the safe thing on
+// it too; the rest surface an honest transient error rather than a convincing
+// empty state.
+export class UnifiedInstancesUnavailableError extends Error {
+  constructor(public readonly teamId: string) {
+    super(
+      `HAI /instances/unified returned a non-array "items" for ${
+        teamId ? `team ${teamId}` : "the global sweep"
+      } — treating as upstream failure, not an empty instance list`
+    );
+    this.name = "UnifiedInstancesUnavailableError";
+  }
+}
+
 // Get unified instances for a team (HAI 2.2)
 export async function getUnifiedInstances(
   teamId: string,
   page = 0,
   perPage = 100
 ): Promise<{ items: UnifiedInstance[]; total_items: number }> {
-  return hostedaiRequest<{ items: UnifiedInstance[]; total_items: number }>(
+  const result = await hostedaiRequest<{
+    items: UnifiedInstance[] | null;
+    total_items?: number;
+  }>(
     "GET",
     `/instances/unified?page=${page}&per_page=${perPage}&team_id=${teamId}`,
     undefined,
     60000
   );
+  if (!Array.isArray(result.items)) {
+    // Only a real list response carries the pagination envelope: a null items
+    // alongside total_items is a team with nothing running, not an outage.
+    if (typeof result.total_items === "number") {
+      return { ...result, items: [], total_items: result.total_items };
+    }
+    // Loud server-side log — this was previously invisible (PA-422).
+    console.error(
+      `[Hosted.AI] /instances/unified returned non-array items with no pagination envelope for team ${teamId} (HTTP 200, items=${JSON.stringify(
+        result.items
+      )}) — treating as upstream failure`
+    );
+    throw new UnifiedInstancesUnavailableError(teamId);
+  }
+  return result as { items: UnifiedInstance[]; total_items: number };
 }
 
 // Status count entry from HAI 2.2 /instances/unified response
@@ -287,22 +428,33 @@ export async function getGlobalInstanceSummary(): Promise<GlobalInstanceSummary>
 
 // Get ALL unified instances globally (paginated, no team filter)
 // Used by admin pods to get actual running/stopped instances
+const MAX_INSTANCE_PAGES = 500;
+
 export async function getAllUnifiedInstances(): Promise<UnifiedInstance[]> {
   const all: UnifiedInstance[] = [];
-  let page = 0;
   const perPage = 100;
-  while (true) {
-    const res = await hostedaiRequest<{ items: UnifiedInstance[]; total_items: number }>(
+  for (let page = 0; page < MAX_INSTANCE_PAGES; page++) {
+    const res = await hostedaiRequest<{ items: UnifiedInstance[] | null; total_items?: number }>(
       "GET",
       `/instances/unified?page=${page}&per_page=${perPage}`,
       undefined,
       60000
     );
-    if (res.items && res.items.length > 0) {
-      all.push(...res.items);
+    // The per-team read's items-null guard, which this sweep never had: ending
+    // the walk on it truncates the result, and every team below the cut then
+    // reads as a confident "0 active GPUs" rather than an upstream failure.
+    if (!Array.isArray(res.items)) {
+      if (typeof res.total_items === "number") break;
+      throw new UnifiedInstancesUnavailableError("");
     }
-    if (!res.items || res.items.length < perPage || all.length >= res.total_items) break;
-    page++;
+    if (res.items.length === 0) break;
+    all.push(...res.items);
+    // total_items is the authority on where the listing ends: HAI may serve
+    // fewer rows than the requested per_page, which a short-page stop misread.
+    const done = typeof res.total_items === "number"
+      ? all.length >= res.total_items
+      : res.items.length < perPage;
+    if (done) break;
   }
   return all;
 }
@@ -321,7 +473,29 @@ export async function getTeamWorkspaces(
 export async function createInstance(
   params: CreateInstanceParams
 ): Promise<Instance> {
-  return hostedaiRequest<Instance>("POST", "/service/i/create-instance", params as unknown as Record<string, unknown>);
+  // Defense-in-depth region maintenance gate. Every GPU create path flows
+  // through here, so block provisions into a region under maintenance even on
+  // the paths that don't pre-check (snapshot restore, HF deploy, v1/API). The
+  // main /api/instances flow pre-checks and returns a clean 503 before reaching
+  // this; here we throw — and those secondary paths already refund on a
+  // createInstance throw. Fail-open inside the resolver (a DB blip won't block).
+  const maint = await isRegionInMaintenance(params.region_id);
+  if (maint.inMaintenance) {
+    throw new RegionMaintenanceError(maint.message);
+  }
+
+  // Ariel (HAI 2.2) supports rootfs persistence for GPUaaS pods. Enable it by
+  // default on EVERY provision path (this is the single chokepoint all callers
+  // — /api/instances, v1, from-snapshot, huggingface — flow through). A caller
+  // can still opt out by passing pod_opts.rootfs_enabled = false explicitly.
+  const withRootfs: CreateInstanceParams = {
+    ...params,
+    pod_opts: {
+      ...(params.pod_opts ?? {}),
+      rootfs_enabled: params.pod_opts?.rootfs_enabled ?? true,
+    },
+  };
+  return hostedaiRequest<Instance>("POST", "/service/i/create-instance", withRootfs as unknown as Record<string, unknown>);
 }
 
 // Start an instance
@@ -444,12 +618,14 @@ export async function listScenarios(): Promise<ServiceScenario[]> {
   return Array.isArray(res) ? res : res.scenarios;
 }
 
-// Create a scenario in HAI
+// Create a scenario in HAI. The name is coerced to HAI's own rule first —
+// an unsupported character makes it reject the whole call.
 export async function createScenario(opts: {
   name: string;
   description: string;
 }): Promise<{ id: string }> {
-  return hostedaiRequest<{ id: string }>("POST", "/scenario", opts as unknown as Record<string, unknown>);
+  const body = { ...opts, name: scenarioName(opts.name) };
+  return hostedaiRequest<{ id: string }>("POST", "/scenario", body as unknown as Record<string, unknown>);
 }
 
 // Assign a service to a scenario
@@ -494,9 +670,16 @@ export async function getScenarioCompatibleServices(
   | { services: CompatibleService[]; has_more_batches: boolean; next_offset: number }
   | CompatibleService[]
 > {
+  // PA-407: HAI takes 12-19s to compute this for the B200 scenario (other
+  // categories: 1-2s) and latency varies per team. The default 15s GET
+  // timeout sat inside that band, so checks timed out and the launch modal
+  // showed "No GPUs available" intermittently. 45s = ~2.4x worst measured,
+  // still under nginx's 60s proxy window. Real fix is HAI-side performance.
   return hostedaiRequest(
     "GET",
-    `/service/i/scenario-compatible-services?scenario_id=${scenarioId}&team_id=${teamId}&limit=${limit}&offset=${offset}`
+    `/service/i/scenario-compatible-services?scenario_id=${scenarioId}&team_id=${teamId}&limit=${limit}&offset=${offset}`,
+    undefined,
+    45_000
   );
 }
 

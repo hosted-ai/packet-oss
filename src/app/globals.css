@@ -7,9 +7,14 @@
   --panel: #ffffff;
   --muted: #5b6476;
   --line: #e4e7ef;
+  /* Retained from the reverted PA-670 ramp: PA-644's BusinessTab metrics use
+     var(--ink), so dropping it would break newer work. Inert otherwise. */
+  --ink: #0b0f1c;
   --blue: #1a4fff;
   --blue-dark: #1238c9;
   --teal: #18b6a8;
+  /* Hover shade for --teal fills; color-mix tracks tenant accent overrides. */
+  --teal-dark: color-mix(in srgb, var(--teal) 85%, black);
   --primary-r: 26;
   --primary-g: 79;
   --primary-b: 255;

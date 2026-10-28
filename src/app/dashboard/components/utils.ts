@@ -2,6 +2,26 @@
  * Dashboard utility functions
  */
 
+/**
+ * Tolerant slug equality for ?gpu= deep-links: exact match, else a
+ * hyphen-boundary suffix match in either direction. Covers vendor-prefix
+ * drift between auto-generated category slugs and the deeplink contract
+ * ("nvidia-b200" ↔ "b200"), and URLs minted before a slug rename. The
+ * boundary check stops "b200" from matching "rtx-5200".
+ */
+export function slugMatches(candidate: string | null | undefined, requested: string): boolean {
+  if (!candidate) return false;
+  // trim: PA-456 — admin-edited slugs can carry stray whitespace
+  const c = candidate.trim().toLowerCase();
+  const r = requested.trim().toLowerCase();
+  if (c === r) return true;
+  const boundarySuffix = (long: string, short: string) =>
+    long.length > short.length &&
+    long.endsWith(short) &&
+    long[long.length - short.length - 1] === "-";
+  return boundarySuffix(c, r) || boundarySuffix(r, c);
+}
+
 // Time-based greeting
 export function getTimeBasedGreeting(): string {
   const hour = new Date().getHours();

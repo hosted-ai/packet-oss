@@ -1,6 +1,7 @@
 import { sendEmailDirect } from "../client";
 import { escapeHtml, emailLayout, emailText, emailDetailBox } from "../utils";
 import { getBrandName, getSupportEmail } from "@/lib/branding";
+import { isPro } from "@/lib/edition";
 import { loadTemplate } from "../template-loader";
 
 export async function sendContactEmail(params: {
@@ -65,7 +66,11 @@ Sent from ${getBrandName()} contact form`;
     text: fallbackText,
   });
 
-  const recipients = [getSupportEmail(), "hello@hosted.ai"].join(", ");
+  // Pro cc's the central Packet.ai intake; OSS self-hosts go to the operator's
+  // support address only — never silently forward customer submissions upstream.
+  const recipients = [getSupportEmail(), isPro() ? "hello@hosted.ai" : null]
+    .filter(Boolean)
+    .join(", ");
 
   await sendEmailDirect({
     to: recipients,

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import jwt from 'jsonwebtoken';
 import fs from 'fs';
-import path from 'path';
 import {
   generateAdminToken,
   verifyAdminToken,
@@ -21,7 +20,6 @@ describe('Admin Authentication Module', () => {
   const TEST_EMAIL = 'admin@hosted.ai';
   const TEST_EMAIL_PACKET = 'admin@packet.ai';
   const INVALID_DOMAIN_EMAIL = 'admin@example.com';
-  const ADMINS_FILE = path.join(process.cwd(), 'data', 'admins.json');
 
   const mockAdminsData = {
     admins: [

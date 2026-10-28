@@ -34,6 +34,48 @@ interface CronJob {
 
 const jobs: CronJob[] = [
   {
+    // The PodMetadata row is the only link between a paid subscription and the
+    // pod it deployed. Whoever fails to write it — a swallowed error here, a
+    // deploy made straight on the platform — the customer sees "Not Deployed"
+    // and can deploy a second pod on one subscription. Repair from what the
+    // platform is actually running.
+    name: "reconcile-monthly-deploys",
+    path: "/api/cron/reconcile-monthly-deploys",
+    schedule: { type: "interval", ms: 900_000 }, // 15 min
+    method: "POST",
+    enabled: true,
+  },
+  {
+    // A Stripe webhook we answer with a non-2xx leaves the customer unlinked
+    // and the launch wizard empty, and nothing else notices — Stripe just
+    // retries into the same failure. Sweep for undelivered events instead.
+    name: "replay-stuck-webhooks",
+    path: "/api/cron/replay-stuck-webhooks",
+    schedule: { type: "interval", ms: 300_000 }, // 5 min
+    method: "POST",
+    enabled: true,
+  },
+  {
+    // handleWalletTopup marks the Stripe event processed before it writes the
+    // invoice, and invoice generation swallows its own errors — so a lost
+    // invoice is permanent, silent, and only surfaces when a customer asks
+    // support for a receipt. Issue the missing ones instead.
+    name: "reconcile-wallet-invoices",
+    path: "/api/cron/reconcile-wallet-invoices",
+    schedule: { type: "interval", ms: 1_800_000 }, // 30 min
+    method: "POST",
+    enabled: true,
+  },
+  {
+    // A provider quota refusal holds mail — sign-in links included — until the
+    // provider's reset, so the queue is drained often enough to deliver promptly.
+    name: "resend-deferred-email",
+    path: "/api/cron/resend-deferred-email",
+    schedule: { type: "interval", ms: 600_000 }, // 10 min
+    method: "POST",
+    enabled: true,
+  },
+  {
     name: "midnight-status-email",
     path: "/api/cron/midnight-status-email",
     schedule: { type: "daily", hour: 0, minute: 0 }, // midnight UTC
@@ -53,7 +95,55 @@ const jobs: CronJob[] = [
     method: "POST",
     enabled: true,
   },
+  {
+    // Bare-metal term-prepay provisioning: catch-up paid orders, poll
+    // Requested→Active (manual node assignment on the HAI panel can take
+    // hours/days), promote to provisioned with real SSH details, and fire
+    // the one-shot stuck alarm. See docs/baremetal-term-prepay-plan.md.
+    name: "baremetal-provisioning",
+    path: "/api/cron/baremetal-provisioning",
+    schedule: { type: "interval", ms: 300_000 }, // 5 min
+    method: "POST",
+    enabled: true,
+  },
+  {
+    // Bare-metal lifecycle (daily): termination reminders in the final week,
+    // auto-terminate at expiry (release HAI), and refund-aging ops alerts.
+    // See src/lib/baremetal/lifecycle.ts.
+    name: "baremetal-lifecycle",
+    path: "/api/cron/baremetal-lifecycle",
+    schedule: { type: "daily", hour: 8, minute: 0 }, // 08:00 UTC
+    method: "POST",
+    enabled: true,
+  },
+  {
+    // Daily Operating Summary: post 7 KPIs to the ops Mattermost channel.
+    // No-ops if MATTERMOST_OPS_WEBHOOK_URL isn't set. The route guards against
+    // a duplicate post via OPS_SUMMARY_LAST_POSTED (catch-up/restart safe).
+    // Post time is fixed here (not config-driven) so catch-up logic keys off it.
+    name: "daily-ops-summary",
+    path: "/api/cron/daily-ops-summary",
+    // 00:30 UTC = 6:00 AM IST — right after the last ~5-min billing-sync run of
+    // the prior day has landed, so yesterday's revenue window is complete and
+    // the live snapshot aligns with the window boundary.
+    schedule: { type: "daily", hour: 0, minute: 30 },
+    method: "POST",
+    enabled: true,
+  },
 ];
+
+// CRON_HANDED_OVER names jobs packet-api's in-process scheduler now owns
+// ("all" hands over everything). A job must run in exactly one scheduler.
+const HANDED_OVER = new Set(
+  (process.env.CRON_HANDED_OVER ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
+function handedOver(name: string): boolean {
+  return HANDED_OVER.has("all") || HANDED_OVER.has(name);
+}
 
 let started = false;
 let tickInterval: ReturnType<typeof setInterval> | null = null;
@@ -143,10 +233,15 @@ async function executeJob(job: CronJob): Promise<void> {
 
     if (!response.ok) {
       const body = await response.text();
-      console.error(`[Cron Scheduler] Job ${job.name} failed: ${response.status} - ${body}`);
+      console.error(
+        `[Cron Scheduler] Job ${job.name} failed: ${response.status} - ${body}`,
+      );
     } else {
       const result = await response.json();
-      console.log(`[Cron Scheduler] Job ${job.name} completed:`, JSON.stringify(result).slice(0, 200));
+      console.log(
+        `[Cron Scheduler] Job ${job.name} completed:`,
+        JSON.stringify(result).slice(0, 200),
+      );
     }
   } catch (error) {
     console.error(`[Cron Scheduler] Job ${job.name} error:`, error);
@@ -163,10 +258,10 @@ async function executeJob(job: CronJob): Promise<void> {
 function tick() {
   const now = new Date();
   for (const job of jobs) {
-    if (!job.enabled) continue;
+    if (!job.enabled || handedOver(job.name)) continue;
     if (shouldRunNow(job, now)) {
       executeJob(job).catch((err) =>
-        console.error(`[Cron Scheduler] Unhandled error in ${job.name}:`, err)
+        console.error(`[Cron Scheduler] Unhandled error in ${job.name}:`, err),
       );
     }
   }
@@ -200,11 +295,13 @@ export function startCronScheduler(): void {
   setTimeout(() => {
     const now = new Date();
     for (const job of jobs) {
-      if (!job.enabled) continue;
+      if (!job.enabled || handedOver(job.name)) continue;
       if (needsCatchUp(job, now)) {
-        console.log(`[Cron Scheduler] Catch-up: ${job.name} missed its window today, running now`);
+        console.log(
+          `[Cron Scheduler] Catch-up: ${job.name} missed its window today, running now`,
+        );
         executeJob(job).catch((err) =>
-          console.error(`[Cron Scheduler] Catch-up error in ${job.name}:`, err)
+          console.error(`[Cron Scheduler] Catch-up error in ${job.name}:`, err),
         );
       }
     }
@@ -212,10 +309,29 @@ export function startCronScheduler(): void {
     tick();
   }, 10_000);
 
-  const enabledJobs = jobs.filter((j) => j.enabled);
+  // This banner is the ops check that a handover took, so it must name what
+  // will actually fire — not every job compiled in.
+  const active = activeJobNames();
   console.log(
-    `[Cron Scheduler] Started with ${enabledJobs.length} job(s): ${enabledJobs.map((j) => j.name).join(", ")}`
+    `[Cron Scheduler] Started with ${active.length} job(s): ${active.join(", ")}`,
   );
+
+  const handed = jobs
+    .filter((j) => j.enabled && handedOver(j.name))
+    .map((j) => j.name);
+  if (handed.length > 0) {
+    console.log(
+      `[Cron Scheduler] Handed over to packet-api, not scheduled here: ${handed.join(", ")}`,
+    );
+  }
+}
+
+// activeJobNames lists the jobs this scheduler will actually run — enabled
+// and not handed over to packet-api. Read by tests and ops checks.
+export function activeJobNames(): string[] {
+  return jobs
+    .filter((j) => j.enabled && !handedOver(j.name))
+    .map((j) => j.name);
 }
 
 export function stopCronScheduler(): void {

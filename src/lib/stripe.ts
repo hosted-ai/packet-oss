@@ -2,6 +2,10 @@ import Stripe from "stripe";
 import type { TenantConfig } from "@/lib/tenant/types";
 import { getSetting } from "@/lib/settings";
 
+// The SDK retries nothing by default, so one 429 fails the caller outright — a
+// wallet read included. Two: enough to ride out a 429, few enough to not pile on.
+const STRIPE_OPTIONS: Stripe.StripeConfig = { maxNetworkRetries: 2 };
+
 // Lazy initialization - only creates Stripe client when needed
 let stripeInstance: Stripe | null = null;
 
@@ -16,7 +20,7 @@ export async function getStripe(): Promise<Stripe> {
     if (!key) {
       throw new Error("STRIPE_SECRET_KEY is not set — configure in Platform Settings or .env.local");
     }
-    stripeInstance = new Stripe(key);
+    stripeInstance = new Stripe(key, STRIPE_OPTIONS);
   }
   return stripeInstance;
 }
@@ -49,7 +53,7 @@ export async function getStripeForTenant(tenant: TenantConfig): Promise<Stripe> 
     throw new Error(`Tenant ${tenant.slug} has no Stripe secret key configured`);
   }
 
-  const instance = new Stripe(tenant.stripeSecretKey);
+  const instance = new Stripe(tenant.stripeSecretKey, STRIPE_OPTIONS);
   tenantStripeInstances.set(tenant.id, instance);
   return instance;
 }

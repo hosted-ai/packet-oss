@@ -2,11 +2,11 @@
 
 ## Overview
 
-The Pro 6000 Blackwell section features AI models specifically optimized for NVIDIA RTX Pro 6000 Blackwell GPUs with 48GB VRAM. These pre-configured templates enable one-click deployment of large language models up to 70B+ parameters, taking full advantage of the Blackwell architecture's performance capabilities.
+The Pro 6000 Blackwell section features AI models specifically optimized for NVIDIA RTX Pro 6000 Blackwell GPUs with 96GB VRAM. These pre-configured templates enable one-click deployment of large language models up to 70B+ parameters, taking full advantage of the Blackwell architecture's performance capabilities.
 
 ### Key Features
 
-- **48GB VRAM Capacity**: Run 70B+ parameter models at full precision
+- **96GB VRAM Capacity**: Run 70B+ parameter models
 - **Blackwell Architecture**: Latest NVIDIA GPU technology for AI inference
 - **vLLM Optimized**: Pre-configured for maximum inference throughput
 - **One-Click Deploy**: Launch production-ready models instantly
@@ -21,7 +21,7 @@ The Pro 6000 Blackwell section features AI models specifically optimized for NVI
 
 | Specification | Value |
 |---------------|-------|
-| **GPU Memory** | 48 GB GDDR7 |
+| **GPU Memory** | 96 GB GDDR7 |
 | **Memory Bandwidth** | 1.8 TB/s |
 | **CUDA Cores** | 18,176 |
 | **Tensor Cores** | 568 (5th gen) |
@@ -46,7 +46,7 @@ The Pro 6000 Blackwell section features AI models specifically optimized for NVI
 
 ### Featured Models
 
-These models are optimized and tested for Pro 6000 Blackwell:
+These models are optimized and tested for Pro 6000 Blackwell. The current one-click template list is shown in the **⚡ Pro 6000 Blackwell** tab of the dashboard's **Hugging Face** section; each example below also includes a manual vLLM launch command you can run on any GPU pod:
 
 #### Llama 3.1 70B Instruct
 
@@ -367,7 +367,7 @@ python -m vllm.entrypoints.openai.api_server \
 
 ## 📈 Performance Benchmarks
 
-### Tested on Pro 6000 Blackwell (48GB)
+### Tested on Pro 6000 Blackwell (96GB)
 
 | Model | Batch 1 | Batch 8 | Batch 32 | Max Batch |
 |-------|---------|---------|----------|-----------|
@@ -407,7 +407,7 @@ python -m vllm.entrypoints.openai.api_server \
 
 ### Network Security
 
-1. Use Service Exposure with LoadBalancer for HTTPS
+1. Use Service Exposure with the **HTTPS** service type
 2. Restrict access via firewall rules
 3. Consider VPC/private networking
 4. Monitor for unusual traffic patterns
@@ -416,7 +416,6 @@ python -m vllm.entrypoints.openai.api_server \
 
 ## 📚 Related Documentation
 
-- [OpenAI-Compatible API Gateway](./openai-api-gateway.md)
 - [Inference Playground](./inference-playground.md)
 - [GPU Metrics Dashboard](./gpu-metrics.md)
 - [Token Usage Dashboard](./token-usage.md)
@@ -433,4 +432,4 @@ python -m vllm.entrypoints.openai.api_server \
 
 ---
 
-**Last Updated**: January 2025 | **Version**: 1.0
+**Last Updated**: July 2026 | **Version**: 1.1

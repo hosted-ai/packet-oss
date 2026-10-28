@@ -1,13 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NextRequest } from 'next/server';
-import { generateCustomerToken } from '@/lib/auth/customer';
+import { NextRequest, NextResponse } from 'next/server';
+import { authContext, OPERATING_ACCOUNT_ID } from '../fixtures/customer';
 
-const TEST_CUSTOMER_ID = 'cus_budget_test';
-const TEST_EMAIL = 'budget@example.com';
+const { mockGetAuthenticatedCustomer, mockFindUnique, mockUpsert } = vi.hoisted(
+  () => ({
+    mockGetAuthenticatedCustomer: vi.fn(),
+    mockFindUnique: vi.fn(),
+    mockUpsert: vi.fn(),
+  }),
+);
 
-// Mock Prisma
-const mockFindUnique = vi.fn();
-const mockUpsert = vi.fn();
+vi.mock('@/lib/auth/helpers', () => ({
+  getAuthenticatedCustomer: mockGetAuthenticatedCustomer,
+}));
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     budgetSettings: {
@@ -19,13 +24,19 @@ vi.mock('@/lib/prisma', () => ({
 
 import { GET, PUT } from '@/app/api/account/budget/route';
 
-describe('/api/account/budget', () => {
-  let validToken: string;
+const validToken = 'good-token';
 
+describe('/api/account/budget', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    validToken = generateCustomerToken(TEST_EMAIL, TEST_CUSTOMER_ID);
+    mockGetAuthenticatedCustomer.mockResolvedValue(authContext());
   });
+
+  function denyAuth() {
+    mockGetAuthenticatedCustomer.mockResolvedValue(
+      NextResponse.json({ error: 'Unauthorized' }, { status: 401 }),
+    );
+  }
 
   function makeGetRequest(token?: string): NextRequest {
     const headers: Record<string, string> = {};
@@ -53,14 +64,19 @@ describe('/api/account/budget', () => {
   }
 
   describe('GET', () => {
-    it('should return 401 without auth token', async () => {
+    it('should return the auth helper 401 verbatim', async () => {
+      denyAuth();
       const response = await GET(makeGetRequest());
       expect(response.status).toBe(401);
+      expect(mockFindUnique).not.toHaveBeenCalled();
     });
 
-    it('should return 401 with invalid token', async () => {
-      const response = await GET(makeGetRequest('bad-token'));
-      expect(response.status).toBe(401);
+    it('should read the operating account, not the JWT customer', async () => {
+      mockFindUnique.mockResolvedValue(null);
+      await GET(makeGetRequest(validToken));
+      expect(mockFindUnique).toHaveBeenCalledWith({
+        where: { stripeCustomerId: OPERATING_ACCOUNT_ID },
+      });
     });
 
     it('should return default settings when none exist', async () => {
@@ -101,9 +117,19 @@ describe('/api/account/budget', () => {
   });
 
   describe('PUT', () => {
-    it('should return 401 without auth token', async () => {
+    it('should return the auth helper 401 verbatim', async () => {
+      denyAuth();
       const response = await PUT(makePutRequest({ monthlyLimitCents: 10000 }));
       expect(response.status).toBe(401);
+      expect(mockUpsert).not.toHaveBeenCalled();
+    });
+
+    it('should write to the operating account, not the JWT customer', async () => {
+      mockUpsert.mockResolvedValue({});
+      await PUT(makePutRequest({ monthlyLimitCents: 50000 }, validToken));
+      const arg = mockUpsert.mock.calls[0][0];
+      expect(arg.where.stripeCustomerId).toBe(OPERATING_ACCOUNT_ID);
+      expect(arg.create.stripeCustomerId).toBe(OPERATING_ACCOUNT_ID);
     });
 
     it('should update budget settings with valid input', async () => {

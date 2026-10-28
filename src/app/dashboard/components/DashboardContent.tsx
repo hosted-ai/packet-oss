@@ -2,11 +2,12 @@
 
 import React from "react";
 import Link from "next/link";
+import posthog from "posthog-js";
 import { BrandLogo } from "@/components/BrandLogo";
 import { isPro, hasPremiumFeature } from "@/lib/edition";
+import { computeHourlyBurn } from "@/lib/burn-rate";
 import dynamic from "next/dynamic";
 
-const XTerminal = dynamic(() => import("@/components/XTerminal"), { ssr: false });
 import TeamMembers from "@/components/TeamMembers";
 import HuggingFaceTab from "@/components/HuggingFaceTab";
 import { TwoFactorSettings } from "@/components/two-factor";
@@ -16,11 +17,13 @@ import { LogoutConfirmModal } from "@/components/logout-confirm-modal";
 import ReferralCard from "@/components/ReferralCard";
 import { formatSmartPrice } from "@/lib/format";
 import { ApiKeysSettings } from "@/components/ApiKeysSettings";
-import { GPUHardwareMetrics } from "@/components/GPUHardwareMetrics";
 import { AppsTab } from "./AppsTab";
 import { StorageTab } from "./StorageTab";
+import { BareMetalInstanceCard } from "./BareMetalInstanceCard";
 import { resolveLaunchDeeplink } from "./launch-deeplink";
+import { sanitizeNextPath } from "@/lib/auth/safe-next";
 import { ImpersonationBanner } from "./ImpersonationBanner";
+import { CrispUserSync } from "@/components/CrispUserSync";
 import { isTabAllowed } from "./tab-access";
 
 // Support tab — edition-gated: Pro uses Zammad ticketing, OSS uses contact form
@@ -31,6 +34,13 @@ const SupportTab = hasPremiumFeature("support")
 // Premium tabs — dynamically imported, only available in Pro edition
 const BareMetalTab = hasPremiumFeature("bare-metal")
   ? dynamic(() => import("./BareMetalTab").then(m => ({ default: m.BareMetalTab })))
+  : () => null;
+
+// Bare Metal Orders — term-prepay wire-invoice flow. The component file IS
+// OSS-export-excluded, so it must only be referenced via an edition-gated
+// dynamic import (same pattern as BareMetalTab above) or the OSS build breaks.
+const BareMetalOrdersTab = isPro()
+  ? dynamic(() => import("./BareMetalOrdersTab").then(m => ({ default: m.BareMetalOrdersTab })))
   : () => null;
 const TruConversionIdentity = hasPremiumFeature("analytics")
   ? dynamic(() => import("@/components/TruConversionIdentity").then(m => ({ default: m.TruConversionIdentity })))
@@ -52,7 +62,7 @@ import {
 } from "./";
 import { useLiveCostTicker } from "@/hooks/useLiveCostTicker";
 import { HelpTooltip, HELP_CONTENT } from "@/components/HelpTooltip";
-import { TopupModal, ActivityLogModal, TransactionsModal, BlackwellModal, WelcomeModal, MonthlyPlansModal } from "./modals";
+import { TopupModal, ActivityLogModal, TransactionsModal, BlackwellModal, MonthlyPlansModal } from "./modals";
 import { MobileHeader, MobileNav, MobileMenuSheet, MobileMoreSheet } from "./MobileDashboard";
 import { ProfileSettings } from "./ProfileSettings";
 import { BudgetSettings } from "./BudgetSettings";
@@ -61,10 +71,12 @@ import { useBranding } from "@/hooks/useBranding";
 import SSHKeys from "@/components/SSHKeys";
 import { useDashboardData, useDashboardActions, useModals, TabType } from "./hooks";
 import { OnboardingChecklist } from "./OnboardingChecklist";
+import { OnboardingTour } from "./OnboardingTour";
 import { AccountSwitcher } from "@/components/AccountSwitcher";
 import { InvitationAcceptModal } from "@/components/InvitationAcceptModal";
 import { useSearchParams } from "next/navigation";
 import { DashboardAnnouncements } from "./DashboardAnnouncements";
+import { B200Banner } from "./B200Banner";
 
 export function DashboardContent() {
   // PA-175: when /invite/<token> lands the user here with ?invite=<token>
@@ -81,6 +93,7 @@ export function DashboardContent() {
     data,
     instances,
     poolSubscriptions,
+    stoppedRatePercent,
     podMetadata,
     hfDeployments,
     instancesLoading,
@@ -97,6 +110,7 @@ export function DashboardContent() {
     pendingUserEmail,
     tosConsentRequired,
     tosConsentVersion,
+    isNewSignup,
     setTosConsentRequired,
     fetchInstances,
     fetchActivityEvents,
@@ -113,9 +127,7 @@ export function DashboardContent() {
 
   const {
     topupLoading,
-    hostedaiLoginLoading,
     billingPortalLoading,
-    openHostedaiDashboard,
     openBillingPortal,
     downloadActivityCSV,
     downloadTransactionsCSV,
@@ -168,8 +180,6 @@ export function DashboardContent() {
   // Monthly plans modal (lists all monthly products)
   const [showMonthlyPlansModal, setShowMonthlyPlansModal] = React.useState(false);
 
-  // Welcome modal for new users with no infrastructure or wallet balance
-  const [showWelcomeModal, setShowWelcomeModal] = React.useState(false);
 
   // Track product ID to pre-select in launch modal (e.g., after returning from top-up)
   const [launchProductId, setLaunchProductId] = React.useState<string | undefined>(undefined);
@@ -186,7 +196,7 @@ export function DashboardContent() {
   // When deploying a specific monthly subscription, lock the launch modal to
   // that product and pass the subscription ID to the instances API.
   const [launchSubscription, setLaunchSubscription] = React.useState<
-    { productId: string; stripeSubscriptionId: string } | null
+    { productId: string | null; stripeSubscriptionId: string } | null
   >(null);
 
   // Toast notifications
@@ -260,21 +270,56 @@ export function DashboardContent() {
     fetchBareMetalNodes();
   }, [fetchBareMetalNodes]);
 
+  // PA-190: real GPU telemetry (TFLOPs + VRAM) from HAI via the user-panel API,
+  // replacing the old per-pod SSH nvidia-smi collector. Drives the Compute +
+  // VRAM cards (number + chart). Last-5m window, polled each minute.
+  const [gpuSeries, setGpuSeries] = React.useState<
+    Array<{ unix_timestamp: number; formatted_time: string; tflops: number; vram_mib: number }>
+  >([]);
+  React.useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    const fetchGpuMetrics = async () => {
+      try {
+        const res = await fetch("/api/instances/gpu-metrics?window=last_5m", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!cancelled && Array.isArray(json.data)) setGpuSeries(json.data);
+      } catch {
+        // Non-critical — leave the cards in their empty/collecting state.
+      }
+    };
+    fetchGpuMetrics();
+    const interval = setInterval(fetchGpuMetrics, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [token]);
+
   // Calculate values needed for live cost ticker (must be before any early returns)
   // Treat users as hourly if they have wallet credit (e.g. voucher users with billing_type "free")
   const isHourlyEarly = data?.customer?.billingType === "hourly" || (data?.wallet?.balance || 0) > 0;
+  // Bare metal rows (nature "baremetal") are display-only in the pods grid:
+  // exclude them from GPU metrics charts and app/service discovery — their
+  // per-row metric/service fetches use VM-only endpoints that reject
+  // baremetal ids. (Their statuses already fall outside the active filters,
+  // so the cost ticker/totalRunning never count them.)
+  const vmPodSubscriptions = poolSubscriptions.filter((s) => s.nature !== "baremetal");
   const activeSubscriptionsEarly = poolSubscriptions.filter((s) => s.status === "subscribed" || s.status === "active" || s.status === "running" || s.status === "pending" || s.status === "starting" || s.status === "restarting");
   const totalRunningEarly = instances.filter((i) => i.status === "running" || i.status === "active").length + activeSubscriptionsEarly.length;
-  let totalHourlyRateEarly = 0;
-  activeSubscriptionsEarly.forEach((sub) => {
-    totalHourlyRateEarly += sub.hourlyRate || 0;
-  });
+  // Stopped pods keep billing at the reservation rate, so the ticker and the
+  // runway must drain at running + stopped, not running alone.
+  const burnEarly = computeHourlyBurn(poolSubscriptions, stoppedRatePercent);
+  const totalHourlyRateEarly = burnEarly.totalHourly;
 
   // Live Cost Ticker - real-time balance countdown (must be called unconditionally)
   const liveCostTicker = useLiveCostTicker({
     initialBalance: data?.wallet?.balance || 0,
     totalHourlyRate: totalHourlyRateEarly,
-    isActive: totalRunningEarly > 0 && isHourlyEarly && !loading && !error,
+    isActive: (totalRunningEarly > 0 || burnEarly.stoppedBillableCount > 0) && isHourlyEarly && !loading && !error,
     onSync: async () => {
       // Sync with server by fetching fresh wallet balance
       if (!token) return data?.wallet?.balance || 0;
@@ -376,10 +421,10 @@ export function DashboardContent() {
   // the real boundary and enforce the same permissions server-side.)
   React.useEffect(() => {
     if (!data?.can) return; // can-map not loaded yet — don't redirect on first paint
-    if (!isTabAllowed(activeTab, data.can)) {
+    if (!isTabAllowed(activeTab, data.can, { bareMetalEnabled: isPro() && !!data.bareMetalEnabled })) {
       setActiveTab("dashboard");
     }
-  }, [activeTab, data?.can, setActiveTab]);
+  }, [activeTab, data?.can, data?.bareMetalEnabled, setActiveTab]);
 
   // Handle return from Stripe top-up: show toast, auto-reopen launch modal
   React.useEffect(() => {
@@ -391,8 +436,8 @@ export function DashboardContent() {
 
     if (topupStatus === "success") {
       // Track wallet refill conversion
-      if (typeof (window as any).my_analytics !== "undefined") {
-        (window as any).my_analytics.goal("0xxmvyzdifvutbty");
+      if (typeof window.my_analytics !== "undefined") {
+        window.my_analytics.goal("0xxmvyzdifvutbty");
       }
 
       // Growify v2 conversion — wallet top-up
@@ -402,9 +447,9 @@ export function DashboardContent() {
           const custEmail = data?.customer?.email;
           const custName = data?.customer?.name || "";
           const nameParts = custName.split(" ");
-          const w = window as any;
+          const w = window;
           w.grpQueue = w.grpQueue || [];
-          if (!w.grp) { w.grp = function() { w.grpQueue.push(arguments); }; }
+          if (!w.grp) { w.grp = function(...args: unknown[]) { w.grpQueue?.push(args); }; }
           w.grp('conversion', {
             userEmail: custEmail || '',
             userFirstName: nameParts[0] || '',
@@ -482,59 +527,44 @@ export function DashboardContent() {
     const next = data?.next;
     if (!next || typeof window === "undefined") return;
     appliedNextRef.current = true;
-    let search = "";
+    let url: URL;
     try {
-      search = new URL(next, window.location.origin).search;
+      url = new URL(next, window.location.origin);
     } catch {
       return;
     }
-    const target = resolveLaunchDeeplink(search);
+    const target = resolveLaunchDeeplink(url.search);
     if (target.kind === "monthly") {
       if (target.categorySlug) setMonthlyCategorySlug(target.categorySlug);
       setShowMonthlyPlansModal(true);
     } else if (target.kind === "hourly") {
       if (target.categorySlug) setLaunchCategorySlug(target.categorySlug);
       setShowLaunchModal(true);
+    } else {
+      // PA-335: a non-launch deep link (a shared page or ?ref= link the visitor
+      // originally came in on) — send them to the real destination instead of
+      // stranding them on the bare dashboard. Re-run the same sanitiser used at
+      // sign time (defence in depth: only ever navigate to a same-origin app
+      // path) and replace() so the one-time token URL doesn't linger in history.
+      const dest = sanitizeNextPath(next, window.location.origin);
+      if (dest && dest !== "/dashboard") window.location.replace(dest);
     }
-  }, [data]);
+  }, [data, setShowLaunchModal]);
 
-  // Show welcome modal for brand-new users (no balance, no infra, not returning from Stripe)
-  React.useEffect(() => {
-    if (!data || loading) return;
-    // Don't show if returning from Stripe top-up
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("topup") === "success") return;
-    }
-    // Don't pop over a deep-linked launch/monthly modal — direct ?gpu= or a
-    // next-claim carried through login — that intent wins.
-    if (showLaunchModal || showMonthlyPlansModal || data.next) return;
-    // PA-271: wallet is redacted (null) for non-billing users — don't infer a
-    // "new user" top-up prompt from an absent balance.
-    if (!data.wallet) return;
-    const walletBalance = data.wallet.balance;
-    const isNewUser =
-      walletBalance <= 0 &&
-      poolSubscriptions.length === 0 &&
-      instances.length === 0 &&
-      bareMetalNodes.length === 0;
-    if (isNewUser) {
-      setShowWelcomeModal(true);
-    }
-  }, [data, loading, poolSubscriptions.length, instances.length, bareMetalNodes.length]);
-
-  // On-demand requires a funded wallet, regardless of monthly subscriptions.
-  // Monthly pods launch via their own card button (setLaunchSubscription path).
+  // PA-351: the empty-wallet "Welcome" top-up popup was removed entirely —
+  // no auto-show for new users and no balance pre-check on launch. The launch
+  // modal + server enforce affordability (same as the PA-271 redacted-wallet
+  // path); top-up lives in the wallet UI (TopupModal).
   const handleLaunchGpu = React.useCallback(() => {
-    // PA-271: for non-billing users the wallet is redacted (null) — we can't and
-    // needn't pre-check balance here; the launch modal + server enforce
-    // affordability. Only show the top-up prompt when we know the wallet is empty.
-    if (data?.wallet && data.wallet.balance <= 0) {
-      setShowWelcomeModal(true);
-      return;
-    }
     setShowLaunchModal(true);
-  }, [data?.wallet, setShowLaunchModal]);
+  }, [setShowLaunchModal]);
+
+  // PA-384: dashboard B200 banner — mirrors the ?gpu=b200 deep-link behavior
+  // (resolveLaunchDeeplink's "hourly" path) so deployment matches exactly.
+  const handleLaunchB200 = React.useCallback(() => {
+    setLaunchCategorySlug("b200");
+    setShowLaunchModal(true);
+  }, [setLaunchCategorySlug, setShowLaunchModal]);
 
   const handleLogout = async () => {
     // PA-267: revoke the server-side session + clear the cookie so a copied
@@ -546,6 +576,13 @@ export function DashboardContent() {
       });
     } catch {
       // best-effort — navigate away regardless
+    }
+    // Stop session recording and clear the identified user so no post-logout
+    // activity is attributed to the previous session.
+    posthog.reset();
+    // Feature 5: reset Crisp session so the next visitor starts fresh
+    if (typeof window !== "undefined" && window.$crisp) {
+      window.$crisp.push(["do", "session:reset"]);
     }
     window.location.href = "/account";
   };
@@ -654,25 +691,39 @@ export function DashboardContent() {
 
   // Treat users as hourly if they have wallet credit (e.g. voucher users with billing_type "free")
   const isHourly = data.customer.billingType === "hourly" || (data.wallet?.balance || 0) > 0;
-  const isFree = data.customer.billingType === "free" || data.customer.billingType === "free_trial";
   const activeSubscriptions = poolSubscriptions.filter((s) => s.status === "subscribed" || s.status === "active" || s.status === "running" || s.status === "pending" || s.status === "starting" || s.status === "restarting");
   const totalRunning = instances.filter((i) => i.status === "running" || i.status === "active").length + activeSubscriptions.length;
+
+  // Running pods at full rate plus stopped pods at the reservation rate —
+  // what the wallet is actually draining per hour.
+  const hourlyBurn = computeHourlyBurn(poolSubscriptions, stoppedRatePercent);
+  const totalHourlyRate = hourlyBurn.totalHourly;
+  const walletBurning = (totalRunning > 0 || hourlyBurn.stoppedBillableCount > 0) && isHourly;
+
+  // PA-339: customer is in arrears when the effective wallet balance is negative.
+  // Mirror the balance card's own source: the live-ticking balance while an
+  // hourly instance runs, otherwise the server-reported balance.
+  const effectiveBalanceCents = walletBurning
+    ? liveCostTicker.currentBalance
+    : (data.wallet?.balance ?? 0);
+  const inArrears = effectiveBalanceCents < 0;
 
   // Calculate current GPU metrics from active subscriptions
   // Using metric_window=last_5m for both TFLOPs and VRAM (average over last 5 mins)
   // Note: hosted.ai API returns vram_usage in KB, not MB
-  let totalTflops = 0;
-  let totalVramKb = 0;
-  let totalHourlyRate = 0; // Sum of hourly rates from all active subscriptions
-  activeSubscriptions.forEach((sub) => {
-    totalTflops += sub.metrics?.tflops_usage || 0;
-    totalVramKb += sub.metrics?.vram_usage || 0;
-    totalHourlyRate += sub.hourlyRate || 0; // Use catalog-based hourly rate
-  });
-  const totalVramGb = totalVramKb / (1024 * 1024); // KB -> GB
+  // PA-190: TFLOPs + VRAM come from HAI's telemetry (gpuSeries), averaged over
+  // the last-5m window. The old per-subscription metrics read 0 for vGPU pods.
+  // Average the buckets that actually reported. Counting an unreported bucket
+  // as 0 drags the headline figure toward zero on any gap in telemetry.
+  const avgReported = (xs: Array<number | null>) => {
+    const real = xs.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+    return real.length ? real.reduce((a, b) => a + b, 0) / real.length : 0;
+  };
+  const gpuTflops = avgReported(gpuSeries.map((p) => p.tflops));
+  const totalVramGb = avgReported(gpuSeries.map((p) => p.vram_mib)) / 1024; // MiB -> GB
   // Average hourly rate per subscription (for display purposes)
-  const avgHourlyRate = activeSubscriptions.length > 0 && totalHourlyRate > 0
-    ? totalHourlyRate / activeSubscriptions.length
+  const avgHourlyRate = activeSubscriptions.length > 0 && hourlyBurn.runningHourly > 0
+    ? hourlyBurn.runningHourly / activeSubscriptions.length
     : 0;
 
   // PA-271: gate every financial surface (sidebar balance, stat cards, monthly
@@ -702,8 +753,6 @@ export function DashboardContent() {
   const hasStorageCost = storageCost > 0;
 
   // Estimated runtime from balance (use total hourly rate from all active subscriptions)
-  const balanceAmount = data.wallet?.balance ? data.wallet.balance / 100 : 0;
-  const runtimeHours = totalHourlyRate > 0 ? balanceAmount / totalHourlyRate : (balanceAmount / avgHourlyRate);
 
   // PA-224: per-context display name.
   // - In the user's OWN workspace (isOwner=true): prefer the Stripe customer
@@ -734,6 +783,7 @@ export function DashboardContent() {
         />
       )}
       <TruConversionIdentity email={data.customer.email} />
+      <CrispUserSync data={data} token={token} />
       {/* Mobile Header */}
       <MobileHeader
         balance={canViewBilling ? (data.wallet?.balanceFormatted || "$0") : undefined}
@@ -780,7 +830,10 @@ export function DashboardContent() {
 
           {/* Balance Card - Live Cost Ticker — billing-gated (PA-271) */}
           {canViewBilling && (
-          <div className="rounded-2xl p-4 text-white bg-gradient-to-br from-zinc-900 to-zinc-800">
+          <div
+            data-tour="wallet-card"
+            onClick={() => setShowTopupModal(true)}
+            className="rounded-2xl p-4 text-white bg-gradient-to-br from-zinc-900 to-zinc-800 cursor-pointer hover:from-zinc-800 hover:to-zinc-700 transition-colors">
             {/* Low balance banner */}
             {liveCostTicker.status === "critical" && (
               <div className="bg-rose-500 text-white text-xs font-medium px-2 py-1 rounded-lg mb-3 flex items-center gap-1.5">
@@ -798,28 +851,51 @@ export function DashboardContent() {
                 Balance running low
               </div>
             )}
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-zinc-400">Available balance</span>
-              <div className="flex items-center gap-2">
-                {totalRunning > 0 && isHourly && liveCostTicker.costPerSecond > 0 && (
-                  <span className="text-xs text-zinc-500 font-mono">
-                    -${liveCostTicker.costPerSecond.toFixed(4)}/s
-                  </span>
-                )}
-                <div className="w-8 h-5 rounded-sm bg-gradient-to-r from-rose-400 to-orange-400"></div>
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs text-zinc-400 whitespace-nowrap">Available balance</span>
+              {/* Brand gradient (teal → violet), same pairing used on the
+                  B200 waitlist success page — doubles as the top-up affordance now
+                  that the whole card is clickable. */}
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gradient-to-br from-teal-400 to-teal-600 shrink-0 whitespace-nowrap">
+                <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                <span className="text-xs font-medium text-white">Top up</span>
               </div>
             </div>
-            <div className="flex items-baseline gap-2 mb-2">
-              <span className={`text-3xl font-bold tabular-nums ${
-                liveCostTicker.status === "critical" ? "text-rose-400" : ""
-              }`}>
-                {totalRunning > 0 && isHourly ? liveCostTicker.formattedBalance : (data.wallet?.balanceFormatted || "$0")}
+            {walletBurning && liveCostTicker.costPerSecond > 0 && (
+              <span className="text-xs text-zinc-500 font-mono block mb-1">
+                -${liveCostTicker.costPerSecond.toFixed(4)}/s
               </span>
-              {data.wallet && getWalletReaction(liveCostTicker.currentBalance || data.wallet.balance) && (
-                <span className="text-xs text-zinc-400">{getWalletReaction(liveCostTicker.currentBalance || data.wallet.balance)}</span>
-              )}
+            )}
+            <div className="flex items-baseline gap-2 mb-2 overflow-hidden">
+              {(() => {
+                const balanceStr = walletBurning ? liveCostTicker.formattedBalance : (data.wallet?.balanceFormatted || "$0");
+                // Scale font down for large balances so text fits the card
+                const sizeClass = balanceStr.length > 14 ? "text-lg" : balanceStr.length > 10 ? "text-xl" : "text-3xl";
+                // Hide reaction text for very large balances to prevent overflow
+                const showReaction = balanceStr.length <= 12;
+                return (
+                  <>
+                    <span className={`${sizeClass} font-bold tabular-nums truncate ${
+                      liveCostTicker.status === "critical" || inArrears ? "text-rose-400" : ""
+                    }`}>
+                      {balanceStr}
+                    </span>
+                    {showReaction && data.wallet && getWalletReaction(liveCostTicker.currentBalance || data.wallet.balance) && (
+                      <span className="text-xs text-zinc-400 whitespace-nowrap shrink-0">{getWalletReaction(liveCostTicker.currentBalance || data.wallet.balance)}</span>
+                    )}
+                  </>
+                );
+              })()}
             </div>
-            {totalRunning > 0 && isHourly && data.wallet && totalHourlyRate > 0 && (
+            {/* PA-339: explain a negative balance instead of hiding it as $0.00 */}
+            {inArrears && (
+              <p className="text-xs text-rose-300 mb-2">
+                Your account is in arrears. Top-ups apply to this balance first before adding spendable credit.
+              </p>
+            )}
+            {walletBurning && data.wallet && totalHourlyRate > 0 && (
               <>
                 {/* Progress bar showing time remaining */}
                 <div className="h-1.5 bg-zinc-700/50 rounded-full mb-2 overflow-hidden">
@@ -900,14 +976,11 @@ export function DashboardContent() {
               onClick={() => setActiveTab("storage")}
             />
           )}
-          {isPro() && data.bareMetalEnabled && data.can?.["gpu.provision"] && (
-            <NavItem
-              icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" /></svg>}
-              label="Bare Metal"
-              active={activeTab === "baremetal"}
-              onClick={() => setActiveTab("baremetal")}
-            />
-          )}
+          {/* Bare Metal Orders has NO desktop sidebar item by design — it's
+              reached via the "Bare Metal" CTA in the dashboard header (avoids a
+              duplicate door to the same tab). The tab/view + ?tab=bare-metal-orders
+              deeplink remain valid; mobile keeps its own nav entry. Legacy Spheron
+              "Bare Metal" tab retired (no live deployments). */}
           {/* Metrics: shown to RoM (gpu.access) and FM (billing.view).
               Server-side filtering scopes the data to what each role can see. */}
           {(data.can?.["gpu.access"] || data.can?.["billing.view"]) && (
@@ -1034,9 +1107,12 @@ export function DashboardContent() {
                   )}
                   {data.can?.["gpu.provision"] && (
                     <>
+                      {/* PA-367: filled Packet green (--teal) so On-demand reads
+                          as a primary CTA on par with Monthly / Bare Metal. */}
                       <button
+                        data-tour="ondemand-btn"
                         onClick={handleLaunchGpu}
-                        className="px-4 py-2.5 border border-zinc-200 bg-white hover:bg-zinc-50 text-sm font-medium text-zinc-600 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                        className="px-4 py-2.5 bg-(--teal) hover:bg-(--teal-dark) text-white text-sm font-medium rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                       >
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
@@ -1044,6 +1120,7 @@ export function DashboardContent() {
                         On-demand
                       </button>
                       <button
+                        data-tour="monthly-btn"
                         onClick={() => setShowMonthlyPlansModal(true)}
                         className="px-4 py-2.5 bg-(--blue) hover:bg-(--blue-dark) text-white text-sm font-medium rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
                       >
@@ -1052,20 +1129,41 @@ export function DashboardContent() {
                       </button>
                     </>
                   )}
+                  {/* Bare Metal Orders — must mirror the tab guard exactly
+                      (billing.view AND the bareMetalEnabled entitlement), or a
+                      non-entitled user clicks into a disallowed tab and the
+                      guard-redirect loops. */}
+                  {isPro() && data.can?.["billing.view"] && data.bareMetalEnabled && (
+                    <button
+                      data-tour="baremetal-btn"
+                      onClick={() => setActiveTab("bare-metal-orders")}
+                      className="px-4 py-2.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white text-sm font-medium rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+                      </svg>
+                      Bare Metal
+                    </button>
+                  )}
                 </div>
               </div>
 
               {/* Dashboard announcements from admin */}
               {token && <DashboardAnnouncements token={token} />}
 
+              {/* B200 flagship quick-deploy banner (PA-384) */}
+              {token && data.can?.["gpu.provision"] && (
+                <B200Banner token={token} onDeploy={handleLaunchB200} />
+              )}
+
               {/* Onboarding checklist for new users */}
               <OnboardingChecklist
                 walletBalance={data.wallet?.balance ?? 0}
-                hasGpuRunning={totalRunning > 0}
+                hasLaunchedGpu={instances.length > 0 || totalRunning > 0}
                 hasPoolSubscriptions={poolSubscriptions.length > 0}
-                onNavigateToTab={(tab) => setActiveTab(tab as TabType)}
                 onAddFunds={() => setShowTopupModal(true)}
                 onExploreGPUs={() => setShowLaunchModal(true)}
+                onLaunchGpu={() => setShowLaunchModal(true)}
               />
 
               {/* Stats Row */}
@@ -1233,18 +1331,13 @@ export function DashboardContent() {
                               {data.can?.["gpu.provision"] && (
                                 <button
                                   onClick={() => {
-                                    if (sub.productId) {
-                                      setLaunchSubscription({
-                                        productId: sub.productId,
-                                        stripeSubscriptionId: sub.id,
-                                      });
-                                      setShowLaunchModal(true);
-                                    } else {
-                                      // Fallback: no product link — use the
-                                      // normal launch path and rely on the API
-                                      // to resolve the sub from the price ID.
-                                      handleLaunchGpu();
-                                    }
+                                    // The subscription travels even when its
+                                    // product link is missing: it is what pays.
+                                    setLaunchSubscription({
+                                      productId: sub.productId ?? null,
+                                      stripeSubscriptionId: sub.id,
+                                    });
+                                    setShowLaunchModal(true);
                                   }}
                                   className="w-full px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white font-medium rounded-xl transition-colors text-sm flex items-center justify-center gap-2"
                                 >
@@ -1295,6 +1388,32 @@ export function DashboardContent() {
                       </div>
                     )}
                     {poolSubscriptions.map((subscription) => {
+                      // Term-prepay bare metal servers (HAI unified nature
+                      // "baremetal"): read-only card — VM actions don't apply
+                      // (and their endpoints reject baremetal ids). Managed
+                      // from the Bare Metal tab (billing.view gated, Pro-only).
+                      if (subscription.nature === "baremetal") {
+                        // Only offer "Manage" when the orders tab is actually
+                        // reachable (entitlement + billing.view) — otherwise the
+                        // link bounces off the guard and loops. The card itself
+                        // (read-only + SSH) still shows for the owned server.
+                        const canManageBm =
+                          isPro() &&
+                          !!data?.bareMetalEnabled &&
+                          (!data?.can || !!data.can["billing.view"]);
+                        return (
+                          <BareMetalInstanceCard
+                            key={`sub-${subscription.id}`}
+                            subscription={subscription}
+                            token={token ?? undefined}
+                            onManage={
+                              canManageBm
+                                ? () => setActiveTab("bare-metal-orders")
+                                : undefined
+                            }
+                          />
+                        );
+                      }
                       const meta = podMetadata[String(subscription.id)];
                       // Detect monthly: check billingType in metadata, or match against Stripe subscriptions via poolIds
                       const isMonthly = meta?.billingType === "monthly" || (data?.subscriptions || []).some(
@@ -1360,12 +1479,9 @@ export function DashboardContent() {
                           ({bareMetalNodes.length})
                         </span>
                       </h2>
-                      <button
-                        onClick={() => setActiveTab("baremetal")}
-                        className="text-sm text-[var(--blue)] hover:underline"
-                      >
-                        Manage
-                      </button>
+                      {/* Legacy Spheron "Manage" link removed — the baremetal
+                          tab is retired, so this navigated to a dead tab that
+                          the guard rejects (flicker loop). */}
                     </div>
                     <div className="grid md:grid-cols-2 gap-4">
                       {bareMetalNodes.map((node) => (
@@ -1423,7 +1539,7 @@ export function DashboardContent() {
                 )}
               </div>
 
-              {/* 6 Cards Grid: TFLOPs, VRAM, GPU Load, Hardware, Billing, Activity */}
+              {/* Cards Grid: TFLOPs, VRAM, Billing, Activity */}
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 {/* GPU Compute Card */}
                 <div className="bg-white rounded-2xl border border-[var(--line)] p-5">
@@ -1434,13 +1550,11 @@ export function DashboardContent() {
                     </h3>
                     <span className="text-xs text-zinc-400">Last 5m</span>
                   </div>
-                  <div className="text-3xl font-bold text-emerald-600 mb-1">{totalTflops.toFixed(1)}</div>
+                  <div className="text-3xl font-bold text-emerald-600 mb-1">{gpuTflops.toFixed(1)}</div>
                   <div className="text-xs text-zinc-500 mb-2">TFLOPs</div>
                   <div className="h-32">
                     <GPUUsageChart
-                      token={token!}
-                      subscriptions={poolSubscriptions}
-                      podMetadata={podMetadata}
+                      data={gpuSeries}
                       metricType="tflops"
                     />
                   </div>
@@ -1459,16 +1573,12 @@ export function DashboardContent() {
                   <div className="text-xs text-zinc-500 mb-2">avg usage</div>
                   <div className="h-32">
                     <GPUUsageChart
-                      token={token!}
-                      subscriptions={poolSubscriptions}
-                      podMetadata={podMetadata}
+                      data={gpuSeries}
                       metricType="vram"
                     />
                   </div>
                 </div>
 
-                {/* Real-time GPU Hardware Metrics (from Netdata) */}
-                {totalRunning > 0 && <GPUHardwareMetrics token={token!} variant="dashboard" />}
 
                 {/* Billing Chart Card — hidden for roles without billing.view
                     (Read-only Member, Team Member). Same gate as the Billing
@@ -1533,6 +1643,7 @@ export function DashboardContent() {
             <BillingTab
               transactions={data.transactions}
               walletBalance={data.wallet?.balanceFormatted || "$0"}
+              walletBalanceCents={data.wallet?.balance ?? 0}
               onTopUp={() => setShowTopupModal(true)}
               formatDateTime={formatDateTime}
               onDownloadCSV={downloadTransactionsCSV}
@@ -1540,6 +1651,8 @@ export function DashboardContent() {
               billingPortalUrl={data?.billingPortalUrl}
               subscriptions={data?.subscriptions}
               token={token!}
+              autoRefill={data?.autoRefill}
+              canManageBilling={data.can?.["billing.manage"] ?? false}
             />
           )}
 
@@ -1591,8 +1704,17 @@ export function DashboardContent() {
           {activeTab === "apps" && token && (
             <AppsTab
               token={token}
-              subscriptions={poolSubscriptions}
-              onRefresh={fetchInstances}
+              subscriptions={vmPodSubscriptions}
+              onDeployed={(podName, appName) => {
+                // Mirror the main LaunchGPUModal onSuccess: show provisioning
+                // banner, switch to GPU tab, and poll until the instance appears.
+                setProvisioningGpu({ name: podName, poolName: appName });
+                setActiveTab("dashboard");
+                const pollInterval = setInterval(() => fetchInstances(), 3000);
+                setTimeout(() => clearInterval(pollInterval), 60000);
+                setTimeout(() => setProvisioningGpu(null), 120000);
+                fetchInstances();
+              }}
             />
           )}
 
@@ -1605,6 +1727,10 @@ export function DashboardContent() {
 
           {activeTab === "baremetal" && token && <BareMetalTab token={token} onTopUp={() => setShowTopupModal(true)} />}
 
+          {activeTab === "bare-metal-orders" && isPro() && token && (
+            <BareMetalOrdersTab token={token} canManage={data?.can?.["billing.manage"] ?? false} />
+          )}
+
           {activeTab === "settings" && (
             <div className="max-w-2xl space-y-6">
               <div>
@@ -1612,8 +1738,12 @@ export function DashboardContent() {
                 <p className="text-sm text-[var(--muted)]">Manage your account settings and security</p>
               </div>
 
-              {/* Profile Section */}
-              <ProfileSettings token={token!} />
+              {/* Profile Section — highlight billing/KYC when arriving from
+                  the bare-metal "complete your profile" redirect. */}
+              <ProfileSettings
+                token={token!}
+                highlightBilling={dashboardSearchParams.get("billing") === "1"}
+              />
 
               {/* Budget Controls Section */}
               <BudgetSettings token={token!} />
@@ -1696,7 +1826,7 @@ export function DashboardContent() {
         topupLoading={topupLoading}
         initialProductId={launchProductId}
         initialCategorySlug={launchCategorySlug}
-        lockedProductId={launchSubscription?.productId}
+        lockedProductId={launchSubscription?.productId ?? undefined}
         stripeSubscriptionId={launchSubscription?.stripeSubscriptionId}
       />
 
@@ -1756,17 +1886,6 @@ export function DashboardContent() {
         initialCategorySlug={monthlyCategorySlug}
       />
 
-      {/* Welcome Modal for new users */}
-      <WelcomeModal
-        isOpen={showWelcomeModal}
-        onClose={() => setShowWelcomeModal(false)}
-        token={token!}
-        topupLoading={topupLoading}
-        onTopup={handleTopup}
-        onVoucherRedeemed={refreshAccountData}
-        customerEmail={data?.customer?.email}
-      />
-
       {/* Mobile Bottom Navigation */}
       <MobileNav
         activeTab={activeTab}
@@ -1805,11 +1924,12 @@ export function DashboardContent() {
         }}
         hasUnreadSupport={hasUnreadSupport}
         bareMetalEnabled={isPro() && data.bareMetalEnabled}
+        canViewBilling={!!data.can?.["billing.view"]}
       />
 
       {/* Top-up success toast */}
       {topupToast && (
-        <div className="fixed top-4 right-4 z-[60] animate-in slide-in-from-top-2 duration-300">
+        <div className={`fixed ${data.skipTwoFactor ? "top-16" : "top-4"} right-4 z-[60] animate-in slide-in-from-top-2 duration-300`}>
           <div className="bg-emerald-600 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-3">
             <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -1826,7 +1946,7 @@ export function DashboardContent() {
 
       {/* Error toast */}
       {errorToast && (
-        <div className="fixed top-4 right-4 z-[60] animate-in slide-in-from-top-2 duration-300">
+        <div className={`fixed ${data.skipTwoFactor ? "top-16" : "top-4"} right-4 z-[60] animate-in slide-in-from-top-2 duration-300`}>
           <div className="bg-red-600 text-white px-5 py-3 rounded-xl shadow-lg flex items-center gap-3 max-w-md">
             <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -1840,6 +1960,9 @@ export function DashboardContent() {
           </div>
         </div>
       )}
+
+      {/* Onboarding tour — guided tooltip walkthrough for first-time sign-ups */}
+      <OnboardingTour isNewSignup={isNewSignup} customerId={data?.customer?.id} />
       </div>
     </div>
   );

@@ -25,6 +25,8 @@ const PRO_DEFAULTS = {
   dashboardUrl: "https://dash.packet.ai",
   apiBaseUrl: "https://api.packet.ai",
   supportEmail: "help@packet.ai",
+  onboardingEmail: "onboarding@hosted.ai",
+  statusEmailTo: "partners@hosted.ai",
   logoUrl: "/packet-logo.png",
   faviconUrl: "/favicon.ico",
   primaryColor: "#1a4fff",
@@ -46,6 +48,11 @@ const OSS_DEFAULTS = {
   dashboardUrl: "http://localhost:3000",
   apiBaseUrl: "http://localhost:3000/api",
   supportEmail: "admin@localhost",
+  // Internal-notification recipients: no @hosted.ai default in OSS — an
+  // unconfigured self-host must not silently ship customer PII upstream.
+  // Empty here → the getters fall back to the operator's own support email.
+  onboardingEmail: "",
+  statusEmailTo: "",
   logoUrl: "/logo.svg",
   faviconUrl: "/favicon.ico",
   primaryColor: "#1a4fff",
@@ -72,8 +79,7 @@ function env(key: string): string | undefined {
   if (typeof window === "undefined") {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { getSettingSync } =
-        require("./settings") as typeof import("./settings");
+      const { getSettingSync } = require("./settings") as typeof import("./settings");
       const dbVal = getSettingSync(key);
       if (dbVal) return dbVal;
     } catch {
@@ -114,6 +120,29 @@ export function getSupportEmail(): string {
   return env("SUPPORT_EMAIL") || defaults().supportEmail;
 }
 
+/**
+ * Internal recipient for onboarding / customer-event notification emails
+ * (signup, subscription, topup, GPU launch, the customer CSV export).
+ *
+ * These carry customer PII, so the recipient must be configurable: a
+ * self-hoster sets `ONBOARDING_EMAIL` to route them internally. Pro defaults
+ * to `onboarding@hosted.ai`; an unconfigured OSS build falls back to the
+ * operator's own support email rather than leaking upstream to hosted.ai.
+ */
+export function getOnboardingEmail(): string {
+  return env("ONBOARDING_EMAIL") || defaults().onboardingEmail || getSupportEmail();
+}
+
+/**
+ * Internal recipient for the daily KPI / status snapshot email (MRR, revenue,
+ * signups, active pods). Configurable via `STATUS_EMAIL_TO`; Pro defaults to
+ * `partners@hosted.ai`, an unconfigured OSS build falls back to the operator's
+ * own support email.
+ */
+export function getStatusEmailTo(): string {
+  return env("STATUS_EMAIL_TO") || defaults().statusEmailTo || getSupportEmail();
+}
+
 /** Strip query strings from local paths — next/image rejects them. */
 function cleanLocalUrl(url: string): string {
   if (url.startsWith("/") && url.includes("?")) {
@@ -145,6 +174,21 @@ export function getAccentColor(): string {
 /** Parent company name (empty in OSS if not configured). */
 export function getCompanyName(): string {
   return env("COMPANY_NAME") || defaults().companyName;
+}
+
+/**
+ * Legal billing entity for invoices (FROM block + beneficiary reference). The
+ * brand (e.g. "Packet.ai") is a product, not a company — invoices must bill from
+ * the registered entity. Finance requires the exact wording "Hosted AI Inc.
+ * (Packet.AI)" for the default Packet brand; tenant brands derive from their
+ * configured company + brand, and an empty company name falls back to the brand.
+ */
+export function getInvoiceEntity(): string {
+  const company = getCompanyName();
+  if (!company) return getBrandName();
+  const brand = getBrandName();
+  if (brand === "Packet.ai") return `${company} (Packet.AI)`;
+  return `${company} (${brand})`;
 }
 
 /** Background color (hex). */

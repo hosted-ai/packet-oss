@@ -1,7 +1,8 @@
 /**
  * Midnight Status Report Email
  *
- * Sends a daily KPI snapshot to partners@hosted.ai at midnight.
+ * Sends a daily KPI snapshot to the configured status recipient (the caller
+ * passes `to` — STATUS_EMAIL_TO, see getStatusEmailTo) at midnight.
  * Compares today's metrics against the same day last week,
  * and includes 7-day trend history for all key metrics.
  */

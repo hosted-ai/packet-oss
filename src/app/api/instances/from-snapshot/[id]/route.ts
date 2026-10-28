@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken, generateCustomerToken } from "@/lib/customer-auth";
-import { getStripe } from "@/lib/stripe";
+import { verifyCustomerToken, createLoginLink } from "@/lib/customer-auth";
+import { resolveOperatingContext } from "@/lib/auth/account-resolver";
 import {
   createInstance,
   getServiceProvisioningInfo,
@@ -18,7 +18,6 @@ import { runStartupScript } from "@/lib/startup-script-runner";
 import { WORKSPACE_SETUP_SCRIPT } from "@/lib/startup-scripts";
 import { gatePermission } from "@/lib/auth/gate";
 import { randomBytes } from "crypto";
-import Stripe from "stripe";
 import { z } from "zod";
 
 const restoreSnapshotSchema = z.object({
@@ -67,11 +66,30 @@ export async function POST(
 
     const options = parsed.data;
 
+    // PA-94: resolve the operating account (team-scoped) rather than the raw
+    // JWT identity, so an invited team member can restore the team's own
+    // snapshots and gets charged/gated against the team's shared wallet
+    // instead of their own always-empty personal account.
+    const ctx = await resolveOperatingContext({
+      email: payload.email,
+      jwtCustomerId: payload.customerId,
+      activeAccountId: payload.activeAccountId,
+    });
+    if (!ctx) {
+      return NextResponse.json({ error: "Account not found" }, { status: 404 });
+    }
+    const accountId = ctx.accountId;
+    const customer = ctx.customer;
+
+    // Hourly usage is paid from the hourly wallet on the context; the operating
+    // account only owns the restored instance.
+    const hourlyWalletId = ctx.hourlyCustomerId ?? accountId;
+
     // Get the snapshot
     const snapshot = await prisma.podSnapshot.findFirst({
       where: {
         id: snapshotId,
-        stripeCustomerId: payload.customerId,
+        stripeCustomerId: accountId,
       },
     });
 
@@ -82,13 +100,7 @@ export async function POST(
       );
     }
 
-    // Get customer to find team ID
-    const stripe = await getStripe();
-    const customer = (await stripe.customers.retrieve(
-      payload.customerId
-    )) as Stripe.Customer;
-
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },
@@ -99,7 +111,7 @@ export async function POST(
     // PA-175 gate: restoring from a snapshot creates a new instance → gpu.provision.
     const denial = await gatePermission({
       payload,
-      accountId: customer.id,
+      accountId,
       customerEmail: typeof customer.email === "string" ? customer.email : null,
       permission: "gpu.provision",
       request,
@@ -279,7 +291,7 @@ export async function POST(
     const MINIMUM_BILLING_MINUTES = 30;
     const gpuCount = 1; // Unified instances are single-GPU
     const prepaidAmountCents = Math.round((MINIMUM_BILLING_MINUTES / 60) * hourlyRateCents * gpuCount);
-    const walletBalance = await getWalletBalance(payload.customerId);
+    const walletBalance = await getWalletBalance(hourlyWalletId);
 
     if (walletBalance.availableBalance < prepaidAmountCents) {
       return NextResponse.json(
@@ -293,9 +305,9 @@ export async function POST(
     // CHARGE BEFORE DEPLOYMENT - deduct from wallet upfront
     console.log(`[Snapshot Restore] Pre-charging $${(prepaidAmountCents / 100).toFixed(2)} BEFORE deployment`);
 
-    const preDeployId = `predeploy_${payload.customerId}_${Date.now()}`;
+    const preDeployId = `predeploy_${hourlyWalletId}_${Date.now()}`;
     const deductResult = await deductUsage(
-      payload.customerId,
+      hourlyWalletId,
       (MINIMUM_BILLING_MINUTES / 60) * gpuCount,
       `GPU deploy (snapshot restore): ${product.name} @ $${(hourlyRateCents / 100).toFixed(2)}/hr`,
       hourlyRateCents,
@@ -337,7 +349,7 @@ export async function POST(
       const errMsg = deployError instanceof Error ? deployError.message : "";
       console.log(`[Snapshot Restore] Deployment failed, refunding pre-charge of $${(prepaidAmountCents / 100).toFixed(2)}`);
       await refundDeployment(
-        payload.customerId,
+        hourlyWalletId,
         prepaidAmountCents,
         `Refund: snapshot restore failed - ${errMsg.slice(0, 100)}`
       );
@@ -361,7 +373,7 @@ export async function POST(
         data: {
           subscriptionId: `instance-${instanceId}`, // Unique placeholder for legacy compat
           instanceId,
-          stripeCustomerId: payload.customerId,
+          stripeCustomerId: hourlyWalletId,
           displayName,
           notes: `Restored from snapshot: ${snapshot.displayName}`,
           deployTime,
@@ -369,6 +381,7 @@ export async function POST(
           prepaidAmountCents,
           poolId: derivedPoolId,
           productId: product.id,
+          productName: product.name,
           hourlyRateCents,
           metricsToken,
           startupScript: snapshot.deployScript || null,
@@ -395,7 +408,7 @@ export async function POST(
     // Log deploy charge to local WalletTransaction table
     await prisma.walletTransaction.create({
       data: {
-        stripeCustomerId: payload.customerId,
+        stripeCustomerId: hourlyWalletId,
         teamId,
         type: "gpu_deploy",
         amountCents: prepaidAmountCents,
@@ -415,7 +428,7 @@ export async function POST(
         await prisma.huggingFaceDeployment.create({
           data: {
             subscriptionId: instanceId,
-            stripeCustomerId: payload.customerId,
+            stripeCustomerId: accountId,
             hfItemId: snapshot.hfItemId,
             hfItemType: snapshot.hfItemType || "model",
             hfItemName: snapshot.hfItemName || snapshot.hfItemId,
@@ -429,11 +442,11 @@ export async function POST(
     }
 
     // Log activity
-    await logGPULaunched(payload.customerId, product.name, gpuCount, displayName, instanceId);
+    await logGPULaunched(accountId, product.name, gpuCount, displayName, instanceId);
 
     // Send email
     try {
-      const dashboardToken = generateCustomerToken(payload.email.toLowerCase(), payload.customerId);
+      const dashboardToken = await createLoginLink({ email: payload.email.toLowerCase(), customerId: accountId });
       const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${dashboardToken}`;
       await sendGpuLaunchedEmail({
         to: customer.email!,

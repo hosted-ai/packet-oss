@@ -172,7 +172,7 @@ describe('API Keys Library', () => {
 
       try {
         await apiKeys.authenticateApiKey(request);
-      } catch (error) {
+      } catch {
         // Expected without proper mocking
       }
 

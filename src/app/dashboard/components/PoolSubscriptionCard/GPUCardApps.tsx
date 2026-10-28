@@ -40,7 +40,7 @@ interface GPUCardAppsProps {
   onExposeService?: (port: number, serviceName: string) => void;
 }
 
-export function GPUCardApps({ subscriptionId, token, podName, onExposeService }: GPUCardAppsProps) {
+export function GPUCardApps({ subscriptionId, token, onExposeService }: GPUCardAppsProps) {
   const [apps, setApps] = useState<App[]>([]);
   const [installedApps, setInstalledApps] = useState<InstalledApp[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +68,9 @@ export function GPUCardApps({ subscriptionId, token, podName, onExposeService }:
     fetchApps();
   }, [subscriptionId, token]);
 
+  // Depending on the array itself would re-run the effect that sets it.
+  const hasInstalling = installedApps.some(a => a.status === "installing");
+
   // Fetch installed apps status
   useEffect(() => {
     async function fetchStatus() {
@@ -87,12 +90,11 @@ export function GPUCardApps({ subscriptionId, token, podName, onExposeService }:
     fetchStatus();
 
     // Poll for status updates if any app is installing
-    const hasInstalling = installedApps.some(a => a.status === "installing");
     if (hasInstalling) {
       const interval = setInterval(fetchStatus, 5000);
       return () => clearInterval(interval);
     }
-  }, [subscriptionId, token, installing]);
+  }, [subscriptionId, token, installing, hasInstalling]);
 
   const handleDismiss = async (appSlug: string) => {
     try {

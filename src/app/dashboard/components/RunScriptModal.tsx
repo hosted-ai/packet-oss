@@ -65,7 +65,7 @@ export function RunScriptModal({ isOpen, onClose, subscriptionId, token, podName
             <h2 className="text-base font-medium text-[var(--ink)]">Run Script</h2>
             <p className="text-xs text-[var(--muted)]">Execute a bash script on the pod</p>
           </div>
-          <button onClick={onClose} className="p-1.5 text-zinc-400 hover:text-zinc-600 transition-colors">
+          <button aria-label="Close dialog" onClick={onClose} className="p-1.5 text-zinc-400 hover:text-zinc-600 transition-colors">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>

@@ -73,6 +73,7 @@ export function HelpTooltip({
       top = viewport.height - tooltip.height - 8;
     }
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- positions the tooltip from post-render DOM measurements (getBoundingClientRect)
     setTooltipPosition({ top, left });
   }, [isOpen, position]);
 
@@ -232,7 +233,7 @@ export const HELP_CONTENT = {
       <>
         Your prepaid credit balance. GPU costs are deducted automatically as you use them.
         <br /><br />
-        <span className="text-zinc-400">Auto-refill:</span> When balance drops below $10, we'll automatically charge your card.
+        <span className="text-zinc-400">Auto-refill:</span> When balance drops below $10, we&apos;ll automatically charge your card.
       </>
     ),
   },

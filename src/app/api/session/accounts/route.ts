@@ -92,7 +92,15 @@ export async function GET(request: NextRequest) {
   const accountIds = new Set<string>(
     filteredMemberships.map((m) => m.stripeCustomerId),
   );
-  if (ownPrimaryId) accountIds.add(ownPrimaryId);
+  // Only surface the user's own account if it actually has an HAI workspace.
+  // An invited-only user gets a bare Stripe customer (no hostedai_team_id)
+  // during login — showing it as "My account / Owner" is confusing (PA-1950).
+  if (
+    ownPrimaryId &&
+    ownResolved?.primaryCustomer?.metadata?.hostedai_team_id
+  ) {
+    accountIds.add(ownPrimaryId);
+  }
   if (accountIds.size === 0) {
     return NextResponse.json({ accounts: [], activeAccountId: null });
   }

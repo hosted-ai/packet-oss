@@ -75,7 +75,7 @@ export default function SystemMetricsCard({
     }
   }, [subscriptionId, token, isVisible]);
 
-  const installNetdata = async () => {
+  const installNetdata = useCallback(async () => {
     setInstalling(true);
     try {
       const response = await fetch(`/api/instances/${subscriptionId}/system-metrics`, {
@@ -99,7 +99,7 @@ export default function SystemMetricsCard({
     } finally {
       setInstalling(false);
     }
-  };
+  }, [subscriptionId, token, fetchMetrics]);
 
   useEffect(() => {
     if (isVisible) {
@@ -123,7 +123,7 @@ export default function SystemMetricsCard({
       setAutoInstallAttempted(true);
       installNetdata();
     }
-  }, [metrics, isVisible, installing, autoInstallAttempted, subscriptionId]);
+  }, [metrics, isVisible, installing, autoInstallAttempted, subscriptionId, installNetdata]);
 
   if (!isVisible) return null;
 

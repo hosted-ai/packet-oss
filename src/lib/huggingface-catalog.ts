@@ -45,7 +45,7 @@ export const HF_CATALOG: {
       gated: true,
       featured: true,
       downloads: 5000000,
-      logo: "https://huggingface.co/meta-llama/resolve/main/Llama3.png",
+      logo: "",
       provider: "Meta",
     },
     {
@@ -59,7 +59,7 @@ export const HF_CATALOG: {
       gated: false,
       featured: true,
       downloads: 3000000,
-      logo: "https://huggingface.co/Qwen/resolve/main/assets/qwen2.5_logo.jpeg",
+      logo: "",
       provider: "Alibaba",
     },
     {
@@ -73,7 +73,7 @@ export const HF_CATALOG: {
       gated: false,
       featured: true,
       downloads: 2500000,
-      logo: "https://huggingface.co/deepseek-ai/resolve/main/logo.png",
+      logo: "",
       provider: "DeepSeek",
     },
     {
@@ -87,7 +87,7 @@ export const HF_CATALOG: {
       gated: true,
       featured: true,
       downloads: 3000000,
-      logo: "https://huggingface.co/google/resolve/main/gemma_logo.png",
+      logo: "",
       provider: "Google",
     },
     {
@@ -101,7 +101,7 @@ export const HF_CATALOG: {
       gated: true,
       featured: true,
       downloads: 10000000,
-      logo: "https://huggingface.co/meta-llama/resolve/main/Llama3.png",
+      logo: "",
       provider: "Meta",
     },
     {
@@ -115,7 +115,7 @@ export const HF_CATALOG: {
       gated: false,
       featured: true,
       downloads: 2000000,
-      logo: "https://huggingface.co/Qwen/resolve/main/assets/qwen2.5_logo.jpeg",
+      logo: "",
       provider: "Alibaba",
     },
     {
@@ -129,7 +129,7 @@ export const HF_CATALOG: {
       gated: false,
       featured: true,
       downloads: 1500000,
-      logo: "https://huggingface.co/NousResearch/resolve/main/nous-logo.png",
+      logo: "",
       provider: "Nous Research",
     },
     {
@@ -143,7 +143,7 @@ export const HF_CATALOG: {
       gated: false,
       featured: true,
       downloads: 8000000,
-      logo: "https://huggingface.co/mistralai/resolve/main/mistral-logo.png",
+      logo: "",
       provider: "Mistral AI",
     },
     {
@@ -157,7 +157,7 @@ export const HF_CATALOG: {
       gated: false,
       featured: true,
       downloads: 4000000,
-      logo: "https://huggingface.co/microsoft/resolve/main/phi-logo.png",
+      logo: "",
       provider: "Microsoft",
     },
     {
@@ -171,7 +171,7 @@ export const HF_CATALOG: {
       gated: false,
       featured: true,
       downloads: 800000,
-      logo: "https://huggingface.co/meta-llama/resolve/main/Llama3.png",
+      logo: "",
       provider: "TheBloke",
     },
   ],
@@ -190,7 +190,7 @@ export const HF_CATALOG: {
       gated: true,
       featured: true,
       downloads: 10000000,
-      logo: "https://huggingface.co/meta-llama/resolve/main/Llama3.png",
+      logo: "",
       provider: "Meta",
     },
     {
@@ -205,7 +205,7 @@ export const HF_CATALOG: {
       gated: false,
       featured: true,
       downloads: 8000000,
-      logo: "https://huggingface.co/mistralai/resolve/main/mistral-logo.png",
+      logo: "",
       provider: "Mistral AI",
     },
     {
@@ -238,7 +238,7 @@ export const HF_CATALOG: {
       tags: ["llm", "chat", "meta"],
       gated: true,
       downloads: 10000000,
-      logo: "https://huggingface.co/meta-llama/resolve/main/Llama3.png",
+      logo: "",
       provider: "Meta",
     },
     {
@@ -252,7 +252,7 @@ export const HF_CATALOG: {
       tags: ["llm", "chat", "mistral"],
       gated: false,
       downloads: 8000000,
-      logo: "https://huggingface.co/mistralai/resolve/main/mistral-logo.png",
+      logo: "",
       provider: "Mistral AI",
     },
     {
@@ -266,7 +266,7 @@ export const HF_CATALOG: {
       tags: ["llm", "chat", "mistral", "moe"],
       gated: false,
       downloads: 4000000,
-      logo: "https://huggingface.co/mistralai/resolve/main/mistral-logo.png",
+      logo: "",
       provider: "Mistral AI",
     },
     {
@@ -280,7 +280,7 @@ export const HF_CATALOG: {
       tags: ["llm", "chat", "qwen"],
       gated: false,
       downloads: 5000000,
-      logo: "https://huggingface.co/Qwen/resolve/main/assets/qwen2.5_logo.jpeg",
+      logo: "",
       provider: "Alibaba",
     },
     {
@@ -294,7 +294,7 @@ export const HF_CATALOG: {
       tags: ["llm", "chat", "google", "gemma"],
       gated: true,
       downloads: 6000000,
-      logo: "https://huggingface.co/google/resolve/main/gemma_logo.png",
+      logo: "",
       provider: "Google",
     },
     {
@@ -308,7 +308,7 @@ export const HF_CATALOG: {
       tags: ["llm", "chat", "google", "gemma"],
       gated: true,
       downloads: 3000000,
-      logo: "https://huggingface.co/google/resolve/main/gemma_logo.png",
+      logo: "",
       provider: "Google",
     },
     {
@@ -322,7 +322,7 @@ export const HF_CATALOG: {
       tags: ["code", "deepseek", "programming"],
       gated: false,
       downloads: 1500000,
-      logo: "https://huggingface.co/deepseek-ai/resolve/main/logo.png",
+      logo: "",
       provider: "DeepSeek",
     },
     {
@@ -336,7 +336,7 @@ export const HF_CATALOG: {
       tags: ["llm", "chat", "microsoft", "small"],
       gated: false,
       downloads: 4000000,
-      logo: "https://huggingface.co/microsoft/resolve/main/phi-logo.png",
+      logo: "",
       provider: "Microsoft",
     },
   ],
@@ -418,7 +418,7 @@ export const HF_CATALOG: {
       dockerImage: "vllm/vllm-openai:latest",
       tags: ["inference", "llm", "vllm", "openai"],
       gated: false,
-      logo: "https://docs.vllm.ai/en/stable/_static/vllm-logo-text-light.png",
+      logo: "",
       provider: "vLLM",
     },
     {
@@ -446,7 +446,7 @@ export const HF_CATALOG: {
       gated: false,
       hasWebUI: true,
       webUIPort: 8888,
-      logo: "https://jupyter.org/assets/logos/rectanglelogo-greytext-orangebody-greymoons.svg",
+      logo: "",
       provider: "Jupyter",
     },
   ],
@@ -464,7 +464,7 @@ export const HF_CATALOG: {
       gated: false,
       hasWebUI: true,
       webUIPort: 7860,
-      logo: "https://www.gradio.app/assets/img/logo.svg",
+      logo: "",
       provider: "Gradio",
     },
     {
@@ -478,7 +478,7 @@ export const HF_CATALOG: {
       gated: true,
       hasWebUI: true,
       webUIPort: 7860,
-      logo: "https://huggingface.co/stabilityai/resolve/main/stability-ai-logo.png",
+      logo: "",
       provider: "Stability AI",
     },
     {
@@ -492,7 +492,7 @@ export const HF_CATALOG: {
       gated: true,
       hasWebUI: true,
       webUIPort: 7860,
-      logo: "https://huggingface.co/black-forest-labs/resolve/main/bfl-logo.png",
+      logo: "",
       provider: "Black Forest Labs",
     },
   ],

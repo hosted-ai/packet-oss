@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { verifyCustomerToken } from "@/lib/customer-auth";
 import { processVoucherRedemption } from "@/lib/voucher";
-import { gatePermission } from "@/lib/auth/gate";
-import { getStripe } from "@/lib/stripe";
+import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
+import { requirePermission } from "@/lib/auth/audit";
 
 const redeemSchema = z.object({
   code: z.string().trim().min(1, "Voucher code is required").max(50),
@@ -11,22 +10,12 @@ const redeemSchema = z.object({
 
 export async function POST(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
 
-    const token = authHeader.substring(7);
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { success: false, error: "Invalid token" },
-        { status: 401 }
-      );
-    }
+    // Redemption mints wallet credit, so only Owner / Admin / Finance Manager.
+    const denial = requirePermission(auth, "billing.manage", request);
+    if (denial) return denial;
 
     const body = await request.json();
     const parsed = redeemSchema.safeParse(body);
@@ -39,28 +28,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // PA-175 gate: voucher redemption adds credit to the wallet — billing.manage only.
-    const stripe = await getStripe();
-    const stripeCustomer = await stripe.customers.retrieve(payload.customerId);
-    const customerEmail =
-      "deleted" in stripeCustomer && stripeCustomer.deleted
-        ? null
-        : typeof stripeCustomer.email === "string"
-          ? stripeCustomer.email
-          : null;
-    const denial = await gatePermission({
-      payload,
-      accountId: payload.customerId,
-      customerEmail,
-      permission: "billing.manage",
-      request,
-    });
-    if (denial) return denial;
-
+    // Credit lands on the wallet hourly usage is drawn from.
     const result = await processVoucherRedemption(
       parsed.data.code,
-      payload.customerId,
-      payload.email,
+      auth.hourlyCustomerId ?? auth.accountId,
+      auth.payload.email,
       0, // No payment — voucher-only redemption
     );
 

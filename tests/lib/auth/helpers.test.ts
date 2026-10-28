@@ -219,4 +219,110 @@ describe("getAuthenticatedCustomer", () => {
     expect(auth.accountId).toBe(SECONDARY_ACCOUNT);
     expect(auth.membership.role).toBe("member");
   });
+
+  // accountId is what every operating-account read scopes to, so it must never
+  // resolve to an account the session holds no active membership on.
+  it("refuses an activeAccountId the user has no active membership on", async () => {
+    const FOREIGN_ACCOUNT = "cus_foreign";
+    mockUserFindUnique.mockResolvedValue({ id: TEST_USER_ID });
+    mockStripeRetrieve.mockResolvedValue({
+      id: FOREIGN_ACCOUNT,
+      email: "someone.else@example.com",
+      metadata: { hostedai_team_id: "team_foreign" },
+    });
+    mockTeamMembershipFindUnique.mockResolvedValue(null);
+
+    const token = generateCustomerToken(TEST_EMAIL, TEST_CUSTOMER_ID, {
+      userId: TEST_USER_ID,
+      activeAccountId: FOREIGN_ACCOUNT,
+    });
+    const result = await getAuthenticatedCustomer(makeRequest(token));
+
+    expect(result).toBeInstanceOf(NextResponse);
+    expect((result as NextResponse).status).toBe(404);
+  });
+
+  it("refuses an activeAccountId whose membership is revoked", async () => {
+    const REVOKED_ACCOUNT = "cus_revoked";
+    mockUserFindUnique.mockResolvedValue({ id: TEST_USER_ID });
+    mockStripeRetrieve.mockResolvedValue({
+      id: REVOKED_ACCOUNT,
+      email: "someone.else@example.com",
+      metadata: { hostedai_team_id: "team_revoked" },
+    });
+    mockTeamMembershipFindUnique.mockResolvedValue({
+      id: "tm_revoked",
+      userId: TEST_USER_ID,
+      stripeCustomerId: REVOKED_ACCOUNT,
+      role: "member",
+      isOwner: false,
+      status: "active",
+      revokedAt: new Date("2026-05-01T00:00:00Z"),
+    });
+
+    const token = generateCustomerToken(TEST_EMAIL, TEST_CUSTOMER_ID, {
+      userId: TEST_USER_ID,
+      activeAccountId: REVOKED_ACCOUNT,
+    });
+    const result = await getAuthenticatedCustomer(makeRequest(token));
+
+    expect(result).toBeInstanceOf(NextResponse);
+    expect((result as NextResponse).status).toBe(404);
+  });
+});
+
+// Routes that charge hourly usage need the hourly wallet id, which the
+// operating account does not hold when it is a monthly billing artefact.
+describe("getAuthenticatedCustomer — hourly wallet id", () => {
+  const MONTHLY = {
+    id: "cus_monthly",
+    email: TEST_EMAIL,
+    created: 1,
+    metadata: { hostedai_team_id: "team_abc", billing_type: "monthly" },
+  };
+  const HOURLY = {
+    id: "cus_hourly",
+    email: TEST_EMAIL,
+    created: 2,
+    metadata: { hostedai_team_id: "team_abc", billing_type: "hourly" },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockFindSuspension.mockResolvedValue(null);
+    mockUserFindUnique.mockResolvedValue({ id: TEST_USER_ID });
+    mockTeamMembershipFindUnique.mockResolvedValue({
+      id: "tm_1",
+      userId: TEST_USER_ID,
+      status: "active",
+      role: "teamAdmin",
+      isOwner: true,
+      revokedAt: null,
+    });
+    mockStripeRetrieve.mockResolvedValue(MONTHLY);
+  });
+
+  async function authFor(customers: object[], activeAccountId?: string) {
+    setStripeReturning(customers);
+    const token = generateCustomerToken(TEST_EMAIL, HOURLY.id, {
+      userId: TEST_USER_ID,
+      ...(activeAccountId ? { activeAccountId } : {}),
+    });
+    const result = await getAuthenticatedCustomer(makeRequest(token));
+    expect(result).not.toBeInstanceOf(NextResponse);
+    return result as Exclude<typeof result, NextResponse>;
+  }
+
+  it("carries the hourly customer while operating a monthly billing artefact", async () => {
+    const auth = await authFor([MONTHLY, HOURLY], MONTHLY.id);
+
+    expect(auth.accountId).toBe("cus_monthly");
+    expect(auth.hourlyCustomerId).toBe("cus_hourly");
+  });
+
+  it("is null when the email carries no hourly customer", async () => {
+    const auth = await authFor([MONTHLY], MONTHLY.id);
+
+    expect(auth.hourlyCustomerId).toBeNull();
+  });
 });

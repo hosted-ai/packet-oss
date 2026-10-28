@@ -24,6 +24,7 @@ import { getHaiRoleIdForPacketRole } from "@/lib/auth/hai-role-ids";
 import { changeUserRole, removeUserFromTeam } from "@/lib/hostedai";
 import { recomputeApiKeyPermissions, revokeApiKeysForRemovedMember } from "@/lib/auth/api-key-permissions";
 import { removeMemberSshKeys } from "@/lib/auth/ssh-key-removal";
+import { logTeamMemberRemoved } from "@/lib/activity";
 
 function isPacketRole(role: string): role is PacketRole {
   return (PACKET_ROLES as readonly string[]).includes(role);
@@ -267,6 +268,8 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
       },
     })
     .catch((err) => console.error("[DELETE members] audit log failed:", err));
+
+  logTeamMemberRemoved(accountId, target.user.email).catch(() => {});
 
   return NextResponse.json({
     member: {

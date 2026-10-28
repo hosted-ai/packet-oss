@@ -18,6 +18,7 @@ import {
 } from "@/lib/hostedai";
 import { getWalletBalance } from "@/lib/wallet";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
+import { SELLABLE_WHERE } from "@/lib/product-availability";
 
 export async function GET(request: NextRequest) {
   const token = request.headers.get("authorization")?.replace("Bearer ", "");
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
     }
     const customer = ctx.customer;
 
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json({ error: "No team associated" }, { status: 400 });
     }
@@ -58,9 +59,10 @@ export async function GET(request: NextRequest) {
     });
     if (denial) return denial;
 
-    // Fetch all active products with a linked HAI service
+    // Sellable: the app deploy path bills hourly from the wallet, so putting an
+    // app on a GPU is a new sale. Monthly rows price at 0/hr and cannot appear.
     const products = await prisma.gpuProduct.findMany({
-      where: { active: true, serviceId: { not: null } },
+      where: { ...SELLABLE_WHERE, serviceId: { not: null } },
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
     });
 
@@ -72,11 +74,17 @@ export async function GET(request: NextRequest) {
       const services = Array.isArray(compatible) ? compatible : compatible?.services;
       if (Array.isArray(services)) {
         for (const svc of services) {
-          availableServiceIds.add(svc.id);
+          if (svc?.id) availableServiceIds.add(svc.id);
         }
       }
     } catch {
       // If scenario check fails, show all products as potentially available
+      availableServiceIds = new Set(products.map(p => p.serviceId!).filter(Boolean));
+    }
+
+    // An empty answer is not a verdict: the platform returns `services: null`
+    // here, which marks every GPU unavailable and empties the deploy modal.
+    if (availableServiceIds.size === 0) {
       availableServiceIds = new Set(products.map(p => p.serviceId!).filter(Boolean));
     }
 
@@ -106,9 +114,9 @@ export async function GET(request: NextRequest) {
       })
     );
 
-    // Fetch wallet balance from the OPERATING account — apps are charged
-    // to the team owner's wallet, not the invited user's personal one.
-    const wallet = await getWalletBalance(ctx.accountId);
+    // Quote against the wallet the deploy will actually charge — the hourly one
+    // on the context, which a monthly billing artefact never carries itself.
+    const wallet = await getWalletBalance(ctx.hourlyCustomerId ?? ctx.accountId);
 
     return NextResponse.json({
       products: availableProducts,

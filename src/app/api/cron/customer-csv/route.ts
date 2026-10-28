@@ -2,8 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { sendEmailDirect } from "@/lib/email/client";
-
-const ONBOARDING_EMAIL = "onboarding@hosted.ai";
+import { getOnboardingEmail } from "@/lib/branding";
 
 /**
  * Escape a value for CSV: wrap in quotes if it contains commas, quotes, or newlines.
@@ -29,7 +28,8 @@ function formatDate(value: number | Date | null | undefined): string {
 /**
  * POST /api/cron/customer-csv
  *
- * Generates a comprehensive customer CSV and emails it to onboarding@hosted.ai.
+ * Generates a comprehensive customer CSV and emails it to the configured
+ * onboarding address (ONBOARDING_EMAIL — see getOnboardingEmail).
  * Includes wallet balance, active GPUs, billing type, and recent activity timestamps.
  *
  * Schedule: Every 12 hours via external cron.
@@ -302,18 +302,19 @@ export async function POST(request: NextRequest) {
     ].join("\n");
 
     // Send email with inline CSV data
+    const onboardingEmail = getOnboardingEmail();
     await sendEmailDirect({
-      to: ONBOARDING_EMAIL,
+      to: onboardingEmail,
       subject: `[Customer CSV] ${dateStr} — ${totalCustomers} customers`,
       html: emailHtml,
       text: emailText,
     });
 
-    console.log(`[Customer CSV] Sent to ${ONBOARDING_EMAIL}: ${rows.length} customers`);
+    console.log(`[Customer CSV] Sent to ${onboardingEmail}: ${rows.length} customers`);
 
     return NextResponse.json({
       success: true,
-      sentTo: ONBOARDING_EMAIL,
+      sentTo: onboardingEmail,
       customers: rows.length,
       filename,
     });

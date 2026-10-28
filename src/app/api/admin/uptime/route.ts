@@ -22,7 +22,6 @@ export async function GET(request: NextRequest) {
 
   try {
     const now = new Date();
-    const fiveMinAgo = new Date(now.getTime() - 5 * 60 * 1000);
     const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
     const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);

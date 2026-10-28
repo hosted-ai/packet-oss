@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { verifyCustomerToken } from "@/lib/customer-auth";
+import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import { prisma } from "@/lib/prisma";
 
 const budgetSettingsSchema = z.object({
@@ -15,22 +15,15 @@ const budgetSettingsSchema = z.object({
 
 /**
  * GET /api/account/budget
- * Get budget settings for the current customer
+ * Get budget settings for the operating account
  */
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get("authorization")?.replace("Bearer ", "");
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-    }
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
 
     const settings = await prisma.budgetSettings.findUnique({
-      where: { stripeCustomerId: payload.customerId },
+      where: { stripeCustomerId: auth.accountId },
     });
 
     // Return default settings if none exist
@@ -63,19 +56,12 @@ export async function GET(request: NextRequest) {
 
 /**
  * PUT /api/account/budget
- * Update budget settings for the current customer
+ * Update budget settings for the operating account
  */
 export async function PUT(request: NextRequest) {
   try {
-    const token = request.headers.get("authorization")?.replace("Bearer ", "");
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-    }
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
 
     const body = await request.json();
     const parsed = budgetSettingsSchema.safeParse(body);
@@ -96,7 +82,7 @@ export async function PUT(request: NextRequest) {
     } = parsed.data;
 
     const settings = await prisma.budgetSettings.upsert({
-      where: { stripeCustomerId: payload.customerId },
+      where: { stripeCustomerId: auth.accountId },
       update: {
         monthlyLimitCents: monthlyLimitCents ?? null,
         dailyLimitCents: dailyLimitCents ?? null,
@@ -107,7 +93,7 @@ export async function PUT(request: NextRequest) {
         autoShutdownThreshold: autoShutdownThreshold ?? 100,
       },
       create: {
-        stripeCustomerId: payload.customerId,
+        stripeCustomerId: auth.accountId,
         monthlyLimitCents: monthlyLimitCents ?? null,
         dailyLimitCents: dailyLimitCents ?? null,
         alertAt50Percent: alertAt50Percent ?? true,

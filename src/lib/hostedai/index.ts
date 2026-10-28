@@ -87,13 +87,17 @@ export {
   updateHAIService,
   getTeamWorkspaces,
   getUnifiedInstances,
+  UnifiedInstancesUnavailableError,
   getUnifiedInstanceDetail,
+  isUnifiedInstanceId,
   getAllUnifiedInstances,
   podVolumeAction,
   waitForInstanceRunning,
+  getPodMetricsV2,
+  getTeamMetricsV2,
 } from "./instances";
 
-export type { UnifiedInstance, UnifiedInstanceDetail, WaitResult, WaitForInstanceOptions } from "./instances";
+export type { UnifiedInstance, UnifiedInstanceDetail, WaitResult, WaitForInstanceOptions, GpuMetricsPoint, MetricsWindow } from "./instances";
 
 export type { AddDiskParams, AddDiskPricing } from "./instances";
 
@@ -199,3 +203,22 @@ export {
   createAppService,
   deleteAppService,
 } from "./recipes";
+
+// Re-export bare-metal (Ariel native) functions
+export {
+  subscribeToBaremetal,
+  listBaremetalInstances,
+  getBaremetalInstance,
+  getBaremetalCostEstimate,
+  getBaremetalCredentials,
+  terminateBaremetal,
+  waitForBaremetalActive,
+} from "./baremetal";
+
+export type {
+  SubscribeToBaremetalPayload,
+  BaremetalSubscription,
+  BaremetalCostEstimate,
+  WaitForBaremetalOptions,
+  BaremetalWaitResult,
+} from "./baremetal";

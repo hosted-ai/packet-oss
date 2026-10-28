@@ -9,10 +9,17 @@ import {
   createSharedVolume,
   podVolumeAction,
 } from "@/lib/hostedai";
-import Stripe from "stripe";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
+}
+
+// HAI resolves an attach against AVAILABLE or IN_USE (db/shared_volumes.go); a
+// volume being mounted elsewhere does not make it unattachable.
+const ATTACHABLE_STATUSES = new Set(["AVAILABLE", "IN_USE"]);
+
+function isAttachableStatus(status?: string | null): boolean {
+  return ATTACHABLE_STATUSES.has((status || "").toUpperCase());
 }
 
 // GET - Get storage info for an instance: attached volumes, available volumes, block sizes
@@ -39,11 +46,26 @@ export async function GET(request: NextRequest, context: RouteContext) {
     if (!ctx) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
-    const teamId = ctx.customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
 
     if (!teamId) {
       return NextResponse.json({ error: "No team associated with this account" }, { status: 400 });
     }
+
+    // PA-295: this GET returns the create-volume flow (attachable volumes +
+    // block sizes) — the same managed read the sibling storage-blocks GET
+    // gates — so require storage.manage here too, matching the POST below.
+    // (The ungated shared-volumes *list* GET stays the read-only "view your
+    // storage" affordance; this endpoint feeds the manage/attach flow.)
+    const denial = await gatePermission({
+      payload,
+      accountId: ctx.accountId,
+      customerEmail: typeof ctx.customer.email === "string" ? ctx.customer.email : null,
+      permission: "storage.manage",
+      request,
+      extra: { instanceId, action: "add-storage-options" },
+    });
+    if (denial) return denial;
 
     // Get instance details (region, attached volumes)
     const instance = await getUnifiedInstanceDetail(instanceId);
@@ -61,19 +83,30 @@ export async function GET(request: NextRequest, context: RouteContext) {
       (instance.shared_volumes || []).map((v) => v.id)
     );
 
-    // Fetch team volumes and block sizes in parallel
-    const [teamVolumes, storageBlocks] = await Promise.all([
-      getSharedVolumes(teamId).catch(() => []),
-      getSharedStorageBlocks(regionId, teamId).catch(() => []),
+    // Swallowing these made an upstream failure indistinguishable from "this
+    // region has nothing" — the caller needs to tell the two apart.
+    const [volumesResult, blocksResult] = await Promise.allSettled([
+      getSharedVolumes(teamId),
+      getSharedStorageBlocks(regionId, teamId),
     ]);
+    if (volumesResult.status === "rejected") {
+      console.error("[AddStorage] Failed to list team volumes:", volumesResult.reason);
+    }
+    if (blocksResult.status === "rejected") {
+      console.error(`[AddStorage] Failed to list storage blocks for region ${regionId}:`, blocksResult.reason);
+    }
+    const teamVolumes = volumesResult.status === "fulfilled" ? volumesResult.value : [];
+    const storageBlocks = blocksResult.status === "fulfilled" ? blocksResult.value : [];
 
-    // Available = same region, not already attached, status AVAILABLE
+    // A volume mounted on another instance is still attachable here — that is what
+    // shared storage is for, and HAI resolves both statuses. Only a volume already
+    // on THIS instance is excluded.
     const availableVolumes = teamVolumes
       .filter(
         (v) =>
           v.region_id === regionId &&
           !attachedVolumeIds.has(v.id) &&
-          v.status?.toUpperCase() === "AVAILABLE"
+          isAttachableStatus(v.status)
       )
       .map((v) => ({
         id: v.id,
@@ -81,6 +114,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
         size_in_gb: v.size_in_gb,
         mount_point: v.mount_point,
         cost: v.cost,
+        status: v.status,
       }));
 
     return NextResponse.json({
@@ -90,6 +124,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       availableVolumes,
       storageBlocks: [...storageBlocks].sort((a, b) => a.size - b.size),
       hasSharedStorageSupport: instance.region?.has_shared_storage_support ?? true,
+      loadFailed: volumesResult.status === "rejected" || blocksResult.status === "rejected",
     });
   } catch (error) {
     console.error("Get storage options error:", error);
@@ -123,7 +158,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
     const customer = ctx.customer;
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
 
     if (!teamId) {
       return NextResponse.json({ error: "No team associated with this account" }, { status: 400 });
@@ -166,6 +201,15 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: "Could not determine instance region" }, { status: 400 });
     }
 
+    // PA-327: same capability gate as the create flow — don't accept an
+    // attach request HAI will never resolve.
+    if (instance.region?.has_shared_storage_support === false) {
+      return NextResponse.json(
+        { error: "Shared storage is not supported for this instance's region/GPU type." },
+        { status: 400 }
+      );
+    }
+
     let attachVolumeId: number;
 
     if (volume_id) {
@@ -178,7 +222,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
       if (vol.region_id !== regionId) {
         return NextResponse.json({ error: "Volume is in a different region than the instance" }, { status: 400 });
       }
-      if (vol.status?.toUpperCase() !== "AVAILABLE") {
+      const alreadyOnThisInstance = (instance.shared_volumes || []).some((v) => v.id === vol.id);
+      if (alreadyOnThisInstance) {
+        return NextResponse.json({ error: "Volume is already attached to this instance" }, { status: 400 });
+      }
+      if (!isAttachableStatus(vol.status)) {
         return NextResponse.json({ error: `Volume is not available (status: ${vol.status})` }, { status: 400 });
       }
       attachVolumeId = vol.id;

@@ -176,7 +176,7 @@ export function SaveSnapshotModal({
             {snapshotStep === "options" && "Data Preservation"}
             {snapshotStep === "saving" && "Saving..."}
           </h3>
-          <button
+          <button aria-label="Close dialog"
             onClick={resetModal}
             className="text-zinc-400 hover:text-zinc-600 p-1"
             disabled={snapshotStep === "saving"}

@@ -11,6 +11,8 @@
  * the on-demand modal's behaviour of skipping step 1 when there are no categories.
  */
 
+import { slugMatches } from "./utils";
+
 export interface PlanCategory {
   id: string;
   name: string;
@@ -80,5 +82,10 @@ export function findBucketBySlug<T>(
   slug?: string | null,
 ): PlanBucket<T> | undefined {
   if (!slug) return undefined;
-  return buckets.find((b) => b.slug === slug);
+  // Exact first; then tolerant match so ?gpu= deep-links survive slug drift
+  // ("b200" ↔ "nvidia-b200") and renames (URLs minted with the old slug).
+  return (
+    buckets.find((b) => b.slug === slug) ??
+    buckets.find((b) => slugMatches(b.slug, slug))
+  );
 }

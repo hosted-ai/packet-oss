@@ -22,7 +22,8 @@ vi.mock('../../src/lib/email/template-loader', () => ({
   loadTemplate: vi.fn((_name: string, _vars: unknown, fallback: { subject: string; html: string; text: string }) => fallback),
 }));
 vi.mock('../../src/lib/customer-auth', () => ({
-  generateCustomerToken: vi.fn(() => 'mock-jwt-token'),
+  createLoginLink: vi.fn().mockResolvedValue('mock-jwt-token'),
+  LOGIN_LINK_TTL_MINUTES: 15,
 }));
 vi.mock('../../src/lib/team-members', () => ({
   getTeamMemberships: vi.fn().mockResolvedValue([]),

@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { computePoolOverview, writePoolOverviewCache, readPoolOverviewCache } from "@/lib/pool-overview";
+import { snapshotFleetCapacity } from "@/lib/fleet-snapshot";
 
 export async function GET(request: NextRequest) {
   const authError = verifyCronAuth(request);
@@ -23,30 +24,33 @@ export async function GET(request: NextRequest) {
     console.log("[Pool Overview Cron] Computing pool overview...");
     const data = await computePoolOverview(existingCache);
 
-    // Don't overwrite good cache when GPUaaS API is partially or fully down.
-    // If pod count drops by more than 50%, it's likely API failures, not real terminations.
-    if (existingCache && existingCache.summary.activePods > 0) {
-      const dropPercent = Math.round(
-        ((existingCache.summary.activePods - data.summary.activePods) / existingCache.summary.activePods) * 100
+    // Don't overwrite good cache when a GPUaaS API call actually errored this run —
+    // a real pod-count drop (e.g. a team deletion) is legitimate and must write through,
+    // even if it's a big percentage of a small pool (PA-633).
+    if (existingCache && data.hadApiFailures) {
+      const elapsed = Date.now() - startTime;
+      console.warn(
+        `[Pool Overview Cron] API failures during fetch — keeping existing cache (${existingCache.summary.activePods} active pods)`
       );
-      if (dropPercent > 50) {
-        const elapsed = Date.now() - startTime;
-        console.warn(
-          `[Pool Overview Cron] Pod count dropped ${dropPercent}% (${existingCache.summary.activePods} → ${data.summary.activePods}) — likely API failures, keeping existing cache`
-        );
-        return NextResponse.json({
-          ok: true,
-          pools: data.pools.length,
-          activePods: data.summary.activePods,
-          keptExistingCache: true,
-          existingActivePods: existingCache.summary.activePods,
-          dropPercent,
-          elapsedMs: elapsed,
-        });
-      }
+      return NextResponse.json({
+        ok: true,
+        pools: data.pools.length,
+        activePods: data.summary.activePods,
+        keptExistingCache: true,
+        existingActivePods: existingCache.summary.activePods,
+        elapsedMs: elapsed,
+      });
     }
 
     writePoolOverviewCache(data);
+
+    // PA-693: first clean refresh of each UTC day persists a capacity snapshot
+    // (the "available GPU-hours" series). Best-effort — never fails the refresh.
+    try {
+      await snapshotFleetCapacity(data);
+    } catch (err) {
+      console.error("[Pool Overview Cron] fleet capacity snapshot failed:", err);
+    }
 
     const elapsed = Date.now() - startTime;
     console.log(`[Pool Overview Cron] Done in ${elapsed}ms — ${data.pools.length} pools, ${data.summary.activePods} active pods`);

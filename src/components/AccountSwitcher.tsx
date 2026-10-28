@@ -102,6 +102,7 @@ export function AccountSwitcher({ token }: Props) {
       }
       // Reload the dashboard with the new token. Match how every other auth
       // landing in the app works: JWT lives in the URL query string.
+      // eslint-disable-next-line react-hooks/immutability -- intentional full-page navigation, not a React state mutation
       window.location.href = `/dashboard?token=${data.token}`;
     } catch {
       setError("Network error.");

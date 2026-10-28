@@ -254,7 +254,11 @@ export function NodeMonitoringTab() {
       </div>
 
       {/* Global Summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+      {/* 8 across only once the viewport is wide enough to hold them: these cards are more
+          compact than GPU Pods' (no icon, stacked label + number) but still clip an unbreakable
+          label like "Utilization" up to ~1320px viewport. lg (1024px) fired ~300px too early -
+          PA-477, same pattern as PA-429. */}
+      <div className="grid grid-cols-2 md:grid-cols-4 min-[1400px]:grid-cols-8 gap-4">
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-[#5b6476] uppercase tracking-wide">Providers</p>
           <p className="text-2xl font-bold text-[#0b0f1c]">{data.summary.totalProviders}</p>

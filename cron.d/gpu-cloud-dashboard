@@ -1,0 +1,61 @@
+# GPU Cloud Dashboard — scheduled jobs
+# Installed by install.sh or manually copied to /etc/cron.d/
+# Logs: journalctl -t CRON or /var/log/syslog
+#
+# All jobs call localhost via the packetai-cron wrapper,
+# which sources secrets from /opt/packet-oss/.env.local.
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+CRON=/usr/bin/packetai-cron
+
+# ── Billing (critical) ──────────────────────────────────────────────
+# Sync: per-pod billing, wallet refill, storage & stopped-instance charges
+*/5 * * * *   root  $CRON /api/sync POST > /dev/null 2>&1
+
+# Budget enforcement: spend alerts & auto-shutdown
+*/15 * * * *  root  $CRON /api/cron/check-budgets POST > /dev/null 2>&1
+
+# ── Infrastructure monitoring ────────────────────────────────────────
+# Pool overview cache (feeds admin dashboard)
+*/2 * * * *   root  $CRON /api/cron/refresh-pool-overview > /dev/null 2>&1
+
+# GPU metrics collection from pods
+*/3 * * * *   root  $CRON /api/cron/collect-gpu-metrics > /dev/null 2>&1
+
+# Complete provisioning (install metrics collector on new pods)
+*/2 * * * *   root  $CRON /api/cron/complete-provisioning POST > /dev/null 2>&1
+
+# Pod deletion cleanup
+*/10 * * * *  root  $CRON /api/cron/check-deletions > /dev/null 2>&1
+
+# Pod removal lifecycle
+*/15 * * * *  root  $CRON /api/cron/check-removals > /dev/null 2>&1
+
+# PA-361: terminate monthly pods whose 24h post-payment-failure grace window
+# has elapsed without recovery (re-checks live Stripe status before killing).
+# The 24h window is enforced by the paymentFailedAt timestamp, not the cadence.
+*/15 * * * *  root  $CRON /api/cron/terminate-overdue-monthly POST > /dev/null 2>&1
+
+# Reconcile orphaned "provisioning" deploys — refund + clean up pods HAI
+# never started (auto-deprovisioned after 10min). Catches deploys orphaned
+# by a service restart while the inline monitor was still polling.
+*/3 * * * *   root  $CRON /api/cron/check-pending-deploys POST > /dev/null 2>&1
+
+# Cleanup expired pod snapshots
+0 3 * * *     root  $CRON /api/cron/cleanup-expired-snapshots POST > /dev/null 2>&1
+
+# Delete shared volumes past their non-payment grace period (PA-206).
+# Volumes retained when an out-of-balance customer's pods are terminated are
+# removed here once the grace window lapses (kept if the customer recovered).
+0 4 * * *     root  $CRON /api/cron/cleanup-expired-volumes > /dev/null 2>&1
+
+# ── Periodic reports & cache ─────────────────────────────────────────
+# Customer CSV export (twice daily)
+0 8,20 * * *  root  $CRON /api/cron/customer-csv > /dev/null 2>&1
+
+# Admin stats cache (twice daily)
+0 0,12 * * *  root  $CRON /api/cron/admin-stats POST > /dev/null 2>&1
+
+# Customer cache sync (twice daily)
+0 6,18 * * *  root  $CRON /api/cron/sync-customer-cache POST > /dev/null 2>&1

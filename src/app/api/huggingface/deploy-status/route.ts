@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth/audit";
 import { getUnifiedInstances } from "@/lib/hostedai";
 import { prisma } from "@/lib/prisma";
 import { sendHfDeploymentEmail } from "@/lib/email";
-import { generateCustomerToken } from "@/lib/customer-auth";
+import { createLoginLink } from "@/lib/customer-auth";
 import { logActivity } from "@/lib/activity";
 import {
   generateDeployScript,
@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, customer, teamId } = auth;
+    const { payload, customer, teamId, accountId } = auth;
 
     // PA-202 gate: Hugging Face hidden from Read-only Member + Finance Manager.
     const denial = requirePermission(auth, "huggingface.use", request);
@@ -191,7 +191,7 @@ export async function GET(request: NextRequest) {
         });
 
         await logActivity(
-          payload.customerId,
+          accountId,
           "hf_deployment_pod_terminated",
           `HuggingFace deployment pod terminated: ${deployment.hfItemName}`,
           { deploymentId: deployment.id, podStatus: instance.status }
@@ -416,7 +416,7 @@ export async function GET(request: NextRequest) {
           });
 
           await logActivity(
-            payload.customerId,
+            accountId,
             status === "running" ? "hf_deployment_running" : "hf_deployment_failed",
             `HuggingFace deployment ${status}: ${deployment.hfItemName}`,
             {
@@ -430,7 +430,7 @@ export async function GET(request: NextRequest) {
           const wasInProgress = ["pending", "installing", "starting", "deploying", "downloading"].includes(previousStatus);
           if (wasInProgress && customer.email) {
             try {
-              const dashboardToken = generateCustomerToken(payload.email.toLowerCase(), payload.customerId);
+              const dashboardToken = await createLoginLink({ email: payload.email.toLowerCase(), customerId: accountId });
               const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${dashboardToken}`;
 
               await sendHfDeploymentEmail({

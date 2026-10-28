@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
-import { getSSHKeys, addSSHKey, deleteSSHKey } from "@/lib/ssh-keys";
+import { getSSHKeys, addSSHKey, deleteSSHKey, getSSHKey } from "@/lib/ssh-keys";
 import { gatePermission } from "@/lib/auth/gate";
 import { resolveMembership } from "@/lib/auth/membership";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
@@ -192,6 +192,16 @@ export async function DELETE(request: NextRequest) {
       extra: { keyId },
     });
     if (denial) return denial;
+
+    // PA-265: a key id that isn't owned by this account matches no row, and
+    // prisma.delete throws P2025 -> 500. Check ownership first and return 404
+    // (no info leak about another customer's key). ponytail: tiny TOCTOU if the
+    // key is deleted between check and delete -> falls back to the pre-existing
+    // 500; not worth a transaction for a single-owner delete path.
+    const existing = await getSSHKey(keyId, ctx.accountId);
+    if (!existing) {
+      return NextResponse.json({ error: "SSH key not found" }, { status: 404 });
+    }
 
     await deleteSSHKey(keyId, ctx.accountId);
 

@@ -23,6 +23,7 @@ export interface Customer {
   billingType: string;
   walletBalance: number; // in cents
   activeGPUs: number;
+  customerIds?: string[];
 }
 
 export interface Admin {
@@ -138,7 +139,7 @@ export interface AdminActivity {
   created: number;
 }
 
-export type AdminTab = "customers" | "admins" | "investors" | "clusters" | "quotes" | "referrals" | "vouchers" | "activity" | "settings" | "calculator" | "qa" | "providers" | "landing" | "game" | "products" | "pods" | "emails" | "email-log" | "drip" | "nodes" | "pools" | "business" | "demand" | "batches" | "token-providers" | "skypilot" | "support" | "spheron" | "node-revenue" | "banners" | "marketing" | "tenants" | "pixel-factory" | "uptime" | "payouts" | "platform-settings" | "gpu-apps" | "announcements" | "broadcast";
+export type AdminTab = "customers" | "admins" | "investors" | "clusters" | "quotes" | "referrals" | "vouchers" | "activity" | "settings" | "calculator" | "qa" | "providers" | "landing" | "game" | "products" | "pods" | "emails" | "email-log" | "drip" | "nodes" | "pools" | "business" | "demand" | "batches" | "token-providers" | "skypilot" | "support" | "spheron" | "baremetal" | "node-revenue" | "banners" | "marketing" | "tenants" | "uptime" | "payouts" | "platform-settings" | "gpu-apps" | "announcements" | "broadcast" | "ops-summary" | "packet-health";
 
 /**
  * Admin tabs that are only available in the Pro edition.
@@ -153,7 +154,7 @@ export const PREMIUM_ADMIN_TABS: ReadonlySet<AdminTab> = new Set([
   "batches",
   "token-providers",
   "spheron",
-  "pixel-factory",
+  "baremetal",
   "tenants",
   "investors",
   "payouts",
@@ -308,6 +309,7 @@ export interface GpuProduct {
   vramGb: number | null;
   cudaCores: number | null;
   gpuFamily: string | null;
+  supportsSharedStorage: boolean;
   createdAt: string;
   updatedAt: string;
 }

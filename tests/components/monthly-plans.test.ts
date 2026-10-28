@@ -83,4 +83,38 @@ describe("findBucketBySlug", () => {
     expect(findBucketBySlug(buckets, undefined)).toBeUndefined();
     expect(findBucketBySlug(buckets, null)).toBeUndefined();
   });
+
+  // Vendor-prefix drift: auto-generated slugs are "nvidia-b200" while the
+  // deeplink contract and marketing CTAs speak "b200" (and vice versa after
+  // a slug rename, for URLs minted before it). Deep-links must survive both.
+  it("falls back to a hyphen-boundary suffix match (deeplink 'b200' → slug 'nvidia-b200')", () => {
+    const drifted = groupMonthlyByCategory([
+      { id: "p1", categories: [cat("c1", "NVIDIA B200", "nvidia-b200")] },
+    ]);
+    expect(findBucketBySlug(drifted, "b200")?.slug).toBe("nvidia-b200");
+  });
+
+  it("matches a stale pre-rename URL ('nvidia-b200' → slug 'b200')", () => {
+    expect(findBucketBySlug(buckets, "nvidia-b200")?.slug).toBe("b200");
+  });
+
+  it("prefers an exact match over a fuzzy one", () => {
+    const both = groupMonthlyByCategory([
+      { id: "p1", categories: [cat("c1", "NVIDIA B200", "nvidia-b200")] },
+      { id: "p2", categories: [cat("c2", "B200", "b200")] },
+    ]);
+    expect(findBucketBySlug(both, "b200")?.slug).toBe("b200");
+  });
+
+  it("does not match a non-boundary suffix ('b200' must not hit 'rtx-5200')", () => {
+    const other = groupMonthlyByCategory([
+      { id: "p1", categories: [cat("c1", "RTX 5200", "rtx-5200")] },
+    ]);
+    expect(findBucketBySlug(other, "b200")).toBeUndefined();
+    expect(findBucketBySlug(other, "200")).toBeUndefined();
+  });
+
+  it("is case-insensitive on the requested slug (?gpu=B200)", () => {
+    expect(findBucketBySlug(buckets, "B200")?.slug).toBe("b200");
+  });
 });

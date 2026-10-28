@@ -36,6 +36,11 @@ export async function resolveInvestorPoolIds(email: string): Promise<ResolvedInv
 
   for (const nid of assignedNodeIds) {
     if (nid === "pixel-factory") continue;
+    // PA-688: `regions:` entries scope BARE METAL and have no GPU pools. Skipped
+    // explicitly so they can't fall through to the ProviderNode-cuid branch
+    // below and trigger a DB lookup for a literal "regions:75" id. Mirrors the
+    // same guard in investor-stats.ts — this file is a duplicate of that loop.
+    if (nid.startsWith("regions:")) continue;
     const poolsMatch = nid.match(/^pools:(.+)$/);
     if (poolsMatch) {
       const pids = poolsMatch[1].split(",").map(Number).filter((n) => !isNaN(n) && n > 0);

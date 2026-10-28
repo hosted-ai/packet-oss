@@ -36,7 +36,7 @@ export async function POST(
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
     const customer = ctx.customer;
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },
@@ -115,7 +115,7 @@ export async function DELETE(
     if (!ctx) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
-    const teamId = ctx.customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },

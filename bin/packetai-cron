@@ -1,0 +1,41 @@
+#!/bin/bash
+# Wrapper for gpu-cloud-dashboard cron jobs.
+# Sources secrets from .env.local and curls the local API endpoint.
+#
+# Usage: packetai-cron <endpoint> [method]
+#   packetai-cron /api/sync POST
+#   packetai-cron /api/cron/refresh-pool-overview GET
+
+set -euo pipefail
+
+CONF="/opt/packet-oss/.env.local"
+ENDPOINT="${1:?Usage: packetai-cron <endpoint> [method]}"
+METHOD="${2:-GET}"
+
+# Source config from .env.local
+CRON_SECRET=""
+SYNC_SECRET=""
+if [ -f "$CONF" ]; then
+    CRON_SECRET=$(grep -oP '^CRON_SECRET=\K.+' "$CONF" 2>/dev/null | tail -1 | tr -d '"' || true)
+    SYNC_SECRET=$(grep -oP '^SYNC_SECRET=\K.+' "$CONF" 2>/dev/null | tail -1 | tr -d '"' || true)
+fi
+# The app port lives in the systemd unit (install-cli.sh --app-port, reconfigure.sh --port)
+PORT=$(grep -oP '(?<=-p )\d+' /etc/systemd/system/packet-oss.service 2>/dev/null | head -1 || true)
+PORT="${PORT:-3000}"
+
+# Pick the right secret based on endpoint
+if [[ "$ENDPOINT" == "/api/sync" ]]; then
+    SECRET="$SYNC_SECRET"
+else
+    SECRET="$CRON_SECRET"
+fi
+
+if [ -z "$SECRET" ]; then
+    echo "[$(date -u +%F\ %T)] ERROR: No secret for $ENDPOINT" >&2
+    exit 1
+fi
+
+exec curl -sf --max-time 120 \
+    -X "$METHOD" \
+    -H "Authorization: Bearer $SECRET" \
+    "http://localhost:${PORT}${ENDPOINT}"

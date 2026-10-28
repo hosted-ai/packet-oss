@@ -7,23 +7,27 @@ The Inference Playground is an interactive web-based interface for testing and e
 ### Key Features
 
 - **Real-time Streaming**: See model responses token-by-token as they generate
-- **System Prompts**: Configure model behavior with custom system instructions
-- **Parameter Controls**: Fine-tune temperature, max tokens, and other generation settings
-- **Multi-Model Support**: Switch between different deployed models instantly
+- **Zero Configuration**: The playground automatically detects the model running on your instance
 - **Conversation History**: Maintain context across multiple turns
-- **Export Capabilities**: Copy conversations or export as JSON
-- **Mobile Responsive**: Works on tablets and phones for demos on the go
+- **Performance Stats**: Latency, generation speed, and token count shown after each response
 
 ---
 
 ## 🚀 Getting Started
 
+### Prerequisites
+
+The playground works with GPU instances running a Hugging Face model deployment:
+
+1. **A running model**: your instance's model deployment shows the **running** status
+2. **Port 8000 exposed**: the playground reaches your model through the instance's exposed vLLM API service. If port 8000 is not yet exposed, the instance card shows an **"Expose API Endpoint"** button instead — click it first. See [Service Exposure](./service-exposure.md) for details.
+
 ### Accessing the Playground
 
 1. Navigate to your Packet.ai Dashboard
-2. Select a GPU instance with a deployed model
-3. Click the **"Playground"** tab or button
-4. The playground loads automatically with your model
+2. Expand the GPU instance card that has your deployed model
+3. In the model deployment section, click the **"Test Chat"** button
+4. The playground opens automatically with your model — no model selection needed
 
 ### First Conversation
 
@@ -41,97 +45,38 @@ The Inference Playground is an interactive web-based interface for testing and e
 The main conversation display showing:
 - **User Messages**: Your inputs (right-aligned, blue background)
 - **Assistant Messages**: Model responses (left-aligned, gray background)
-- **Streaming Indicator**: Pulsing cursor during generation
-- **Timestamps**: When each message was sent
+- **Typing Indicator**: Animated dots while the model begins generating
 
 ### Input Area
 
-At the bottom of the screen:
-- **Message Input**: Multi-line text field for your prompts
+At the bottom of the window:
+- **Message Input**: Multi-line text field for your prompts (Enter to send, Shift+Enter for a new line)
 - **Send Button**: Submit the message
-- **Stop Button**: Interrupt generation in progress
+
+In the header:
 - **Clear Button**: Start a new conversation
 
-### Settings Panel
+### Performance Stats
 
-Right sidebar or expandable panel:
+After each response, a stats bar shows:
 
-| Setting | Range | Description |
-|---------|-------|-------------|
-| **Model** | Dropdown | Select from deployed models |
-| **System Prompt** | Text area | Instructions for model behavior |
-| **Temperature** | 0.0 - 2.0 | Creativity/randomness level |
-| **Max Tokens** | 1 - 32768 | Maximum response length |
-| **Top P** | 0.0 - 1.0 | Nucleus sampling threshold |
-| **Presence Penalty** | -2.0 - 2.0 | Penalize repeated topics |
-| **Frequency Penalty** | -2.0 - 2.0 | Penalize repeated tokens |
+| Stat | Description |
+|------|-------------|
+| **Latency** | Total time taken for the response (ms) |
+| **Speed** | Generation speed in tokens per second |
+| **Tokens** | Number of tokens in the response |
 
 ---
 
 ## ⚙️ Configuration Options
 
-### Temperature
+The playground is intentionally simple — it uses fixed generation settings so you can test a deployed model with zero setup:
 
-Controls randomness in generation:
+- **Model**: detected automatically from your instance (the model currently loaded in vLLM)
+- **Max response length**: capped at 2,048 tokens per response
+- **Sampling parameters** (temperature, top_p, etc.): your model server's defaults
 
-| Value | Behavior | Use Case |
-|-------|----------|----------|
-| **0.0** | Deterministic, focused | Code generation, factual Q&A |
-| **0.3-0.5** | Balanced | General assistant tasks |
-| **0.7-0.9** | Creative | Writing, brainstorming |
-| **1.0+** | Very random | Poetry, experimental content |
-
-```
-Example:
-Temperature 0.0: "The capital of France is Paris."
-Temperature 1.0: "The capital of France is the magnificent city of Paris, a jewel of European culture..."
-```
-
-### Max Tokens
-
-Limits response length:
-- **Short responses** (50-200): Quick answers, one-liners
-- **Medium responses** (200-500): Explanations, short articles
-- **Long responses** (500-2000): Detailed analysis, stories
-- **Very long** (2000+): Full articles, comprehensive guides
-
-### System Prompt
-
-Defines the model's persona and behavior:
-
-```
-Example System Prompts:
-
-1. Technical Assistant:
-"You are a senior software engineer. Provide detailed,
-accurate technical explanations. Include code examples
-when relevant. Use markdown formatting."
-
-2. Creative Writer:
-"You are a creative writing assistant. Write engaging,
-vivid prose. Use metaphors and sensory details. Vary
-sentence structure for rhythm."
-
-3. Data Analyst:
-"You are a data analyst expert. Explain concepts
-clearly with examples. Suggest appropriate
-visualizations. Reference best practices."
-
-4. Customer Support:
-"You are a friendly customer support agent. Be
-helpful and empathetic. Provide step-by-step
-solutions. Escalate complex issues appropriately."
-```
-
-### Top P (Nucleus Sampling)
-
-Alternative to temperature for controlling randomness:
-- **0.1**: Very focused, only most likely tokens
-- **0.5**: Moderately diverse
-- **0.9**: Quite diverse, occasional surprises
-- **1.0**: Consider all tokens (weighted by probability)
-
-**Tip**: Use either temperature OR top_p, not both. Set the unused one to 1.0.
+If you need control over temperature, max tokens, system prompts, or other generation parameters, call your instance's exposed vLLM OpenAI-compatible API directly instead — see [Service Exposure](./service-exposure.md) for how to expose and connect to it.
 
 ---
 
@@ -169,9 +114,24 @@ Assistant: For your Python-based stack, consider...
 
 ### Chain-of-Thought Prompting
 
-For complex reasoning:
+For complex reasoning, ask the model to show its working as part of your message:
 
 ```
-System Prompt: "Think through problems step by step before giving the final answer."
+User: Think through this step by step before giving the final answer.
+A farmer has 17 sheep. All but 9 run away. How many are left?
 
-User: A farmer has 17 sheep. All but 9 run away. How many are left?
+Assistant: Let's work through it. "All but 9 run away" means 9 sheep
+did not run away. Final answer: 9 sheep are left.
+```
+
+---
+
+## 🛠️ Troubleshooting
+
+| Message | What it means | Fix |
+|---------|---------------|-----|
+| "vLLM service not exposed yet. Click 'Expose API Endpoint' first." | Port 8000 is not exposed on the instance | Click **"Expose API Endpoint"** on the instance card |
+| "No model is currently loaded on this instance" | The vLLM server is up but has no model loaded yet | Wait for the deployment to finish loading, then retry |
+| "Instance not found or not running" | The instance is stopped or unreachable | Check the instance status on your dashboard |
+
+If a response fails mid-stream, your message stays in the conversation — just send it again.

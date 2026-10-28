@@ -10,13 +10,21 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockVerifySessionToken, mockFindMany, mockCount } = vi.hoisted(() => ({
-  mockVerifySessionToken: vi.fn(),
-  mockFindMany: vi.fn(),
-  mockCount: vi.fn(),
-}));
+const { mockVerifySessionToken, mockFindMany, mockCount, mockGetActivePodCountsByTeam } =
+  vi.hoisted(() => ({
+    mockVerifySessionToken: vi.fn(),
+    mockFindMany: vi.fn(),
+    mockCount: vi.fn(),
+    mockGetActivePodCountsByTeam: vi.fn(),
+  }));
 
 vi.mock("@/lib/admin", () => ({ verifySessionToken: mockVerifySessionToken }));
+// PA-400: the route now overlays a live active-GPU count; keep this suite
+// hermetic by stubbing it (an empty map = no live pods, snapshot fallback path
+// untouched — these tests only assert the search WHERE clause).
+vi.mock("@/lib/admin-cache", () => ({
+  getActivePodCountsByTeam: mockGetActivePodCountsByTeam,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     customerCache: {
@@ -58,6 +66,7 @@ beforeEach(() => {
   mockVerifySessionToken.mockReturnValue({ email: "admin@example.com" });
   mockFindMany.mockResolvedValue([]);
   mockCount.mockResolvedValue(0);
+  mockGetActivePodCountsByTeam.mockResolvedValue(new Map());
 });
 
 describe("GET /api/admin/customers — search column gating (PA-180)", () => {

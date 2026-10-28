@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { trackEvent } from "@/lib/analytics/track-event";
 
 interface ApiKey {
   id: string;
@@ -87,6 +88,8 @@ export function ApiKeysSettings({ token }: ApiKeysSettingsProps) {
 
       const data = await response.json();
       import("@/lib/plerdy").then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.API_KEY_CREATED)).catch(() => {});
+      // GA4: API key created successfully
+      trackEvent("api_key_created");
       setNewKey(data.apiKey);
       fetchKeys();
     } catch (err) {
@@ -295,7 +298,7 @@ export function ApiKeysSettings({ token }: ApiKeysSettingsProps) {
               <>
                 <div className="flex items-center justify-between mb-6">
                   <h3 className="text-lg font-semibold text-[var(--ink)]">Create API Key</h3>
-                  <button
+                  <button aria-label="Close dialog"
                     onClick={closeCreateModal}
                     className="text-zinc-400 hover:text-zinc-600 p-1"
                   >

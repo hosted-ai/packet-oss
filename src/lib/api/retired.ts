@@ -1,5 +1,5 @@
 /**
- * PA-215 — Retired-endpoint response.
+ * Retired-endpoint response.
  * Returns HTTP 410 Gone with an OpenAI-style error body so existing SDK clients
  * surface the message instead of failing silently.
  */
@@ -12,7 +12,7 @@ const MESSAGES: Record<ProductCode, string> = {
   token_factory:
     "Token Factory has been retired and is no longer accepting requests. The product will relaunch soon — check the dashboard for updates.",
   pixel_factory:
-    "Pixel Factory has been retired and is no longer accepting requests. The product will relaunch soon — check the dashboard for updates.",
+    "Pixel Factory has been removed and is no longer available.",
 };
 
 export function retiredEndpointResponse(product: ProductCode) {

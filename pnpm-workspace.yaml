@@ -37,6 +37,7 @@ allowBuilds:
   unrs-resolver: true
   '@scarf/scarf': false
   core-js-pure: false
+  core-js: false
 
 onlyBuiltDependencies:
   - '@prisma/client'

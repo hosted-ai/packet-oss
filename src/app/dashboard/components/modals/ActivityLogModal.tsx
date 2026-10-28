@@ -8,6 +8,8 @@
 
 "use client";
 
+import { Modal } from "@/components/Modal";
+
 interface ActivityEvent {
   id: string;
   type: string;
@@ -33,8 +35,13 @@ export function ActivityLogModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-2xl mx-4 shadow-xl max-h-[80vh] flex flex-col">
+    <Modal
+      title="Activity Log"
+      ownHeader
+      onClose={onClose}
+      className="bg-white rounded-2xl p-6 w-full max-w-2xl mx-4 shadow-xl max-h-[80vh] flex flex-col"
+    >
+      <>
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-[var(--ink)]">Activity Log</h3>
           <div className="flex items-center gap-3">
@@ -44,7 +51,7 @@ export function ActivityLogModal({
             >
               Download CSV
             </button>
-            <button
+            <button aria-label="Close dialog"
               onClick={onClose}
               className="text-zinc-400 hover:text-zinc-600 p-1"
             >
@@ -110,7 +117,7 @@ export function ActivityLogModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }

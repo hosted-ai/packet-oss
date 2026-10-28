@@ -3,14 +3,13 @@ import { verifySessionToken } from "@/lib/admin";
 import { getStripe } from "@/lib/stripe";
 import { prisma } from "@/lib/prisma";
 import { readPoolOverviewCache } from "@/lib/pool-overview";
+import {
+  computeMarketplaceMetrics,
+  type MarketplaceMetrics,
+} from "@/lib/marketplace-metrics";
 import Stripe from "stripe";
 
 // Helper to get start of day in Unix timestamp
-function startOfDay(date: Date): number {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return Math.floor(d.getTime() / 1000);
-}
 
 // Helper to get days ago
 function daysAgo(days: number): number {
@@ -92,6 +91,7 @@ export async function GET(request: NextRequest) {
         providers: { total: 0, active: 0, totalNodes: 0, activeNodes: 0, payouts: 0, revenue: 0, earnings: 0, margin: 0 },
         marketing: { voucherRedemptions: 0, voucherCreditsGiven: 0, referralClaims: 0, referralConversions: 0, activeVouchers: 0, activeReferralCodes: 0 },
         topCustomers: { byBalance: [], bySpending: [] },
+        marketplace: null,
         notice: "Stripe is not configured. Configure STRIPE_SECRET_KEY in Platform Settings to see business metrics.",
       };
       return NextResponse.json(emptyResponse);
@@ -145,18 +145,21 @@ export async function GET(request: NextRequest) {
     }
     const previousCharges = { data: prevChargesData };
 
-    // Calculate revenue
+    // Revenue = Stripe gross volume: succeeded charges NET of refunds (amount −
+    // amount_refunded). Matches computeRevenueLastNDaysCents / the KPI card — the old
+    // `!c.refunded` filter dropped fully-refunded charges wholesale and ignored partial
+    // refunds, so this tab could disagree with the headline Revenue figure.
     const currentRevenue = charges.data
-      .filter((c) => c.status === "succeeded" && !c.refunded)
-      .reduce((sum, c) => sum + c.amount, 0);
+      .filter((c) => c.status === "succeeded")
+      .reduce((sum, c) => sum + c.amount - (c.amount_refunded || 0), 0);
 
     const previousRevenue = previousCharges.data
-      .filter((c) => c.status === "succeeded" && !c.refunded)
-      .reduce((sum, c) => sum + c.amount, 0);
+      .filter((c) => c.status === "succeeded")
+      .reduce((sum, c) => sum + c.amount - (c.amount_refunded || 0), 0);
 
-    const refunds = charges.data
-      .filter((c) => c.refunded)
-      .reduce((sum, c) => sum + (c.amount_refunded || 0), 0);
+    // Refunds = all refunded money in the period, including PARTIAL refunds (the old
+    // `c.refunded` flag is true only for fully-refunded charges).
+    const refunds = charges.data.reduce((sum, c) => sum + (c.amount_refunded || 0), 0);
 
     // Daily revenue breakdown (last 30 days max)
     const dailyDays = Math.min(periodDays, 30);
@@ -170,7 +173,7 @@ export async function GET(request: NextRequest) {
       const date = new Date(dayEnd * 1000).toISOString().split("T")[0];
       dailyRevenue.unshift({
         date,
-        revenue: dayCharges.reduce((sum, c) => sum + c.amount, 0) / 100,
+        revenue: dayCharges.reduce((sum, c) => sum + c.amount - (c.amount_refunded || 0), 0) / 100,
         deposits: dayCharges.length,
       });
     }
@@ -207,7 +210,9 @@ export async function GET(request: NextRequest) {
       (c) => c.metadata?.billing_type === "monthly"
     ).length;
 
-    // Active customers (have balance or active subscription)
+    // NOTE: this is "customers holding wallet credit" (Stripe balance < 0), NOT engaged/
+    // active users — the UI labels it "Active with balance" accordingly. It also can't tell
+    // organic top-ups from comped credit. Not a revenue signal; do not read it as one.
     let activeCustomers = 0;
     for (const customer of allCustomers) {
       if (customer.balance && customer.balance < 0) {
@@ -215,7 +220,9 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Total wallet balance across all customers
+    // Outstanding wallet CREDIT (a liability), not money earned. Conflates comped credit
+    // (admin/voucher/referral) with organic top-ups — for "money paid in" use organic
+    // deposits (deriveOrganicDeposits), never this. Shown under the Wallet section only.
     const totalWalletBalance = allCustomers.reduce((sum, c) => {
       return sum + Math.abs(Math.min(0, c.balance || 0));
     }, 0);
@@ -351,6 +358,17 @@ export async function GET(request: NextRequest) {
     const providerRevenue = nodeUsage.reduce((sum, u) => sum + u.customerRevenueCents, 0);
     const providerEarnings = nodeUsage.reduce((sum, u) => sum + u.providerEarningsCents, 0);
     const packetMargin = nodeUsage.reduce((sum, u) => sum + u.packetMarginCents, 0);
+
+    // ==================== MARKETPLACE KPIs (GMV / NET REVENUE / UTILIZATION) ====================
+
+    // Gap-analysis sheet #12/#14/#15. Degrades to null so a ledger/HAI hiccup
+    // never takes down the rest of the dashboard.
+    let marketplace: MarketplaceMetrics | null = null;
+    try {
+      marketplace = await computeMarketplaceMetrics(new Date(periodStart * 1000), now);
+    } catch (err) {
+      console.error("[Business Metrics] marketplace KPIs failed:", err);
+    }
 
     // ==================== VOUCHER & REFERRAL METRICS ====================
 
@@ -492,6 +510,9 @@ export async function GET(request: NextRequest) {
         byBalance: customerBalances,
         bySpending: topSpenders,
       },
+
+      // Marketplace KPIs (cents — UI converts)
+      marketplace,
     };
 
     const entry = setCache(period, responseData);

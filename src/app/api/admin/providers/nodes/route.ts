@@ -164,10 +164,12 @@ export async function POST(request: NextRequest) {
         if (pricingTierId) {
           updateData.pricingTierId = pricingTierId;
         }
-        if (customProviderRateCents) {
+        // Allow setting custom rate to null to clear it, and 0 is a legitimate rate
+        if (customProviderRateCents !== undefined) {
           updateData.customProviderRateCents = customProviderRateCents;
         }
-        if (revenueSharePercent) {
+        // Allow setting revenue share to null to clear it, and 0% is legitimate
+        if (revenueSharePercent !== undefined) {
           updateData.revenueSharePercent = revenueSharePercent;
         }
         notificationType = "node_approved";
@@ -175,7 +177,7 @@ export async function POST(request: NextRequest) {
 
         // Calculate hourly rate for email - use custom rate, or look up the pricing tier rate
         let hourlyRateCents = 100;
-        if (customProviderRateCents) {
+        if (typeof customProviderRateCents === "number") {
           hourlyRateCents = customProviderRateCents;
         } else if (pricingTierId) {
           const pricingTier = await prisma.providerPricingTier.findUnique({

@@ -46,7 +46,7 @@ create_venv /opt/jupyter-env
 source /opt/jupyter-env/bin/activate
 
 # Install PyTorch with CUDA
-pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 # Install JupyterLab and common packages
 pip install --quiet jupyterlab numpy pandas matplotlib plotly scipy scikit-learn
@@ -237,7 +237,8 @@ source /opt/mlflow-env/bin/activate
 pip install --quiet mlflow[extras]
 
 # Install common ML frameworks for logging
-pip install --quiet torch scikit-learn xgboost
+pip install --quiet torch==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+pip install --quiet scikit-learn xgboost
 
 # Create data directories
 mkdir -p ~/mlflow-data/artifacts

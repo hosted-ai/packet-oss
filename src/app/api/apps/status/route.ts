@@ -125,7 +125,7 @@ export async function GET(request: NextRequest) {
 
   if (shouldVerify && installations.some(i => i.status === "running")) {
     try {
-      const teamId = ctx.customer.metadata?.hostedai_team_id;
+      const teamId = ctx.teamId;
 
       if (teamId) {
         // Get connection info

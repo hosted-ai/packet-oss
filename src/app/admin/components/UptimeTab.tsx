@@ -174,7 +174,7 @@ export function UptimeTab() {
 
   const SortIcon = ({ col }: { col: typeof sortBy }) => {
     if (sortBy !== col) return <span className="text-gray-300 ml-1">&#8693;</span>;
-    return <span className="ml-1">{sortDir === "asc" ? "&#9650;" : "&#9660;"}</span>;
+    return <span className="ml-1">{sortDir === "asc" ? "▲" : "▼"}</span>;
   };
 
   return (

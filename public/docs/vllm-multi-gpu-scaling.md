@@ -1,13 +1,12 @@
 # vLLM Multi-GPU Scaling
 
 *Created: 2025-12-29*
-*Updated: 2025-12-29 - Single-node complete, multi-node planned*
+*Updated: 2026-07-30 - Deployments currently launch vLLM on a single GPU; multi-node planned*
 
 ## Overview
 
 This document covers vLLM-specific scaling for LLM inference at Packet.ai.
 
-**Related:** For multi-node clusters (Ray), see [Ray Cluster Management](./ray-cluster-management.md)
 
 ---
 
@@ -15,19 +14,19 @@ This document covers vLLM-specific scaling for LLM inference at Packet.ai.
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Single-node tensor parallelism | **Complete** | `--tensor-parallel-size N` |
+| Single-node tensor parallelism | Supported by the deploy script | `--tensor-parallel-size N` — deployments currently launch with N = 1 (single GPU) |
 | Multi-node pipeline parallelism | Planned | Requires Ray cluster |
 
 ---
 
-## Single-Node Scaling (Implemented)
+## Single-Node Scaling
 
-When users deploy models to a subscription with multiple GPUs, vLLM automatically uses tensor parallelism.
+The deploy script accepts a GPU count, which vLLM receives as `--tensor-parallel-size`. Deployments currently launch with a GPU count of 1, so vLLM serves each model from a single GPU even on multi-GPU pods.
 
 **File:** `src/app/api/huggingface/deploy-existing/route.ts`
 
 ```typescript
-const gpuCount = sub.per_pod_info?.vgpu_count || 1;
+const gpuCount = 1;
 
 const script = generateDeployScript(deployScript, {
   modelId: catalogItem?.type !== "docker" ? hfItemId : undefined,
@@ -35,6 +34,8 @@ const script = generateDeployScript(deployScript, {
   port: getDefaultPort(deployScript),
   hfToken: hfToken || undefined,
   gpuCount,  // Passed to vLLM as --tensor-parallel-size
+  openWebUI: openWebUI || false,
+  netdata: netdata || false,
 });
 ```
 
@@ -55,13 +56,13 @@ const script = generateDeployScript(deployScript, {
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  3. API fetches subscription from hosted.ai                             │
-│     → sub.per_pod_info.vgpu_count = 2 (user has 2 GPUs)                │
+│  3. API verifies the instance belongs to your team and fetches          │
+│     SSH credentials from hosted.ai                                      │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  4. generateDeployScript() creates bash script with gpuCount=2          │
+│  4. generateDeployScript() creates bash script (gpuCount currently 1)   │
 └──────────────────────────────┬──────────────────────────────────────────┘
                                │
                                ▼
@@ -70,10 +71,11 @@ const script = generateDeployScript(deployScript, {
 │                                                                         │
 │     python -m vllm.entrypoints.openai.api_server \                      │
 │       --model meta-llama/Llama-3.3-70B \                                │
-│       --tensor-parallel-size 2 \    ← Splits model across 2 GPUs       │
-│       --gpu-memory-utilization 0.8 \                                    │
-│       --enforce-eager \                                                 │
-│       --host 0.0.0.0 --port 8000                                        │
+│       --host 0.0.0.0 --port 8000 \                                      │
+│       --tensor-parallel-size 1 \                                        │
+│       --max-model-len <calculated from GPU memory> \                    │
+│       --gpu-memory-utilization 0.85 \                                   │
+│       --enforce-eager --trust-remote-code --dtype float16               │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -81,7 +83,7 @@ const script = generateDeployScript(deployScript, {
 
 ## vLLM Parallelism Strategies
 
-### 1. Tensor Parallelism (Within a Node) ✅ IMPLEMENTED
+### 1. Tensor Parallelism (Within a Node) — Script Support (Deployments Currently Single-GPU)
 
 **What it does:** Splits model weights across multiple GPUs on the same physical node.
 
@@ -195,22 +197,22 @@ ray start --block --address=${HEAD_IP}:6379
 
 ## What Packet.ai Has Implemented (Software Layer)
 
-### 1. Single-Node Multi-GPU Support ✅ COMPLETE
+### 1. Single-Node Multi-GPU Support — Deploy Script Only
 
-**Status:** Fully implemented (2025-12-29)
+**Status:** The deploy script template supports multi-GPU tensor parallelism, but all deployment paths currently launch vLLM with a GPU count of 1.
 
-When a user requests multiple GPUs in a single pod, the deploy script automatically uses:
+The deploy script template includes:
 
 ```bash
 # In huggingface-deploy-scripts.ts
 --tensor-parallel-size ${gpu_count}
 ```
 
-**Completed Items:**
+**Current state:**
 - [x] `generateDeployScript()` accepts `gpuCount` parameter
-- [x] GPU count passed from subscription to deploy script
-- [x] `/api/huggingface/deploy` passes gpuCount
-- [x] `/api/huggingface/deploy-existing` passes gpuCount
+- [ ] GPU count passed from the pod's GPU allocation to the deploy script (currently fixed at 1)
+- [ ] `/api/huggingface/deploy` — accepts `gpuCount` for GPU allocation and billing, but the vLLM server it starts runs with `--tensor-parallel-size 1`
+- [ ] `/api/huggingface/deploy-existing` — GPU count fixed at 1
 
 ### 2. Future UI Improvements
 
@@ -333,9 +335,9 @@ vllm serve meta-llama/Llama-3.1-405B-FP8 \
 
 ## Next Steps
 
-### Completed ✅
-1. Single-node tensor parallelism (`--tensor-parallel-size`)
-2. GPU count passed from subscription to deploy script
+### Current State
+1. Deploy script supports tensor parallelism (`--tensor-parallel-size`)
+2. Deployments currently launch vLLM with a GPU count of 1 (single GPU per pod)
 
 ### To Do (For Multi-Node)
 1. [ ] Test pod-to-pod connectivity (ping internal IPs)

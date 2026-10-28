@@ -10,6 +10,7 @@
 "use client";
 
 import React from "react";
+import { Modal } from "@/components/Modal";
 
 interface ValidatedVoucher {
   code: string;
@@ -129,11 +130,16 @@ export function TopupModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-xl">
+    <Modal
+      title="Top Up Wallet"
+      ownHeader
+      onClose={onClose}
+      className="bg-white rounded-2xl p-6 w-full max-w-md mx-4 shadow-xl"
+    >
+      <>
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-zinc-900">Top Up Wallet</h3>
-          <button
+          <button aria-label="Close dialog"
             onClick={onClose}
             className="text-zinc-400 hover:text-zinc-600 p-1"
           >
@@ -195,12 +201,12 @@ export function TopupModal({
               )}
               {validatedVoucher && (
                 <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-xs">
-                  <div className="flex items-center gap-1">
-                    <svg className="w-3.5 h-3.5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <div className="flex items-center gap-1 min-w-0">
+                    <svg className="w-3.5 h-3.5 text-green-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
-                    <span className="text-green-700 font-medium">{validatedVoucher.name}</span>
-                    <span className="text-green-600">+${(validatedVoucher.creditCents / 100).toFixed(0)} credit</span>
+                    <span className="text-green-700 font-medium truncate min-w-0" title={validatedVoucher.name}>{validatedVoucher.name}</span>
+                    <span className="text-green-600 shrink-0 whitespace-nowrap">+${(validatedVoucher.creditCents / 100).toFixed(0)} credit</span>
                   </div>
                   {isFreeVoucher ? (
                     <p className="text-green-600 mt-1">Click redeem to add this credit to your wallet.</p>
@@ -267,7 +273,7 @@ export function TopupModal({
             )}
           </>
         )}
-      </div>
-    </div>
+      </>
+    </Modal>
   );
 }

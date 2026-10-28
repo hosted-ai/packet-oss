@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 
-export type TabType = "dashboard" | "billing" | "team" | "keys" | "huggingface" | "referrals" | "support" | "settings" | "metrics" | "apps" | "storage" | "baremetal";
+export type TabType = "dashboard" | "billing" | "team" | "keys" | "huggingface" | "referrals" | "support" | "settings" | "metrics" | "apps" | "storage" | "baremetal" | "bare-metal-orders";
 
-const VALID_TABS: TabType[] = ["dashboard", "billing", "team", "keys", "huggingface", "referrals", "support", "settings", "metrics", "apps", "storage", "baremetal"];
+const VALID_TABS: TabType[] = ["dashboard", "billing", "team", "keys", "huggingface", "referrals", "support", "settings", "metrics", "apps", "storage", "baremetal", "bare-metal-orders"];
 
 export interface ModalsState {
   showLaunchModal: boolean;
@@ -44,17 +44,30 @@ export function useModals(): ModalsState & ModalsActions {
 
   const [activeTab, setActiveTabState] = useState<TabType>(getTabFromUrl);
 
-  // Sync tab state with URL on mount and URL changes
+  // The last tab value we observed in the URL. The sync effect reacts ONLY to
+  // genuine URL changes (deep links, back/forward) — comparing against this
+  // ref rather than against `activeTab`. Comparing against activeTab caused a
+  // render loop: a permission guard that bounces a disallowed tab via
+  // setActiveTab("dashboard") would be reverted by this effect re-reading the
+  // not-yet-updated searchParams, ping-ponging activeTab forever (flicker).
+  const lastUrlTab = useRef<TabType>(getTabFromUrl());
+
+  // Sync tab state with the URL on mount and on real URL navigations.
   useEffect(() => {
     const tabFromUrl = getTabFromUrl();
-    if (tabFromUrl !== activeTab) {
+    if (tabFromUrl !== lastUrlTab.current) {
+      lastUrlTab.current = tabFromUrl;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs tab state from the URL (client-only) on mount and param change
       setActiveTabState(tabFromUrl);
     }
-  }, [searchParams, getTabFromUrl, activeTab]);
+  }, [searchParams, getTabFromUrl]);
 
   // Update URL when tab changes
   const setActiveTab = useCallback((tab: TabType) => {
     setActiveTabState(tab);
+    // Keep the ref aligned so the URL-sync effect treats this programmatic
+    // change as already-synced (and won't revert it from a lagging URL read).
+    lastUrlTab.current = tab;
 
     // Build new URL with tab parameter
     const params = new URLSearchParams(searchParams.toString());

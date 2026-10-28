@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { AccountData, ActivityEvent } from "../types";
+import { useWalletTopup, type TopupHandler } from "@/hooks/useWalletTopup";
 
 export interface DashboardActionsState {
   topupLoading: boolean;
@@ -15,7 +16,7 @@ export interface DashboardActionsCallbacks {
   downloadActivityCSV: () => void;
   downloadTransactionsCSV: () => void;
   formatDateTime: (timestamp: number) => string;
-  handleTopup: (amount: number, voucherCode?: string, launchProductId?: string) => Promise<void>;
+  handleTopup: TopupHandler;
 }
 
 interface UseDashboardActionsProps {
@@ -29,7 +30,7 @@ export function useDashboardActions({
   data,
   activityEvents,
 }: UseDashboardActionsProps): DashboardActionsState & DashboardActionsCallbacks {
-  const [topupLoading, setTopupLoading] = useState(false);
+  const { topupLoading, handleTopup } = useWalletTopup(token);
   const [hostedaiLoginLoading, setHostedaiLoginLoading] = useState(false);
   const [billingPortalLoading, setBillingPortalLoading] = useState(false);
 
@@ -186,35 +187,6 @@ export function useDashboardActions({
     link.download = `transactions-${new Date().toISOString().split("T")[0]}.csv`;
     link.click();
   }, [token, data]);
-
-  // Handle wallet top-up
-  // When called from TopupModal: handleTopup(amount, voucherCode)
-  // When called from LaunchGPUModal: handleTopup(amount, undefined, launchProductId)
-  const handleTopup = useCallback(async (amount: number, voucherCode?: string, launchProductId?: string) => {
-    if (!token || topupLoading) return;
-
-    setTopupLoading(true);
-    try {
-      const res = await fetch("/api/account/wallet-topup", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ amount, voucherCode, launchProductId }),
-      });
-      const result = await res.json();
-      if (result.url) {
-        window.location.href = result.url;
-      } else {
-        alert(result.error || "Failed to create checkout");
-      }
-    } catch {
-      alert("Failed to initiate top-up");
-    } finally {
-      setTopupLoading(false);
-    }
-  }, [token, topupLoading]);
 
   return {
     topupLoading,

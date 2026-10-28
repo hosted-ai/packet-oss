@@ -14,6 +14,8 @@ import { getWalletBalance } from "@/lib/wallet";
 import { getSharedVolumes } from "@/lib/hostedai";
 import { prisma } from "@/lib/prisma";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
+import { getStoragePricePerGBHourCents } from "@/lib/pricing";
+import { DEPLOYABLE_ORDER_BY, DEPLOYABLE_WHERE } from "@/lib/product-availability";
 
 export async function GET(request: NextRequest) {
   try {
@@ -39,9 +41,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
     const stripe = await getStripe();
-    const customer = ctx.customer;
     const accountId = ctx.accountId;
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json({ error: "No team associated with this account" }, { status: 400 });
     }
@@ -58,12 +59,16 @@ export async function GET(request: NextRequest) {
         where: { active: true },
         orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
       }).catch(() => []),
+      // Deployable, not sellable. Monthly rows are fetched regardless of sale
+      // state; the entitlement filter below is their gate.
       prisma.gpuProduct.findMany({
-        where: { active: true },
-        orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+        where: DEPLOYABLE_WHERE,
+        orderBy: [...DEPLOYABLE_ORDER_BY, { displayOrder: "asc" }, { name: "asc" }],
         include: { categories: { select: { id: true } } },
       }),
-      getWalletBalance(accountId).then(w => w.availableBalance).catch(() => 0),
+      // No catch: the modal gates the deploy on this figure, and a swallowed error
+      // reaches the customer as a funded wallet reading $0.00.
+      getWalletBalance(ctx.hourlyCustomerId ?? accountId).then(w => w.availableBalance),
       getSharedVolumes(teamId).catch(() => []),
       prisma.sSHKey.findMany({
         where: { stripeCustomerId: accountId },
@@ -73,20 +78,32 @@ export async function GET(request: NextRequest) {
     ]);
 
     // === ENTITLEMENT CHECK ===
-    const customerBillingType = customer.metadata?.billing_type;
-    const hasHourlyWallet = customerBillingType === "hourly" || customerBillingType === "free_trial" || customerBillingType === "free";
-
     // Monthly subscriptions live on linked monthly customer(s). Reuse the
     // context's monthlyCustomerIds instead of re-listing by email.
+    // Match by both price ID and product ID: grandfathered subscriptions whose
+    // price no longer matches the current GpuProduct.stripePriceId (price/product
+    // recreated after subscribing) still resolve via stripeProductId. This mirrors
+    // /api/account/verify, which decides whether to show the "Deploy GPU" button —
+    // the two must agree or the card offers a deploy the modal then rejects (PA-342).
     const subscribedPriceIds = new Set<string>();
-    const hourlyCustomerId: string | null = hasHourlyWallet ? accountId : null;
-    const subsLookupIds = [accountId, ...ctx.monthlyCustomerIds];
+    const subscribedProductIds = new Set<string>();
+    // Hourly is entitled from the wallet wherever it sits on the email, the same
+    // context the subscription lookup below spans — not the operating account alone.
+    const hourlyCustomerId = ctx.hourlyCustomerId;
+    // allCustomerIds too: a monthly customer the webhook failed to stamp (no
+    // billing_type metadata) is invisible to monthlyCustomerIds, but its active
+    // subscription must still entitle — the sub cards already list email-wide.
+    const subsLookupIds = Array.from(
+      new Set([accountId, ...ctx.monthlyCustomerIds, ...(ctx.allCustomerIds ?? [])])
+    );
     for (const cid of subsLookupIds) {
       try {
         const subs = await stripe.subscriptions.list({ customer: cid, status: "active", limit: 10 });
         for (const sub of subs.data) {
-          const priceId = sub.items?.data?.[0]?.price?.id;
-          if (priceId) subscribedPriceIds.add(priceId);
+          const price = sub.items?.data?.[0]?.price;
+          if (price?.id) subscribedPriceIds.add(price.id);
+          const prod = typeof price?.product === "string" ? price.product : price?.product?.id;
+          if (prod) subscribedProductIds.add(prod);
         }
       } catch (err) {
         console.error(`Failed to fetch subscriptions for ${cid}:`, err);
@@ -97,8 +114,11 @@ export async function GET(request: NextRequest) {
 
     // === FILTER PRODUCTS BY ENTITLEMENT ===
     const entitledProducts = dbProducts.filter(p => {
-      if (p.billingType === "monthly" && p.stripePriceId) {
-        return subscribedPriceIds.has(p.stripePriceId);
+      if (p.billingType === "monthly") {
+        return (
+          (!!p.stripePriceId && subscribedPriceIds.has(p.stripePriceId)) ||
+          (!!p.stripeProductId && subscribedProductIds.has(p.stripeProductId))
+        );
       }
       if (p.billingType === "hourly") {
         return !!hourlyCustomerId;
@@ -127,6 +147,7 @@ export async function GET(request: NextRequest) {
       vramGb: p.vramGb,
       cudaCores: p.cudaCores,
       gpuFamily: p.gpuFamily ?? null,
+      supportsSharedStorage: p.supportsSharedStorage,
       // Availability checked on-demand via /api/instances/category-check
       available: null as boolean | null,
     }));
@@ -149,7 +170,11 @@ export async function GET(request: NextRequest) {
       }))
       .filter(cat => cat.products.length > 0);
 
-    // Existing shared volumes for persistent storage option
+    // Existing shared volumes for the shared-storage option.
+    // PA-356/PA-345: HAI's own `cost` is unrelated to our configured storage rate
+    // (often 0/unset upstream); /api/sync bills size_in_gb * storagePricePerGBHourCents.
+    // Derive the quoted $/hr the same way so the launch estimate matches the invoice.
+    const storageRateCentsPerGBHour = getStoragePricePerGBHourCents();
     const existingSharedVolumes = (sharedVolumes || []).map(v => ({
       id: v.id,
       name: v.name,
@@ -157,7 +182,7 @@ export async function GET(request: NextRequest) {
       region_id: v.region_id,
       status: v.status,
       mount_point: v.mount_point,
-      cost: v.cost,
+      cost: (v.size_in_gb * storageRateCentsPerGBHour) / 100,
     }));
 
     return NextResponse.json({

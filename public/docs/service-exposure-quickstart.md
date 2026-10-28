@@ -12,7 +12,7 @@ python -m vllm.entrypoints.openai.api_server \
 ```
 
 ### Step 2: Expose in Dashboard
-1. Go to https://packet.ai/dashboard
+1. Go to https://dash.packet.ai/dashboard
 2. Expand your GPU card
 3. Scroll to **"Exposed Services"**
 4. Click **"+ Expose Port"**
@@ -20,7 +20,7 @@ python -m vllm.entrypoints.openai.api_server \
    - **Service Name**: `vllm-api`
    - **Port**: `8000`
    - **Protocol**: `TCP`
-   - **Type**: `NodePort`
+   - **Service Type**: `HTTP`
 6. Click **"Expose Service"**
 
 ### Step 3: Use the URL
@@ -83,20 +83,23 @@ python demo.py
 
 ---
 
-## 🛠️ NodePort vs LoadBalancer
+## 🛠️ Service Types at a Glance
 
-| Feature | NodePort | LoadBalancer |
-|---------|----------|--------------|
-| **Cost** | Free | ~$15-30/month |
-| **Setup Time** | Instant | 1-2 minutes |
-| **URL Example** | `http://34.123.45.67:31234` | `http://35.123.45.67:8000` |
-| **Port** | Random (30000-32767) | Your choice |
-| **Best For** | Dev, testing, demos | Production, APIs |
-| **Domain Support** | Harder | Easy |
+The service type options depend on the protocol you pick:
+
+| Protocol | Service Type | Use For | Address Format |
+|----------|--------------|---------|----------------|
+| TCP | **HTTP** (default) | Web UIs, REST APIs | `http://34.123.45.67:31234` |
+| TCP | **HTTPS** | Services serving TLS | `https://34.123.45.67:31234` |
+| TCP | **Raw TCP (no prefix)** | SSH, gRPC, databases | `34.123.45.67:31234` |
+| UDP | **NodePort** | UDP services | `34.123.45.67:31234` |
+| UDP | **LoadBalancer** | UDP behind a load balancer | `34.123.45.67:31234` |
 
 **Rule of thumb**:
-- 🧪 **Development/Testing** → NodePort
-- 🚀 **Production/Public** → LoadBalancer
+- 🌐 Anything with a browser or REST client → **HTTP** (or **HTTPS** if your app serves TLS)
+- 🔌 Everything else over TCP → **Raw TCP**
+
+**Note**: The external port is assigned by the platform — you can't choose it.
 
 ---
 
@@ -165,7 +168,7 @@ tail -f app.log
 - [ ] Use API keys for production services
 - [ ] Don't expose admin panels without auth
 - [ ] Use tokens for Jupyter notebooks
-- [ ] Consider LoadBalancer + HTTPS for public APIs
+- [ ] Consider the HTTPS service type + auth for public APIs
 - [ ] Delete services when done
 - [ ] Don't hardcode secrets in exposed services
 
@@ -203,10 +206,7 @@ curl http://URL/v1/models -H "Authorization: Bearer $API_KEY"
 3. Confirm
 
 ### To Edit a Service:
-1. Find service in list
-2. Click pencil icon ✏️
-3. Modify fields
-4. Click "Update Service"
+Editing isn't available in the dashboard — delete the service and expose it again with the new settings, or use the API (`PUT /api/services`).
 
 ---
 
@@ -216,13 +216,13 @@ curl http://URL/v1/models -H "Authorization: Bearer $API_KEY"
 ```bash
 # vLLM
 python -m vllm.entrypoints.openai.api_server --host 0.0.0.0 --port 8000
-# Expose: port 8000, LoadBalancer (production) or NodePort (dev)
+# Expose: port 8000, TCP, service type HTTP
 ```
 
 ### "Team needs to see TensorBoard"
 ```bash
 tensorboard --logdir=./logs --host=0.0.0.0 --port=6006
-# Expose: port 6006, NodePort
+# Expose: port 6006, TCP, service type HTTP
 ```
 
 ### "Demo for investors"
@@ -234,13 +234,13 @@ demo.launch(server_name="0.0.0.0", server_port=7860)
 ```
 ```bash
 python demo.py
-# Expose: port 7860, NodePort
+# Expose: port 7860, TCP, service type HTTP
 ```
 
 ### "Collaborate on Jupyter notebook"
 ```bash
 jupyter lab --ip=0.0.0.0 --port=8888 --no-browser
-# Expose: port 8888, NodePort
+# Expose: port 8888, TCP, service type HTTP
 # Share the token from output
 ```
 
@@ -248,7 +248,7 @@ jupyter lab --ip=0.0.0.0 --port=8888 --no-browser
 ```bash
 # FastAPI/Flask/Django with gunicorn
 gunicorn app:app --bind 0.0.0.0:8080 --workers 4
-# Expose: port 8080, LoadBalancer
+# Expose: port 8080, TCP, service type HTTP (or HTTPS if serving TLS)
 # Add domain: api.yourcompany.com
 ```
 
@@ -260,7 +260,7 @@ gunicorn app:app --bind 0.0.0.0:8080 --workers 4
 
 2. **Test locally first**: Always `curl localhost:8000` before exposing
 
-3. **Use LoadBalancer for production**: Worth the $20/month for reliability
+3. **Protect production services**: Add API keys or tokens to anything publicly reachable
 
 4. **Monitor your services**: Add health check endpoints like `/health`
 
@@ -290,14 +290,8 @@ gunicorn app:app --bind 0.0.0.0:8080 --workers 4
 - **Full Documentation**: `/docs/service-exposure.md`
 - **Use Cases**: `/docs/service-exposure-use-cases.md`
 - **API Reference**: See "API Reference" section in main docs
-- **Support**: https://packet.ai/support
+- **Support**: via the Support tab in the dashboard
 
 ---
 
-## 🎓 3-Minute Video Tutorial
-
-**Coming soon**: Watch a live walkthrough at https://packet.ai/tutorials/service-exposure
-
----
-
-**Last Updated**: January 2025 | **Version**: 1.0
+**Last Updated**: July 2026 | **Version**: 1.1

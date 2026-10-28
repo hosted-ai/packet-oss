@@ -33,7 +33,7 @@ function makeRequest(method: "GET" | "POST", secret?: string) {
 describe("POST /api/cron/sync-customer-cache", () => {
   beforeEach(() => {
     process.env.CRON_SECRET = SECRET;
-    mockFullSync.mockResolvedValue({ synced: 0, deleted: 0 });
+    mockFullSync.mockResolvedValue({ synced: 0, deleted: 0, refused: false });
   });
 
   afterEach(() => {
@@ -49,13 +49,13 @@ describe("POST /api/cron/sync-customer-cache", () => {
   });
 
   it("returns the sync result counts on success", async () => {
-    mockFullSync.mockResolvedValue({ synced: 42, deleted: 3 });
+    mockFullSync.mockResolvedValue({ synced: 42, deleted: 3, refused: false });
 
     const res = await POST(makeRequest("POST", SECRET));
     const body = await res.json();
 
     expect(res.status).toBe(200);
-    expect(body).toEqual({ success: true, synced: 42, deleted: 3 });
+    expect(body).toEqual({ success: true, synced: 42, deleted: 3, refused: false });
     expect(mockFullSync).toHaveBeenCalledTimes(1);
   });
 
@@ -70,8 +70,20 @@ describe("POST /api/cron/sync-customer-cache", () => {
     expect(body.details).toBe("stripe rate limited");
   });
 
+  // A refused run is not a failed one, so it 200s — but the caller must be
+  // able to tell it apart from a sweep that genuinely found nothing to delete.
+  it("surfaces a refused sweep distinctly from a clean run", async () => {
+    mockFullSync.mockResolvedValue({ synced: 12, deleted: 0, refused: true });
+
+    const res = await POST(makeRequest("POST", SECRET));
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ success: true, synced: 12, deleted: 0, refused: true });
+  });
+
   it("GET delegates to POST (manual-trigger parity)", async () => {
-    mockFullSync.mockResolvedValue({ synced: 7, deleted: 1 });
+    mockFullSync.mockResolvedValue({ synced: 7, deleted: 1, refused: false });
 
     const res = await GET(makeRequest("GET", SECRET));
     const body = await res.json();

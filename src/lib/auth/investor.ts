@@ -139,6 +139,31 @@ export async function setInvestorAssignedNodes(email: string, nodeIds: string[])
   });
 }
 
+/**
+ * PA-688: extract HAI region ids from `regions:<csv>` entries in assignedNodeIds.
+ *
+ * assignedNodeIds is a mixed bag of conventions — bare ProviderNode cuids,
+ * `gpuaas-<cluster>-<node>`, `pools:<csv>`, `pixel-factory` — and this adds
+ * `regions:<csv>` for bare metal. Lives here (next to get/set) so the admin
+ * route and investor-stats share one parser instead of re-deriving the regex.
+ *
+ * Malformed segments are dropped rather than thrown on: the column is
+ * hand-editable JSON, and one bad entry must not blank an investor's whole
+ * dashboard. The admin write path validates the format up front.
+ */
+export function parseAssignedRegionIds(assignedNodeIds: string[]): number[] {
+  const ids = new Set<number>();
+  for (const nid of assignedNodeIds) {
+    const match = nid.match(/^regions:(.+)$/);
+    if (!match) continue;
+    for (const part of match[1].split(",")) {
+      const n = Number(part.trim());
+      if (Number.isInteger(n) && n > 0) ids.add(n);
+    }
+  }
+  return [...ids].sort((a, b) => a - b);
+}
+
 export async function getInvestorRevenueShare(email: string): Promise<number | null> {
   const rows = await prisma.investor.findMany();
   const investors = rows.map(dbToInvestor);

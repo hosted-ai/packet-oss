@@ -41,10 +41,16 @@ describe("sanitizeNextPath", () => {
     }
   });
 
-  it("rejects paths outside the /dashboard|/account allowlist", () => {
-    expect(sanitizeNextPath("/admin", APP)).toBeUndefined();
-    expect(sanitizeNextPath("/dashboardx", APP)).toBeUndefined();
-    expect(sanitizeNextPath("/", APP)).toBeUndefined();
+  it("accepts arbitrary same-origin app deep links (PA-335)", () => {
+    expect(sanitizeNextPath("/some/page?ref=xyz", APP)).toBe("/some/page?ref=xyz");
+    expect(sanitizeNextPath("/gpu/b200", APP)).toBe("/gpu/b200");
+    expect(sanitizeNextPath("/admin", APP)).toBe("/admin");
+    expect(sanitizeNextPath("/", APP)).toBe("/");
+  });
+
+  it("rejects API routes (would dump JSON at the visitor)", () => {
+    expect(sanitizeNextPath("/api", APP)).toBeUndefined();
+    expect(sanitizeNextPath("/api/account/verify", APP)).toBeUndefined();
   });
 
   it("rejects empty, oversized, and non-string input", () => {

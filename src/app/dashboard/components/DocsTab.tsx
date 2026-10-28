@@ -7,7 +7,6 @@ import {
   GettingStartedDoc,
   HuggingFaceDoc,
   Pro6000BlackwellDoc,
-  OpenAIGatewayDoc,
   InferencePlaygroundDoc,
   GPUMetricsDoc,
   TokenUsageDoc,
@@ -16,7 +15,6 @@ import {
   SSHAccessDoc,
   BillingDoc,
   BudgetControlsDoc,
-  WorkspaceDoc,
   BrowserIDEDoc,
 } from "./docs";
 
@@ -37,14 +35,12 @@ type DocSection =
   | "getting-started"
   | "huggingface"
   | "pro-6000-blackwell"
-  | "openai-gateway"
   | "inference-playground"
   | "gpu-metrics"
   | "token-usage"
   | "service-exposure"
   | "persistent-storage"
   | "ssh-access"
-  | "workspace"
   | "browser-ide"
   | "billing"
   | "budget-controls"
@@ -63,7 +59,6 @@ const navItems: NavItemConfig[] = [
   { id: "huggingface", label: "HuggingFace Deploy", shortLabel: "HF" },
   { id: "pro-6000-blackwell", label: "Pro 6000 Blackwell", shortLabel: "Pro 6000", isNew: true },
   // Using Your Models
-  { id: "openai-gateway", label: "OpenAI API", shortLabel: "API", isNew: true },
   { id: "inference-playground", label: "Playground", shortLabel: "Play", isNew: true },
   // Monitoring & Analytics
   { id: "gpu-metrics", label: "GPU Metrics", shortLabel: "GPU", isNew: true },
@@ -72,7 +67,6 @@ const navItems: NavItemConfig[] = [
   { id: "service-exposure", label: "Service Exposure", shortLabel: "Services" },
   { id: "persistent-storage", label: "Storage", shortLabel: "Storage" },
   { id: "ssh-access", label: "SSH Access", shortLabel: "SSH" },
-  { id: "workspace", label: "Persistent Workspace", shortLabel: "Workspace", isNew: true },
   { id: "browser-ide", label: "Browser IDEs", shortLabel: "IDEs", isNew: true },
   // Account & Reference
   { id: "billing", label: "Billing", shortLabel: "Billing" },
@@ -80,7 +74,7 @@ const navItems: NavItemConfig[] = [
   { id: "api", label: "API Reference", shortLabel: "Docs" },
 ];
 
-export function DocsTab({ isOwner }: DocsTabProps) {
+export function DocsTab(_props: DocsTabProps) {
   const [activeSection, setActiveSection] = useState<DocSection>("getting-started");
 
   const renderDocContent = () => {
@@ -93,8 +87,6 @@ export function DocsTab({ isOwner }: DocsTabProps) {
       case "pro-6000-blackwell":
         return <Pro6000BlackwellDoc />;
       // Using Your Models
-      case "openai-gateway":
-        return <OpenAIGatewayDoc />;
       case "inference-playground":
         return <InferencePlaygroundDoc />;
       // Monitoring & Analytics
@@ -109,8 +101,6 @@ export function DocsTab({ isOwner }: DocsTabProps) {
         return <PersistentStorageDoc />;
       case "ssh-access":
         return <SSHAccessDoc />;
-      case "workspace":
-        return <WorkspaceDoc />;
       case "browser-ide":
         return <BrowserIDEDoc />;
       // Account & Reference
@@ -183,7 +173,6 @@ export function DocsTab({ isOwner }: DocsTabProps) {
             <option value="pro-6000-blackwell">Pro 6000 Blackwell ✨</option>
           </optgroup>
           <optgroup label="Using Your Models">
-            <option value="openai-gateway">OpenAI API ✨</option>
             <option value="inference-playground">Playground ✨</option>
           </optgroup>
           <optgroup label="Monitoring">
@@ -194,7 +183,6 @@ export function DocsTab({ isOwner }: DocsTabProps) {
             <option value="service-exposure">Service Exposure</option>
             <option value="persistent-storage">Storage</option>
             <option value="ssh-access">SSH Access</option>
-            <option value="workspace">Persistent Workspace ✨</option>
             <option value="browser-ide">Browser IDEs ✨</option>
           </optgroup>
           <optgroup label="Account">

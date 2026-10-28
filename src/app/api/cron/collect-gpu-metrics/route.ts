@@ -18,6 +18,7 @@ import { readPoolOverviewCache } from "@/lib/pool-overview";
 import { spawn } from "child_process";
 import { validateSSHParams } from "@/lib/ssh-validation";
 import { verifyCronAuth } from "@/lib/cron-auth";
+import { recordFirstWorkloadBatch, WORKLOAD_UTIL_THRESHOLD } from "@/lib/lifecycle";
 
 interface GPUMetrics {
   gpuUtilization: number;
@@ -450,7 +451,7 @@ export async function GET(request: NextRequest) {
                 } else {
                   results.failed++;
                 }
-              } catch (fetchError) {
+              } catch {
                 results.failed++;
               }
             }
@@ -471,6 +472,14 @@ export async function GET(request: NextRequest) {
         data: metricsToInsert,
       });
       console.log(`[GPU Metrics] Inserted ${metricsToInsert.length} metrics records`);
+
+      // PA-693 activation milestone: first sample with real GPU utilization
+      // stamps CustomerLifecycle.firstWorkloadAt (write-once, never throws).
+      await recordFirstWorkloadBatch(
+        metricsToInsert
+          .filter((m) => m.gpuUtilization >= WORKLOAD_UTIL_THRESHOLD)
+          .map((m) => m.stripeCustomerId),
+      );
     }
 
     // Step 5: Clean up old metrics (keep last 7 days)

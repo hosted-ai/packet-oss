@@ -26,7 +26,6 @@ const SENSITIVE_PERMISSIONS = new Set<Permission>([
   "ssh_keys.manage",
   // PA-202 module perms — mutations / resource creation, so audit allow + deny
   "token_factory.use",
-  "pixel_factory.use",
   "huggingface.use",
   "apps.use",
   "storage.manage",

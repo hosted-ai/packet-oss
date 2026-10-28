@@ -22,3 +22,5 @@ export { UptimeTab } from "./UptimeTab";
 export { PlatformSettingsTab } from "./PlatformSettingsTab";
 export { AnnouncementsTab } from "./AnnouncementsTab";
 export { BroadcastTab } from "./BroadcastTab";
+export { OpsSummaryTab } from "./OpsSummaryTab";
+export { PacketHealthTab } from "./PacketHealthTab";

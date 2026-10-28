@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { ApiError } from "@/lib/api";
 import { verifyCustomerToken } from "@/lib/customer-auth";
 import { getSharedStorageBlocks } from "@/lib/hostedai";
 import { gatePermission } from "@/lib/auth/gate";
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
     if (!ctx) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
-    const teamId = ctx.customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json({ error: "No team associated with this account" }, { status: 400 });
     }
@@ -59,7 +60,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ blocks: sorted });
   } catch (error) {
-    console.error("Storage blocks error:", error);
-    return NextResponse.json({ error: "Failed to get storage blocks" }, { status: 500 });
+    // A region with no eligible storage node answers 404 upstream — a real answer for
+    // the volume dialog, not a server fault. Region logged: it is what tells the two
+    // apart on a recurrence.
+    console.error("Storage blocks error:", request.nextUrl.searchParams.get("region_id"), error);
+    const upstream = ApiError.fromUpstream(error, "Failed to get storage blocks");
+    return NextResponse.json({ error: upstream.message }, { status: upstream.status });
   }
 }

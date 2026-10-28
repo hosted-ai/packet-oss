@@ -16,7 +16,12 @@ export function getSessionId(): string {
 
   let sid = sessionStorage.getItem(SESSION_KEY);
   if (!sid) {
-    sid = crypto.randomUUID();
+    // crypto.randomUUID only exists in secure contexts (https/localhost);
+    // fall back so plain-http origins still render.
+    sid =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
     sessionStorage.setItem(SESSION_KEY, sid);
   }
   return sid;

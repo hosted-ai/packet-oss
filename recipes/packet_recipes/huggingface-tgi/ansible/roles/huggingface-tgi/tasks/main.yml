@@ -26,7 +26,7 @@
 - name: Install Python dependencies
   ansible.builtin.pip:
     name:
-      - torch
+      - torch==2.11.0
       - transformers
       - accelerate
       - fastapi

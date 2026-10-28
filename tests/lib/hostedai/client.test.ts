@@ -296,7 +296,7 @@ describe('HostedAI Client', () => {
   });
 
   describe('Request logging', () => {
-    it('should log request details', async () => {
+    it('logs one compact line per call', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -306,15 +306,11 @@ describe('HostedAI Client', () => {
       await hostedaiRequest('POST', '/test', { key: 'value' });
 
       expect(mockConsole.log).toHaveBeenCalledWith(
-        expect.stringContaining('[Hosted.AI] POST')
-      );
-      expect(mockConsole.log).toHaveBeenCalledWith(
-        expect.stringContaining('[Hosted.AI] Request body:'),
-        expect.any(String)
+        expect.stringMatching(/\[Hosted\.AI\] POST \/test → 200 \(\d+B, \d+ms\)/)
       );
     });
 
-    it('should log response details', async () => {
+    it('does not dump request/response bodies without HOSTEDAI_DEBUG', async () => {
       const responseData = { id: '123', status: 'active' };
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -322,9 +318,13 @@ describe('HostedAI Client', () => {
         text: async () => JSON.stringify(responseData),
       });
 
-      await hostedaiRequest('GET', '/test');
+      await hostedaiRequest('POST', '/test', { key: 'value' });
 
-      expect(mockConsole.log).toHaveBeenCalledWith(
+      expect(mockConsole.log).not.toHaveBeenCalledWith(
+        expect.stringContaining('[Hosted.AI] Request body:'),
+        expect.any(String)
+      );
+      expect(mockConsole.log).not.toHaveBeenCalledWith(
         expect.stringContaining('[Hosted.AI] Response:'),
         expect.any(String)
       );

@@ -317,6 +317,37 @@ describe("POST /api/cron/check-budgets", () => {
     expect(mockSendAutoShutdownNotificationEmail).toHaveBeenCalledTimes(1);
   });
 
+  it("takes no action when spend is under every budget threshold", async () => {
+    mockBudgetSettingsFindMany.mockResolvedValue([
+      settingsFixture({
+        stripeCustomerId: "cus_under",
+        monthlyLimitCents: 10000,
+        autoShutdownEnabled: true,
+        autoShutdownThreshold: 100,
+      }),
+    ]);
+    mockStripeCustomersRetrieve.mockResolvedValue({
+      id: "cus_under",
+      email: "u@x.com",
+      metadata: { hostedai_team_id: "team_under" },
+    });
+    // Spend = 3000c → 30% of the 10000c monthly limit — under every alert
+    // threshold (50/80/100) and the auto-shutdown threshold.
+    mockWalletTxnAggregate
+      .mockResolvedValueOnce({ _sum: { amountCents: 3000 } }) // monthly
+      .mockResolvedValueOnce({ _sum: { amountCents: 0 } });   // daily
+
+    const res = await POST(makeAuthorized());
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.alertsSent).toBe(0);
+    expect(body.instancesStopped).toBe(0);
+    expect(mockSendBudgetAlertEmail).not.toHaveBeenCalled();
+    expect(mockGetPoolSubscriptions).not.toHaveBeenCalled();
+    expect(mockPodAction).not.toHaveBeenCalled();
+  });
+
   it("skips customers without a hostedai_team_id (orphan accounts)", async () => {
     mockBudgetSettingsFindMany.mockResolvedValue([
       settingsFixture({ stripeCustomerId: "cus_orphan" }),

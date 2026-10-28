@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { formatSmartPrice } from "@/lib/format";
 
 interface AttachedVolume {
   id: number;
@@ -16,6 +17,7 @@ interface AvailableVolume {
   name: string;
   size_in_gb: number;
   mount_point: string;
+  status?: string;
   cost: string | number;
 }
 
@@ -23,7 +25,8 @@ interface StorageBlockOption {
   id: string;
   name: string;
   size: number;
-  cost: string;
+  /** $/hr, derived from our configured storage rate (see getSharedStorageBlocks). */
+  cost: number;
 }
 
 interface AddStorageModalProps {
@@ -56,6 +59,8 @@ export function AddStorageModal({
   const [attachedVolumes, setAttachedVolumes] = useState<AttachedVolume[]>([]);
   const [availableVolumes, setAvailableVolumes] = useState<AvailableVolume[]>([]);
   const [storageBlocks, setStorageBlocks] = useState<StorageBlockOption[]>([]);
+  const [sharedStorageSupported, setSharedStorageSupported] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Form state
   const [mode, setMode] = useState<"existing" | "create">("existing");
@@ -79,6 +84,8 @@ export function AddStorageModal({
           setAttachedVolumes(data.attachedVolumes || []);
           setAvailableVolumes(data.availableVolumes || []);
           setStorageBlocks(data.storageBlocks || []);
+          setSharedStorageSupported(data.hasSharedStorageSupport ?? true);
+          setLoadFailed(Boolean(data.loadFailed));
 
           // Default to existing if there are available volumes
           if (data.availableVolumes?.length > 0) {
@@ -172,7 +179,7 @@ export function AddStorageModal({
   const canAttach =
     (mode === "existing" && selectedVolumeId !== null) ||
     (mode === "create" && selectedBlockId !== "");
-  const noOptions = availableVolumes.length === 0 && storageBlocks.length === 0;
+  const noOptions = !sharedStorageSupported || (availableVolumes.length === 0 && storageBlocks.length === 0);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -186,7 +193,7 @@ export function AddStorageModal({
                 Manage persistent storage volumes
               </p>
             </div>
-            <button
+            <button aria-label="Close dialog"
               onClick={onClose}
               className="p-1.5 text-zinc-400 hover:text-zinc-600 transition-colors"
             >
@@ -313,6 +320,7 @@ export function AddStorageModal({
                               <div className="text-sm font-medium text-[var(--ink)]">{vol.name}</div>
                               <div className="text-xs text-[var(--muted)]">
                                 {vol.size_in_gb}GB · {vol.mount_point}
+                                {vol.status?.toUpperCase() === "IN_USE" && " · shared with another instance"}
                               </div>
                             </div>
                             {selectedVolumeId === vol.id && (
@@ -343,8 +351,8 @@ export function AddStorageModal({
                           }`}
                         >
                           {block.size}GB
-                          {block.cost !== "0" && block.cost !== "0.00" && (
-                            <span className="text-xs ml-1">(${block.cost}/hr)</span>
+                          {block.cost > 0 && (
+                            <span className="text-xs ml-1">({formatSmartPrice(block.cost)}/hr)</span>
                           )}
                         </button>
                       ))}
@@ -358,7 +366,7 @@ export function AddStorageModal({
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                       </svg>
                       <div className="text-sm text-amber-700">
-                        <strong>GPU will restart briefly.</strong> Unsaved work in ephemeral storage may be lost.
+                        <strong>GPU will restart briefly.</strong> Unsaved work in local storage may be lost.
                       </div>
                     </div>
                   </div>
@@ -369,7 +377,11 @@ export function AddStorageModal({
               {noOptions && attachedVolumes.length === 0 && (
                 <div className="text-center py-8">
                   <p className="text-sm text-[var(--muted)]">
-                    No storage options available for this region.
+                    {loadFailed
+                      ? "Couldn't load storage options just now. Please try again in a moment."
+                      : !sharedStorageSupported
+                        ? "Shared storage isn't supported in this instance's region."
+                        : "This region has no storage capacity available right now."}
                   </p>
                 </div>
               )}

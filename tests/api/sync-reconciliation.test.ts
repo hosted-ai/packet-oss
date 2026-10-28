@@ -11,12 +11,14 @@ const HAI_INSTANCE_ID = 'i-aba9cfa1-17ce-4e3e-9424-cfa62516c742';
 const POOL_ID = 116;
 const POOL_NAME = 'NVIDIA L40S - Dedicated';
 const TEAM_ID = '7637a641-4530-4318-b8ea-745aafc4f6d2';
-const TEAM_OWNER_ID = 'cus_TeamOwner';      // ageofaiteam — owns the HAI team
-const PAYER_ID = 'cus_ThirdPartyPayer';     // jgdashish — pays for the GPU
+// The team owner holds the HAI team; a third-party payer pays for its GPU.
+const TEAM_OWNER_ID = 'cus_TeamOwner';
+const PAYER_ID = 'cus_ThirdPartyPayer';
 const MONTHLY_PRODUCT_ID = 'prod_L40S_Monthly';
 const HOURLY_PRODUCT_ID = 'prod_L40S_Hourly';
 
 const mockFindFirstCustomer = vi.fn();
+const mockFindManyCustomer = vi.fn();
 const mockFindManyPodMetadata = vi.fn();
 const mockCreatePodMetadata = vi.fn();
 const mockUpdatePodMetadata = vi.fn();
@@ -27,6 +29,7 @@ const mockFindManyProduct = vi.fn();
 vi.mock('@/lib/prisma', () => ({
   prisma: {
     customerCache: {
+      findMany: (...args: unknown[]) => mockFindManyCustomer(...args) ?? [],
       findFirst: (...args: unknown[]) => mockFindFirstCustomer(...args),
       update: (...args: unknown[]) => mockUpdateCustomerCache(...args),
     },
@@ -108,6 +111,7 @@ describe('/api/sync — reconciliation', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFindManyCustomer.mockReset();
     vi.useFakeTimers();
     testClock += 2 * 60 * 60 * 1000;
     vi.setSystemTime(new Date(testClock));
@@ -230,6 +234,54 @@ describe('/api/sync — reconciliation', () => {
     expect(call.data.hourlyRateCents).toBe(92);
     expect(call.data.poolId).toBe(String(POOL_ID));
     expect(call.data.productId).toBe(HOURLY_PRODUCT_ID);
+
+    const body = await res.json();
+    expect(body.reconciliationResults).toEqual([
+      expect.objectContaining({ subscriptionId: HAI_INSTANCE_ID, hourlyRateCents: 92, action: 'created' }),
+    ]);
+    expect(body.reconciliationResults[0].reason).toBeUndefined();
+    expect(body.summary.orphanedSubsFixed).toBe(1);
+    expect(body.summary.orphanedSubsUnmetered).toBe(0);
+  });
+
+  // The owner row findFirst picks is arbitrary when several customers share a team.
+  it.each([
+    ['the team owner is monthly', 'monthly', [{ id: TEAM_OWNER_ID, billingType: 'monthly' }]],
+    ['another customer sharing the team is monthly', 'hourly', [
+      { id: TEAM_OWNER_ID, billingType: 'hourly' },
+      { id: PAYER_ID, billingType: 'monthly' },
+    ]],
+  ])('does not meter unclaimed pods when %s', async (_label, ownerBillingType, teamCustomers) => {
+    mockReadPoolOverviewCache.mockReturnValue({
+      pools: [{ id: POOL_ID, name: POOL_NAME, pods: [{ teamId: TEAM_ID, status: 'active' }] }],
+    });
+    mockFindFirstCustomer.mockResolvedValue({
+      id: TEAM_OWNER_ID,
+      teamId: TEAM_ID,
+      email: 'team-owner@example.com',
+      billingType: ownerBillingType,
+    });
+    mockFindManyCustomer.mockImplementation(({ where }: { where?: { teamId?: string } }) =>
+      where?.teamId === TEAM_ID ? teamCustomers : [],
+    );
+    mockGetPoolSubscriptions.mockResolvedValue([{
+      id: HAI_INSTANCE_ID,
+      status: 'active',
+      pool_id: POOL_ID,
+      pool_name: POOL_NAME,
+    }]);
+    mockFindManyPodMetadata.mockImplementation(() => []);
+
+    const res = await POST(makeSyncRequest());
+    expect(res.status).toBe(200);
+
+    expect(mockFindManyCustomer).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ teamId: TEAM_ID, isDeleted: false }) }),
+    );
+    expect(mockCreatePodMetadata).not.toHaveBeenCalled();
+    expect(mockUpdatePodMetadata).not.toHaveBeenCalled();
+    expect(mockStripeUpdate).not.toHaveBeenCalled();
+    expect(mockUpdateCustomerCache).not.toHaveBeenCalled();
   });
 
   it('force-flips team owner to hourly when no monthly row claims the team', async () => {
@@ -311,6 +363,132 @@ describe('/api/sync — reconciliation', () => {
     // Force-flip suppressed by the monthly claim
     expect(mockStripeUpdate).not.toHaveBeenCalled();
     expect(mockUpdateCustomerCache).not.toHaveBeenCalled();
+  });
+});
+
+describe('/api/sync — reconciliation reports an active sub it cannot price', () => {
+  let testClock = new Date('2031-01-01T00:00:00Z').getTime();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    testClock += 2 * 60 * 60 * 1000;
+    vi.setSystemTime(new Date(testClock));
+
+    mockReadPoolOverviewCache.mockReturnValue({
+      pools: [{ id: POOL_ID, name: POOL_NAME, pods: [{ teamId: TEAM_ID, status: 'active' }] }],
+    });
+    mockFindFirstCustomer.mockResolvedValue({
+      id: TEAM_OWNER_ID,
+      teamId: TEAM_ID,
+      email: 'team-owner@example.com',
+      billingType: 'hourly',
+    });
+    mockGetPoolSubscriptions.mockResolvedValue([
+      { id: HAI_INSTANCE_ID, status: 'active', pool_id: POOL_ID, pool_name: POOL_NAME },
+    ]);
+    claimWith([]);
+  });
+
+  const zeroRatedProduct = {
+    id: HOURLY_PRODUCT_ID,
+    name: POOL_NAME,
+    pricePerHourCents: 0,
+    poolIds: JSON.stringify([POOL_ID]),
+    serviceId: null,
+  };
+
+  const rows = [{
+    subscriptionId: HAI_INSTANCE_ID,
+    instanceId: HAI_INSTANCE_ID,
+    stripeCustomerId: TEAM_OWNER_ID,
+    hourlyRateCents: 0,
+    billingType: 'hourly',
+    managedBy: null,
+  }];
+
+  // STEP 1's due-for-billing query stays empty so only STEP 0 runs.
+  function claimWith(existing: typeof rows) {
+    mockFindManyPodMetadata.mockImplementation(({ where }: { where?: { hourlyRateCents?: unknown } }) =>
+      where?.hourlyRateCents ? [] : existing);
+  }
+
+  async function sync() {
+    const warn = vi.spyOn(console, 'warn');
+    const res = await POST(makeSyncRequest());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const lines = warn.mock.calls.map(c => String(c[0])).filter(l => l.startsWith('[Sync Reconcile] Not metering'));
+    warn.mockRestore();
+    return { body, lines };
+  }
+
+  it('reports an orphaned sub whose pool has no product, and creates no row', async () => {
+    mockFindManyProduct.mockResolvedValue([]);
+
+    const { body, lines } = await sync();
+
+    expect(mockCreatePodMetadata).not.toHaveBeenCalled();
+    expect(body.reconciliationResults).toEqual([{
+      customerId: TEAM_OWNER_ID,
+      subscriptionId: HAI_INSTANCE_ID,
+      poolId: String(POOL_ID),
+      hourlyRateCents: 0,
+      action: 'skipped_unpriced',
+      productId: null,
+      reason: 'no_product',
+    }]);
+    expect(body.summary.orphanedSubsFixed).toBe(0);
+    expect(body.summary.orphanedSubsUnmetered).toBe(1);
+    expect(lines).toEqual([
+      `[Sync Reconcile] Not metering sub ${HAI_INSTANCE_ID}: action=skipped_unpriced reason=no_product team=${TEAM_ID} pool=${POOL_ID} product=none customer=${TEAM_OWNER_ID}`,
+    ]);
+  });
+
+  it('reports an orphaned sub whose product is zero-rated, and creates no row', async () => {
+    mockFindManyProduct.mockResolvedValue([zeroRatedProduct]);
+
+    const { body, lines } = await sync();
+
+    expect(mockCreatePodMetadata).not.toHaveBeenCalled();
+    expect(body.reconciliationResults).toEqual([
+      expect.objectContaining({ action: 'skipped_unpriced', reason: 'zero_rate', productId: HOURLY_PRODUCT_ID, hourlyRateCents: 0 }),
+    ]);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`reason=zero_rate team=${TEAM_ID} pool=${POOL_ID} product=${HOURLY_PRODUCT_ID}`);
+  });
+
+  it('reports a claimed rateless row it cannot backfill, and leaves the row untouched', async () => {
+    claimWith(rows);
+    mockFindManyProduct.mockResolvedValue([zeroRatedProduct]);
+
+    const { body, lines } = await sync();
+
+    expect(mockUpdatePodMetadata).not.toHaveBeenCalled();
+    expect(mockCreatePodMetadata).not.toHaveBeenCalled();
+    expect(body.reconciliationResults).toEqual([
+      expect.objectContaining({ subscriptionId: HAI_INSTANCE_ID, action: 'rate_not_backfilled', reason: 'zero_rate', productId: HOURLY_PRODUCT_ID }),
+    ]);
+    expect(body.summary.orphanedSubsFixed).toBe(0);
+    expect(body.summary.orphanedSubsUnmetered).toBe(1);
+    expect(lines[0]).toContain('action=rate_not_backfilled reason=zero_rate');
+  });
+
+  it('still backfills a claimed rateless row when the pool has a priced product', async () => {
+    claimWith(rows);
+    mockFindUniquePodMetadata.mockResolvedValue({ subscriptionId: HAI_INSTANCE_ID, poolId: null, productId: null, prepaidUntil: null });
+    mockFindManyProduct.mockResolvedValue([{ ...zeroRatedProduct, pricePerHourCents: 92 }]);
+
+    const { body, lines } = await sync();
+
+    expect(mockUpdatePodMetadata).toHaveBeenCalledTimes(1);
+    expect(mockUpdatePodMetadata.mock.calls[0][0].data.hourlyRateCents).toBe(92);
+    expect(body.reconciliationResults).toEqual([
+      expect.objectContaining({ subscriptionId: HAI_INSTANCE_ID, hourlyRateCents: 92, action: 'updated' }),
+    ]);
+    expect(body.summary.orphanedSubsFixed).toBe(1);
+    expect(body.summary.orphanedSubsUnmetered).toBe(0);
+    expect(lines).toEqual([]);
   });
 });
 

@@ -22,6 +22,7 @@ const {
   mockReferralClaimCount,
   mockStripeChargesList,
   mockStripeSubscriptionsList,
+  mockAdminStatsSnapshotFindUnique,
 } = vi.hoisted(() => ({
   mockGetStripe: vi.fn(),
   mockSendMidnightStatusEmail: vi.fn(),
@@ -36,6 +37,7 @@ const {
   mockReferralClaimCount: vi.fn(),
   mockStripeChargesList: vi.fn(),
   mockStripeSubscriptionsList: vi.fn(),
+  mockAdminStatsSnapshotFindUnique: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -51,6 +53,9 @@ vi.mock("@/lib/prisma", () => ({
     },
     voucherRedemption: { count: mockVoucherRedemptionCount },
     referralClaim: { count: mockReferralClaimCount },
+    // previousMrrCents now reads the same-day-last-week value from the daily
+    // AdminStatsSnapshot (findUnique by date); null → route falls back to mrrCents.
+    adminStatsSnapshot: { findUnique: mockAdminStatsSnapshotFindUnique },
   },
 }));
 vi.mock("@/lib/stripe", () => ({ getStripe: mockGetStripe }));
@@ -91,6 +96,8 @@ function setUpMinimalMocks() {
     subscriptions: { list: mockStripeSubscriptionsList },
   });
   mockSendMidnightStatusEmail.mockResolvedValue(undefined);
+  // No prior snapshot by default → previousMrrCents falls back to current mrr.
+  mockAdminStatsSnapshotFindUnique.mockResolvedValue(null);
 }
 
 beforeEach(() => {
@@ -183,10 +190,12 @@ describe("POST /api/cron/midnight-status-email", () => {
     ]);
     mockStripeChargesList.mockResolvedValue({
       data: [
-        { status: "succeeded", refunded: false, amount: 5000 },
-        { status: "succeeded", refunded: true, amount: 9999 }, // excluded
-        { status: "failed", refunded: false, amount: 3000 },   // excluded
-        { status: "succeeded", refunded: false, amount: 7500 },
+        { status: "succeeded", amount: 5000, amount_refunded: 0 },
+        // Fully refunded (amount_refunded == amount) → net 0, not a deposit that
+        // stuck. The product nets via amount_refunded, not the `refunded` flag.
+        { status: "succeeded", amount: 9999, amount_refunded: 9999 },
+        { status: "failed", amount: 3000, amount_refunded: 0 }, // excluded (not succeeded)
+        { status: "succeeded", amount: 7500, amount_refunded: 0 },
       ],
     });
 

@@ -379,7 +379,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { payload, teamId } = auth;
+    const { teamId } = auth;
 
     if (!teamId) {
       return NextResponse.json({ error: "No team associated with account" }, { status: 400 });

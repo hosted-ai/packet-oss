@@ -2,9 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
 import { gatePermission } from "@/lib/auth/gate";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
-import { getConnectionInfo } from "@/lib/hostedai";
+import { getConnectionInfo, isUnifiedInstanceId } from "@/lib/hostedai";
 import { spawn } from "child_process";
-import Stripe from "stripe";
 import { validateSSHParams } from "@/lib/ssh-validation";
 
 // Parse SSH command to extract host and port
@@ -155,7 +154,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Account not found" }, { status: 404 });
     }
     const customer = ctx.customer;
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },
@@ -179,6 +178,11 @@ export async function POST(request: NextRequest) {
     const connectionInfo = await getConnectionInfo(teamId, subscriptionId);
 
     if (!connectionInfo || connectionInfo.length === 0) {
+      // Mirror the credentials route: an instance this team does not own is
+      // reported missing rather than confirmed to exist.
+      if (isUnifiedInstanceId(subscriptionId)) {
+        return NextResponse.json({ error: "Instance not found" }, { status: 404 });
+      }
       return NextResponse.json(
         { error: "No connection info available for this subscription" },
         { status: 400 }

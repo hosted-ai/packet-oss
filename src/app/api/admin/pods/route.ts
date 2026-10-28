@@ -9,9 +9,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
 import { getConnectionInfo, getAllUnifiedInstances } from "@/lib/hostedai";
-import type { UnifiedInstance } from "@/lib/hostedai";
+import { getVgpuCounts } from "@/lib/ops-vgpu-cache";
 import { getStripeTeamMap } from "@/lib/admin-cache";
 import { prisma } from "@/lib/prisma";
+import { DEPLOYABLE_ORDER_BY, DEPLOYABLE_WHERE } from "@/lib/product-availability";
 
 export interface AdminPod {
   subscriptionId: string;
@@ -24,6 +25,8 @@ export interface AdminPod {
   /** Whether this pod is considered dead/unhealthy */
   isDead: boolean;
   vgpuCount: number;
+  /** HAI instance nature: "pod" (GPUaaS) or "baremetal". Baremetal has no GPU telemetry. */
+  nature?: string;
   podName?: string;
   // Owner info (if matched to a customer)
   owner?: {
@@ -56,6 +59,18 @@ export interface AdminPod {
     billingType?: string; // "hourly" | "monthly"
     prepaidUntil?: string;
     stripeCustomerId?: string;
+  };
+  // Public IP(s) from HAI (baremetal falls back to the stored server IP)
+  publicIps?: string[];
+  // GPU accelerator/service display name (e.g. "NVIDIA RTX PRO 6000 Blackwell")
+  accelerator?: string;
+  // Baremetal term-prepay linkage (BareMetalOrder via BareMetalServer.haiInstanceId)
+  baremetal?: {
+    invoiceNumber: string;
+    hostedInvoiceUrl?: string;
+    contractMonths: number;
+    totalInvoiceCents: number;
+    status: string;
   };
   // Timestamps
   createdAt?: string;
@@ -90,8 +105,11 @@ async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<stri
     getStripeTeamMap(),
   ]);
 
-  // Active statuses (running or transitional)
-  const ACTIVE_STATUSES = ["running", "pending", "starting", "restarting"];
+  // Active statuses (running or transitional). getAllUnifiedInstances returns
+  // both pods and VMs (nature): a live pod is "running", a live VM is "active"
+  // (Confluence HP/600178689 §2). Both count, else VM-nature GPUs vanish from
+  // the admin pods summary while showing on the user dashboard (PA-134).
+  const ACTIVE_STATUSES = ["running", "active", "pending", "starting", "restarting"];
   const DEAD_STATUSES = ["error", "failed", "unknown"];
 
   // Build pods from unified instances
@@ -107,12 +125,13 @@ async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<stri
     allPods.push({
       subscriptionId: inst.id,
       teamId,
-      poolId: 0, // Not directly available from unified API
+      poolId: inst.pod_info?.pool_id ?? 0, // PA-188: HAI unified pod_info carries the real pool id (0 = none, e.g. baremetal)
       poolName: inst.pod_info?.pool_name || inst.service?.name || "Unknown",
       status: statusLower,
       podStatus: inst.status,
       isDead,
       vgpuCount: inst.pod_info?.vgpu_count || 1,
+      nature: inst.nature || undefined,
       podName: inst.name,
       owner: stripeInfo ? {
         customerId: stripeInfo.customerId,
@@ -125,10 +144,30 @@ async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<stri
       } : undefined),
       ssh: undefined,
       metrics: { tflopsUsage: undefined, vramUsage: undefined },
+      publicIps: Array.isArray(inst.ip) ? inst.ip.filter(Boolean) : [],
+      accelerator:
+        inst.pod_info?.model ||
+        inst.service?.name ||
+        inst.instance_type?.name ||
+        undefined,
       createdAt: inst.created_at,
     });
 
     if (teamId) teamIdsWithPods.add(teamId);
+  }
+
+  // The unified-instance LIST omits pod_info.vgpu_count, so it defaulted to 1.
+  // The per-instance DETAIL carries it; enrich from the cached detail lookup so
+  // multi-GPU pods report their real vGPU count (per-row display + Total vGPUs).
+  try {
+    const gpuPodIds = allPods.filter((p) => p.nature !== "baremetal").map((p) => p.subscriptionId);
+    const vgpu = await getVgpuCounts(gpuPodIds);
+    for (const pod of allPods) {
+      const real = vgpu[pod.subscriptionId];
+      if (typeof real === "number" && real > 0) pod.vgpuCount = real;
+    }
+  } catch (e) {
+    console.warn("[Admin Pods] vGPU count enrichment failed:", e);
   }
 
   console.log(`[Admin Pods] ${allPods.length} instances from unified API, ${teamIdsWithPods.size} unique teams`);
@@ -189,12 +228,15 @@ async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<stri
   }
 
   // Build GpuProduct price map by poolId and pool name — authoritative billing source.
-  // Unified instances don't have numeric poolId, so we also match by pool_name.
+  // poolId now comes from pod_info.pool_id (PA-188); pool_name match stays as a fallback.
   const poolPriceMap = new Map<number, { hourlyRateCents: number; monthlyRateCents: number | null; billingType: string }>();
   const poolNamePriceMap = new Map<string, { hourlyRateCents: number; monthlyRateCents: number | null; billingType: string }>();
   try {
+    // Deployable: live pods sit on plans withdrawn from sale, and their rates
+    // must still show. The hourly preference below keeps a 0/hr monthly row off.
     const gpuProducts = await prisma.gpuProduct.findMany({
-      where: { active: true },
+      where: DEPLOYABLE_WHERE,
+      orderBy: DEPLOYABLE_ORDER_BY,
       select: { name: true, poolIds: true, pricePerHourCents: true, pricePerMonthCents: true, billingType: true },
     });
 
@@ -255,6 +297,7 @@ async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<stri
     const allMeta = await prisma.podMetadata.findMany({
       select: {
         subscriptionId: true,
+        instanceId: true,
         displayName: true,
         notes: true,
         createdAt: true,
@@ -267,6 +310,14 @@ async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<stri
 
     // Build lookup maps
     const metaBySubId = new Map(allMeta.map((m) => [m.subscriptionId, m]));
+    // Some deploy flows store subscriptionId prefixed as `instance-${id}` while
+    // pod.subscriptionId (from the unified instances API) is the raw id — match
+    // via the dedicated instanceId column (always raw, @unique) so those pods
+    // don't fall through to the ambiguous poolId+customerId match below and
+    // collide with another pod on the same pool/owner (PA-348).
+    const metaByInstanceId = new Map(
+      allMeta.filter((m) => m.instanceId).map((m) => [m.instanceId as string, m])
+    );
     // Also by poolId + stripeCustomerId for matching cache pods
     const metaByPoolCustomer = new Map<string, typeof allMeta[0]>();
     for (const m of allMeta) {
@@ -276,8 +327,8 @@ async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<stri
     }
 
     for (const pod of allPods) {
-      // Try matching by subscriptionId first
-      let meta = metaBySubId.get(pod.subscriptionId);
+      // Try matching by subscriptionId, then by instanceId
+      let meta = metaBySubId.get(pod.subscriptionId) || metaByInstanceId.get(pod.subscriptionId);
 
       // If no match, try by poolId + stripeCustomerId
       if (!meta && pod.owner?.customerId) {
@@ -304,12 +355,62 @@ async function fetchPodsData(): Promise<{ pods: AdminPod[]; summary: Record<stri
     console.warn("[Admin Pods] Could not fetch pod metadata:", metaError);
   }
 
+  // Baremetal billing is term-prepaid by Stripe invoice (BareMetalOrder), not an
+  // hourly/monthly GpuProduct rate. Link each baremetal pod to its order via
+  // BareMetalServer.haiInstanceId so the table can show the invoice instead of UNBILLED.
+  try {
+    const baremetalPods = allPods.filter((p) => p.nature === "baremetal");
+    const baremetalIds = baremetalPods.map((p) => p.subscriptionId);
+    const baremetalNames = baremetalPods.map((p) => p.podName).filter(Boolean) as string[];
+    if (baremetalIds.length > 0) {
+      // Baremetal inst.id from HAI is the numeric subscription id (e.g. "121"),
+      // stored as haiSubscriptionId. haiInstanceId/label hold the name
+      // (INV-BM-…-N). Match on any of them so the order links regardless.
+      const servers = await prisma.bareMetalServer.findMany({
+        where: {
+          OR: [
+            { haiSubscriptionId: { in: baremetalIds } },
+            { haiInstanceId: { in: [...baremetalIds, ...baremetalNames] } },
+            { label: { in: baremetalNames } },
+          ],
+        },
+        include: { order: true },
+      });
+      const serverByKey = new Map<string, (typeof servers)[number]>();
+      for (const s of servers) {
+        for (const key of [s.haiSubscriptionId, s.haiInstanceId, s.label]) {
+          if (key) serverByKey.set(key, s);
+        }
+      }
+      for (const pod of allPods) {
+        if (pod.nature !== "baremetal") continue;
+        const server = serverByKey.get(pod.subscriptionId) || (pod.podName ? serverByKey.get(pod.podName) : undefined);
+        if (!server) continue;
+        pod.baremetal = {
+          invoiceNumber: server.order.invoiceNumber,
+          hostedInvoiceUrl: server.order.hostedInvoiceUrl || undefined,
+          contractMonths: server.order.contractMonths,
+          totalInvoiceCents: server.order.totalInvoiceCents,
+          status: server.order.status,
+        };
+        // HAI list IP can be empty for baremetal; fall back to the stored server IP.
+        if ((!pod.publicIps || pod.publicIps.length === 0) && server.ipAddress) {
+          pod.publicIps = [server.ipAddress];
+        }
+      }
+    }
+  } catch (bmError) {
+    console.warn("[Admin Pods] Could not link baremetal orders:", bmError);
+  }
+
   // Calculate summary stats
   // Active = running + transitional states (matches the KPI bar definition)
   const activePods = allPods.filter((p) => ACTIVE_STATUSES.includes(p.status) && !p.isDead);
   const deadPods = allPods.filter((p) => p.isDead);
   const unbilledPods = activePods.filter((p) =>
-    !p.billing || (!p.billing.hourlyRateCents && !p.billing.monthlyRateCents)
+    // Baremetal is term-prepaid by invoice, not by an hourly/monthly rate — never "unbilled".
+    p.nature !== "baremetal" &&
+    (!p.billing || (!p.billing.hourlyRateCents && !p.billing.monthlyRateCents))
   );
   const summary = {
     totalPods: allPods.length,

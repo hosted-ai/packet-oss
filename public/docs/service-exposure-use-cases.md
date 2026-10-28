@@ -57,7 +57,7 @@ export async function POST(req) {
 
 **Steps**:
 1. Deploy vLLM on your GPU pod
-2. Expose port 8000 as `llama-api` (LoadBalancer for production)
+2. Expose port 8000 as `llama-api` (protocol TCP, service type HTTP)
 3. Use the external URL in your web app
 4. Your chatbot is now live! 🎉
 
@@ -90,7 +90,7 @@ Check it out! Real-time metrics updating every 30 seconds.
 
 **Steps**:
 1. Start TensorBoard in your pod
-2. Expose port 6006 as `training-tensorboard` (NodePort is fine)
+2. Expose port 6006 as `training-tensorboard` (service type HTTP)
 3. Slack the URL to your team
 4. Everyone can view metrics in their browser - no SSH needed!
 
@@ -131,7 +131,7 @@ demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
 
 **Steps**:
 1. Create the Gradio app (5 minutes)
-2. Expose port 7860 as `investor-demo` (NodePort)
+2. Expose port 7860 as `investor-demo` (service type HTTP)
 3. Share URL: `http://34.123.45.67:32123`
 4. In the meeting: "Here's a live demo you can try right now"
 5. Investors can interact with your model in real-time 🚀
@@ -159,7 +159,7 @@ jupyter lab --ip=0.0.0.0 --port=8888 --no-browser \
 
 **Steps**:
 1. Start Jupyter Lab on the GPU pod
-2. Expose port 8888 as `team-jupyter` (NodePort)
+2. Expose port 8888 as `team-jupyter` (service type HTTP)
 3. Share with colleague:
    ```
    Jupyter Lab: http://34.123.45.67:31789/lab?token=secure-shared-token-here
@@ -248,7 +248,7 @@ Create a simple comparison tool:
 - ✅ API key authentication
 - ✅ Clean, professional URLs
 
-**With Service Exposure (LoadBalancer)** ✅:
+**With Service Exposure** ✅:
 ```bash
 # Start production vLLM with authentication
 python -m vllm.entrypoints.openai.api_server \
@@ -260,9 +260,9 @@ python -m vllm.entrypoints.openai.api_server \
 ```
 
 **Steps**:
-1. Expose port 8000 with **LoadBalancer** type
-2. Get clean URL: `http://35.123.45.67:8000`
-3. Set up your domain: `api.yourcompany.com → 35.123.45.67`
+1. Expose port 8000 with protocol **TCP** and service type **HTTP**
+2. Get the external URL from the dashboard, e.g. `http://34.123.45.67:31234`
+3. Set up your domain to point at the external IP: `api.yourcompany.com → 34.123.45.67`
 4. Customers use:
    ```bash
    curl https://api.yourcompany.com/v1/chat/completions \
@@ -445,47 +445,37 @@ Do you need to access the service?
 │  └─ Use SSH port forwarding → NO Service Exposure needed
 │
 ├─ From your web app/mobile app?
-│  └─ YES → Use Service Exposure with LoadBalancer
+│  └─ YES → Use Service Exposure (service type HTTP/HTTPS)
 │
 ├─ Share with 1-2 team members?
 │  ├─ Technical team? → SSH port forwarding is fine
-│  └─ Non-technical? → YES → Service Exposure with NodePort
+│  └─ Non-technical? → YES → Use Service Exposure
 │
 ├─ Share with customers/public?
-│  └─ YES → Use Service Exposure with LoadBalancer + domain
+│  └─ YES → Use Service Exposure + your own domain
 │
 ├─ Demo for stakeholders?
-│  └─ YES → Use Service Exposure with NodePort (quick setup)
+│  └─ YES → Use Service Exposure (quick setup)
 │
 └─ Long-running service (24/7)?
-   └─ YES → Use Service Exposure with LoadBalancer (reliability)
+   └─ YES → Use Service Exposure (+ authentication)
 ```
 
 ---
 
 ## Cost-Benefit Analysis
 
-### Free Option (NodePort)
-**Costs**: $0 extra
-**Best for**:
-- Development and testing
-- Team collaboration
-- Internal tools
-- Demos and prototypes
+Service Exposure is included with your GPU instance — there is no separate charge in your dashboard billing for exposing services.
 
-### Paid Option (LoadBalancer)
-**Costs**: ~$10-30/month per service
-**Best for**:
-- Production APIs
-- Customer-facing services
-- Services requiring custom domains
-- High-availability requirements
+**Time saved**:
+- No SSH tunnels to keep alive
+- Share a URL instead of onboarding teammates onto SSH
+- Production-style endpoints without building your own ingress
 
-**ROI Calculation**:
-- Developer time saved: ~5 hours/month (not dealing with SSH tunnels)
-- At $100/hour: **$500/month value**
-- LoadBalancer cost: **$20/month**
-- **Net benefit: $480/month** 📈
+**Good for**:
+- Development, testing, demos, and prototypes
+- Team collaboration and internal tools
+- Production APIs and customer-facing services (add authentication and, ideally, your own domain + TLS)
 
 ---
 

@@ -14,7 +14,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCronAuth } from "@/lib/cron-auth";
 import { prisma } from "@/lib/prisma";
-import { reconcilePendingDeploy } from "@/lib/deploy-monitor";
+import { reconcilePendingDeploy, reconcileRunningGhost, terminateFailedDeploy } from "@/lib/deploy-monitor";
+import { opsAlert } from "@/lib/ops-alert";
 
 // Pods older than this are considered stuck and auto-failed.
 const DEPLOY_TIMEOUT_MS = 15 * 60 * 1000;
@@ -25,6 +26,10 @@ const MAX_AGE_MS = 60 * 60 * 1000;
 
 // Cap per run so a backlog never blows up HAI request volume.
 const MAX_PER_RUN = 25;
+
+// Attempts a failed-deploy survivor may resist before ops is alerted (~25min
+// at the 2.5-minute cron cadence). Retries continue after the alert.
+const TERMINATE_ALERT_AFTER = 10;
 
 async function reconcile(request: NextRequest): Promise<NextResponse> {
   const authError = verifyCronAuth(request);
@@ -39,6 +44,9 @@ async function reconcile(request: NextRequest): Promise<NextResponse> {
       where: {
         deployStatus: "provisioning",
         deployTime: { gte: minAge },
+        // Engine-launched pods are confirmed (or refunded) by packet-api's
+        // reconciler — grabbing one here would race it into failed_refunded.
+        managedBy: { not: "engine" },
       },
       orderBy: { deployTime: "asc" },
       take: MAX_PER_RUN,
@@ -48,11 +56,11 @@ async function reconcile(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Query failed" }, { status: 500 });
   }
 
-  if (pending.length === 0) {
-    return NextResponse.json({ success: true, checked: 0 });
+  // Note: do NOT early-return when pending is empty — the running-ghost pass
+  // below (PA-221) must still run on every invocation.
+  if (pending.length > 0) {
+    console.log(`[CheckPendingDeploys] Reconciling ${pending.length} provisioning row(s)`);
   }
-
-  console.log(`[CheckPendingDeploys] Reconciling ${pending.length} provisioning row(s)`);
 
   const results: Array<{ instanceId: string; status: string; reason?: string }> = [];
 
@@ -82,9 +90,107 @@ async function reconcile(request: NextRequest): Promise<NextResponse> {
     }
   }
 
+  // PA-221: second pass — running "ghost" pods. A deploy can flip
+  // provisioning → running and then be deleted by HAI seconds later; the
+  // pass above only inspects provisioning rows, so the prepaid charge stands
+  // with no refund. Reconcile recently deployed running rows whose prepaid
+  // window is still open. Scoped to deployTime >= minAge so we don't re-poll
+  // every healthy long-running pod (sync keeps their prepaidUntil in the
+  // future). Monthly deploys have null prepaidUntil and are excluded.
+  let runningGhosts: typeof pending = [];
+  try {
+    runningGhosts = await prisma.podMetadata.findMany({
+      where: {
+        deployStatus: "running",
+        prepaidUntil: { gt: new Date(now) },
+        deployTime: { gte: minAge },
+        managedBy: { not: "engine" },
+      },
+      orderBy: { deployTime: "asc" },
+      take: MAX_PER_RUN,
+    });
+  } catch (err) {
+    console.error("[CheckPendingDeploys] Running-ghost query failed:", err);
+  }
+
+  if (runningGhosts.length > 0) {
+    console.log(`[CheckPendingDeploys] Checking ${runningGhosts.length} running row(s) for post-running deletion`);
+  }
+
+  for (const row of runningGhosts) {
+    if (!row.instanceId || row.billingType === "monthly") continue;
+    const prechargedCents = row.prepaidAmountCents || 0;
+    if (prechargedCents <= 0) continue;
+    try {
+      const result = await reconcileRunningGhost({
+        instanceId: row.instanceId,
+        customerId: row.stripeCustomerId,
+        prechargedCents,
+        isMonthlyDeploy: false,
+      });
+      if (result.status !== "alive") {
+        results.push({ instanceId: row.instanceId, status: `running:${result.status}`, reason: result.reason });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[CheckPendingDeploys] Running-ghost reconcile failed for ${row.instanceId}:`, msg);
+      results.push({ instanceId: row.instanceId, status: "error", reason: msg.slice(0, 200) });
+    }
+  }
+
+  // Third pass — a refunded deploy whose instance HAI refused to delete keeps
+  // booting and bills on at any age; least-tried first so none monopolises the cap.
+  let failedSurvivors: typeof pending = [];
+  try {
+    failedSurvivors = await prisma.podMetadata.findMany({
+      where: {
+        deployStatus: "failed_refunded",
+        terminateConfirmedAt: null,
+        managedBy: { not: "engine" },
+      },
+      orderBy: [{ terminateAttempts: "asc" }, { deployTime: "asc" }],
+      take: MAX_PER_RUN,
+    });
+  } catch (err) {
+    console.error("[CheckPendingDeploys] Failed-deploy survivor query failed:", err);
+  }
+
+  for (const row of failedSurvivors) {
+    if (!row.instanceId) continue;
+    try {
+      const state = await terminateFailedDeploy(row.instanceId);
+      // No delete was attempted, so neither the counter nor the confirmation
+      // moves — inflating attempts would alert ops on a HAI outage.
+      if (state === "unknown") {
+        results.push({ instanceId: row.instanceId, status: "failed:unknown" });
+        continue;
+      }
+      const attempts = row.terminateAttempts + 1;
+      await prisma.podMetadata.update({
+        where: { id: row.id },
+        data: state === "gone"
+          ? { terminateAttempts: attempts, terminateConfirmedAt: new Date() }
+          : { terminateAttempts: attempts },
+      });
+      if (state !== "gone") {
+        results.push({ instanceId: row.instanceId, status: `failed:${state}` });
+      }
+      if (state === "alive" && attempts === TERMINATE_ALERT_AFTER) {
+        await opsAlert("CheckPendingDeploys", `HAI will not release failed instance ${row.instanceId}`, [
+          `The deploy was refunded but the instance is still running after ${attempts} terminate attempts.`,
+          `pod_metadata id ${row.id}, subscription ${row.subscriptionId}.`,
+        ]);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[CheckPendingDeploys] Terminate failed for ${row.instanceId}:`, msg);
+      results.push({ instanceId: row.instanceId, status: "error", reason: msg.slice(0, 200) });
+    }
+  }
+
   return NextResponse.json({
     success: true,
-    checked: pending.length,
+    checked: pending.length + runningGhosts.length + failedSurvivors.length,
     durationMs: Date.now() - now,
     results,
   });

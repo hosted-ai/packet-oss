@@ -1,9 +1,12 @@
 import Stripe from "stripe";
 import { getStripe } from "./stripe";
+import { prisma } from "./prisma";
 import { getAutoRefillThresholdCents, getAutoRefillAmountCents } from "./pricing";
 import { addSpend } from "./lifecycle";
 import { cacheCustomer } from "./customer-cache";
-import { createInvoiceForPayment } from "./invoice";
+import { createInvoiceForPayment, heldByInvoiceGeneration } from "./invoice";
+import { trackPurchase } from "./analytics/ga4";
+import { posthogTrackPurchase } from "./analytics/posthog";
 
 export interface WalletBalance {
   availableBalance: number; // in cents
@@ -29,10 +32,12 @@ export async function getWalletBalance(customerId: string): Promise<WalletBalanc
   const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
   cacheCustomer(customer).catch(() => {});
 
-  // customer.balance: positive = they owe us, negative = they have credit
-  // We convert to "available balance" where positive = credit available
+  // customer.balance: positive = they owe us, negative = they have credit. Credit an
+  // invoice hold is sitting on is still spendable, so it counts (see the hold helper).
+  const held = await heldByInvoiceGeneration(stripe, customerId);
+
   return {
-    availableBalance: -(customer.balance || 0), // Flip sign so positive = credit
+    availableBalance: -(customer.balance || 0) + held,
     pendingBalance: 0,
     currency: "usd",
   };
@@ -106,6 +111,29 @@ export async function fundWallet(
         },
       });
 
+      // GA4 + PostHog: purchase event for auto-refill — fires in lockstep with
+      // the balance transaction, matching the pattern in handleWalletTopup().
+      // Without this, auto-refill revenue is invisible to PostHog (PA-??).
+      const refillCustomer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
+      cacheCustomer(refillCustomer).catch(() => {});
+      const refillEmail = refillCustomer.email || undefined;
+
+      trackPurchase({
+        stripeCustomerId: customerId,
+        transactionId: paymentIntent.id,
+        valueCents: amountCents,
+        productType: "on_demand",
+        tenure: "hourly",
+      }).catch(() => {});
+      posthogTrackPurchase({
+        stripeCustomerId: customerId,
+        transactionId: paymentIntent.id,
+        valueCents: amountCents,
+        productType: "on_demand",
+        tenure: "hourly",
+        userEmail: refillEmail,
+      }).catch(() => {});
+
       // Create a Stripe invoice for this auto-refill so it appears in customer portal (PA-102)
       // Awaited (not fire-and-forget) because the function temporarily neutralizes
       // the customer balance — concurrent deductUsage calls would see $0 and reject.
@@ -159,7 +187,8 @@ export async function deductUsage(
     // BALANCE GUARD: Reject debits that would exceed available credit
     const currentCustomer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
     cacheCustomer(currentCustomer).catch(() => {});
-    const availableCredit = -(currentCustomer.balance || 0);
+    const availableCredit =
+      -(currentCustomer.balance || 0) + (await heldByInvoiceGeneration(stripe, customerId));
     if (availableCredit < amountCents) {
       console.warn(`[Wallet] Blocking debit of ${amountCents}c for ${customerId}: only ${availableCredit}c available`);
       return {
@@ -236,8 +265,15 @@ export async function deductUsage(
 }
 
 /**
- * Check if wallet needs refill and trigger if necessary
- * Uses customer metadata lock + balance transaction check to prevent double-charging
+ * Check if wallet needs refill and trigger if necessary.
+ *
+ * Auto-refill is per-customer and OPT-IN (PA-195): the amount, threshold, and
+ * on/off are stored on the Stripe customer's metadata and set by the customer in
+ * the dashboard. When unset, auto-refill is OFF — we never charge a card the
+ * customer didn't explicitly enable. The global pricing defaults are used only as
+ * the suggested starting values in the UI.
+ *
+ * Uses customer metadata lock + balance transaction check to prevent double-charging.
  */
 export async function checkAndRefillWallet(
   customerId: string
@@ -248,11 +284,23 @@ export async function checkAndRefillWallet(
     const customer = await stripe.customers.retrieve(customerId) as Stripe.Customer;
     cacheCustomer(customer).catch(() => {});
 
+    // Per-customer auto-refill settings live on the Stripe customer's metadata
+    // and are OPT-IN: absent / != "true" means the customer has not enabled
+    // auto-refill, so we never charge their card. (PA-195)
+    const meta = customer.metadata || {};
+    if (meta.auto_refill_enabled !== "true") {
+      return { refilled: false };
+    }
+    const customAmount = parseInt(meta.auto_refill_amount_cents ?? "", 10);
+    const autoRefillAmountCents =
+      Number.isFinite(customAmount) && customAmount > 0 ? customAmount : getAutoRefillAmountCents();
+    const customThreshold = parseInt(meta.auto_refill_threshold_cents ?? "", 10);
+    const autoRefillThresholdCents =
+      Number.isFinite(customThreshold) && customThreshold > 0 ? customThreshold : getAutoRefillThresholdCents();
+
     // customer.balance: positive = owes us, negative = has credit
     // We want to refill when credit is low (balance approaching 0 or positive)
     const effectiveBalance = -customer.balance; // Convert to "available credit"
-    const autoRefillThresholdCents = getAutoRefillThresholdCents();
-    const autoRefillAmountCents = getAutoRefillAmountCents();
 
     if (effectiveBalance < autoRefillThresholdCents) {
       // Check 1: Look for recent completed refills (balance transactions)
@@ -328,7 +376,9 @@ export async function checkAndRefillWallet(
         return { refilled: false, error: "Recent wallet payment already processed" };
       }
 
-      console.log(`Wallet low for ${customerId}: ${effectiveBalance} cents. Triggering refill.`);
+      console.log(
+        `Wallet low for ${customerId}: ${effectiveBalance}c → auto-refilling ${autoRefillAmountCents}c (customer setting).`,
+      );
 
       const result = await fundWallet(customerId, autoRefillAmountCents);
 
@@ -410,6 +460,17 @@ export function formatCentsForUser(cents: number): string {
 }
 
 /**
+ * Format cents as a user-facing dollar string, preserving sign.
+ * Credit shows as "$12.50"; debt (a negative wallet balance) shows as "-$12.50".
+ * Unlike formatCentsForUser this does NOT clamp negatives to $0.00 — use it
+ * wherever the customer must see they are in arrears (PA-339).
+ */
+export function formatCentsSigned(cents: number): string {
+  const sign = cents < 0 ? "-" : "";
+  return `${sign}$${(Math.abs(cents) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/**
  * Refund a failed deployment
  * Used when deployment fails after payment was deducted
  */
@@ -435,6 +496,24 @@ export async function refundDeployment(
         refund_time: new Date().toISOString(),
       },
     });
+
+    // PA-693: mirror the refund into the wallet ledger (negative = credit, the
+    // PA-37 "refund" convention) so revenue and provider figures net it out.
+    // Before this, failed-deploy refunds were invisible to every ledger-based
+    // number. Best-effort — the customer already has their money back.
+    try {
+      await prisma.walletTransaction.create({
+        data: {
+          stripeCustomerId: customerId,
+          type: "refund",
+          amountCents: -amountCents,
+          description,
+          metadata: JSON.stringify({ source: "deployment_refund" }),
+        },
+      });
+    } catch (ledgerErr) {
+      console.error("[Wallet] refund ledger write failed (refund already issued):", ledgerErr);
+    }
 
     console.log(`[Wallet] Refunded $${(amountCents / 100).toFixed(2)} to ${customerId}: ${description}`);
     return { success: true };

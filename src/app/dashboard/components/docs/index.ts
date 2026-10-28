@@ -4,8 +4,6 @@ export { HuggingFaceDoc } from "./HuggingFaceDoc";
 export { Pro6000BlackwellDoc } from "./Pro6000BlackwellDoc";
 
 // Using Your Models
-// OSS stub — original: export { OpenAIGatewayDoc } from "./OpenAIGatewayDoc";
-export const OpenAIGatewayDoc = (_props?: any) => null;
 export { InferencePlaygroundDoc } from "./InferencePlaygroundDoc";
 
 // Monitoring & Analytics
@@ -22,5 +20,4 @@ export { BillingDoc } from "./BillingDoc";
 export { BudgetControlsDoc } from "./BudgetControlsDoc";
 
 // Development Environment
-export { WorkspaceDoc } from "./WorkspaceDoc";
 export { BrowserIDEDoc } from "./BrowserIDEDoc";

@@ -28,14 +28,27 @@ export interface CustomerTokenPayload {
   // keeps the token ephemeral (never persisted to a cookie) and drives the
   // dashboard's impersonation banner + audit attribution.
   impersonator?: { adminEmail: string };
+  // PA-380: emailed sign-in / invitation links are single-use. `loginLink` marks
+  // the token as such and `jti` keys the server-side login_link row that enforces
+  // short expiry + invalidate-prior + single-use. Access tokens (minted from a
+  // live session) and admin-bypass tokens carry neither, so they stay reusable.
+  loginLink?: boolean;
+  jti?: string;
 }
 
 export interface GenerateCustomerTokenOptions {
   userId?: string;
   activeAccountId?: string;
   expiresInHours?: number;
+  /** Minute-granularity TTL. Takes precedence over expiresInHours when set —
+   *  used for short-lived sign-in links (PA-380). */
+  expiresInMinutes?: number;
   /** Deep-link intent to carry through login. Sanitized before signing. */
   next?: string;
+  /** PA-380: mark this as a single-use sign-in link and bind it to a login_link
+   *  row via `jti`. Set by createLoginLink — do not set by hand. */
+  loginLink?: boolean;
+  jti?: string;
 }
 
 export function generateCustomerToken(
@@ -61,8 +74,17 @@ export function generateCustomerToken(
   // recipient can never rewrite it and the dashboard can honour it as-is.
   const safeNext = sanitizeNextPath(options.next, getAppUrl());
   if (safeNext) payload.next = safeNext;
+  // PA-380: single-use sign-in link claims. `jti` binds the token to its
+  // login_link row; `loginLink` flags it so /api/account/verify enforces
+  // single-use + supersede (plain access tokens omit both and stay reusable).
+  if (options.jti) payload.jti = options.jti;
+  if (options.loginLink) payload.loginLink = true;
 
-  return jwt.sign(payload, getJwtSecret(), { expiresIn: `${expiresInHours}h` });
+  // Minute-granularity TTL wins for short-lived sign-in links; otherwise hours.
+  // (Kept as inline template literals so the jwt SignOptions type narrows.)
+  return options.expiresInMinutes != null
+    ? jwt.sign(payload, getJwtSecret(), { expiresIn: `${options.expiresInMinutes}m` })
+    : jwt.sign(payload, getJwtSecret(), { expiresIn: `${expiresInHours}h` });
 }
 
 /**
@@ -110,6 +132,11 @@ export function generateTwoFactorVerifiedToken(originalToken: string): string | 
         ...(decoded.userId ? { userId: decoded.userId } : {}),
         ...(decoded.activeAccountId ? { activeAccountId: decoded.activeAccountId } : {}),
         ...(decoded.next ? { next: decoded.next } : {}),
+        // PA-380: keep the login-link identity so the post-2FA token still maps
+        // to the same login_link row and gets consumed (single-use) on session
+        // creation, instead of leaking a second uncontrolled sign-in token.
+        ...(decoded.loginLink ? { loginLink: true } : {}),
+        ...(decoded.jti ? { jti: decoded.jti } : {}),
       },
       getJwtSecret(),
       { expiresIn: remainingSeconds }

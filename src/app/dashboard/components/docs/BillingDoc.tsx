@@ -2,24 +2,23 @@
 
 export function BillingDoc() {
   return (
-    <div className="prose prose-zinc max-w-none">
-      <h1>Billing &amp; Usage Guide</h1>
+    <div>
       <p className="lead">
         This platform offers two ways to rent GPUs: pay-as-you-go with a prepaid wallet, or a flat-rate monthly subscription.
       </p>
 
       {/* Table of Contents */}
-      <nav className="not-prose my-8 p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
-        <h4 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-3">On this page</h4>
-        <ul className="space-y-1.5 text-sm">
-          <li><a href="#two-billing-models" className="text-blue-600 dark:text-blue-400 hover:underline">Two Ways to Rent a GPU</a></li>
-          <li><a href="#hourly-wallet" className="text-blue-600 dark:text-blue-400 hover:underline">Hourly (Pay-as-you-go)</a></li>
-          <li><a href="#monthly-subscription" className="text-blue-600 dark:text-blue-400 hover:underline">Monthly Subscription</a></li>
-          <li><a href="#gpu-pricing" className="text-blue-600 dark:text-blue-400 hover:underline">GPU Pricing</a></li>
-          <li><a href="#how-wallet-works" className="text-blue-600 dark:text-blue-400 hover:underline">How the Wallet Works</a></li>
-          <li><a href="#storage-pricing" className="text-blue-600 dark:text-blue-400 hover:underline">Storage Pricing</a></li>
-          <li><a href="#cost-management" className="text-blue-600 dark:text-blue-400 hover:underline">Cost Management Tips</a></li>
-          <li><a href="#faq" className="text-blue-600 dark:text-blue-400 hover:underline">FAQ</a></li>
+      <nav className="docs-toc">
+        <h4>On this page</h4>
+        <ul>
+          <li><a href="#two-billing-models">Two Ways to Rent a GPU</a></li>
+          <li><a href="#hourly-wallet">Hourly (Pay-as-you-go)</a></li>
+          <li><a href="#monthly-subscription">Monthly Subscription</a></li>
+          <li><a href="#gpu-pricing">GPU Pricing</a></li>
+          <li><a href="#how-wallet-works">How the Wallet Works</a></li>
+          <li><a href="#storage-pricing">Storage Pricing</a></li>
+          <li><a href="#cost-management">Cost Management Tips</a></li>
+          <li><a href="#faq">FAQ</a></li>
         </ul>
       </nav>
 
@@ -31,11 +30,11 @@ export function BillingDoc() {
         Choose the one that fits your workload:
       </p>
 
-      <div className="not-prose grid gap-4 sm:grid-cols-2 my-6">
-        <div className="p-5 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
-          <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Option 1</p>
-          <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-2">Hourly (Wallet)</h3>
-          <ul className="text-sm text-zinc-600 dark:text-zinc-400 space-y-2 list-disc list-inside">
+      <div className="docs-plans">
+        <div className="docs-plan">
+          <p className="docs-plan-eyebrow">Option 1</p>
+          <h3 className="docs-plan-title">Hourly (Wallet)</h3>
+          <ul>
             <li>Top up your wallet, deploy GPUs on demand</li>
             <li>Pay only for what you use</li>
             <li>Billed in 30-minute intervals</li>
@@ -43,10 +42,10 @@ export function BillingDoc() {
             <li>No commitment &mdash; terminate anytime</li>
           </ul>
         </div>
-        <div className="p-5 rounded-xl border border-teal-200 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20">
-          <p className="text-xs font-semibold uppercase tracking-wider text-teal-600 mb-2">Option 2</p>
-          <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 mb-2">Monthly Subscription</h3>
-          <ul className="text-sm text-zinc-600 dark:text-zinc-400 space-y-2 list-disc list-inside">
+        <div className="docs-plan docs-plan-accent">
+          <p className="docs-plan-eyebrow">Option 2</p>
+          <h3 className="docs-plan-title">Monthly Subscription</h3>
+          <ul>
             <li>$299/mo flat rate for one dedicated GPU</li>
             <li>Paid via credit card (Stripe subscription)</li>
             <li>Completely independent of your wallet balance</li>
@@ -70,9 +69,9 @@ export function BillingDoc() {
         <li><strong>Terminate early</strong> &mdash; if you stop before the 30-minute window ends, the unused portion is credited back to your wallet.</li>
       </ol>
 
-      <div className="not-prose bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 my-6">
-        <h4 className="text-green-800 dark:text-green-200 font-semibold mb-2 text-base">Example</h4>
-        <p className="text-green-700 dark:text-green-300 text-sm mb-0">
+      <div className="docs-callout docs-callout-success">
+        <h4>Example</h4>
+        <p>
           You launch an RTX PRO 6000 at $0.66/hr. After 45 minutes you terminate it.
           You&apos;re charged for two 30-minute intervals ($0.33 each = $0.66 total), but
           the 15 unused minutes from the second interval are credited back ($0.165).
@@ -95,9 +94,9 @@ export function BillingDoc() {
         <li>Cancel from your account page &mdash; the GPU stays active until the end of the billing period</li>
       </ul>
 
-      <div className="not-prose bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 my-6">
-        <h4 className="text-blue-800 dark:text-blue-200 font-semibold mb-2 text-base">Monthly vs. Hourly</h4>
-        <p className="text-blue-700 dark:text-blue-300 text-sm mb-0">
+      <div className="docs-callout docs-callout-info">
+        <h4>Monthly vs. Hourly</h4>
+        <p>
           The monthly subscription for the RTX PRO 6000 works out to ~$0.41/hr
           (based on 730 hours/month) &mdash; a <strong>38% saving</strong> compared
           to the hourly rate of $0.66/hr. If you plan to run a GPU for more than
@@ -215,7 +214,7 @@ export function BillingDoc() {
         </thead>
         <tbody>
           <tr>
-            <td><strong>Ephemeral (Local NVMe)</strong></td>
+            <td><strong>Local Storage (NVMe)</strong></td>
             <td>Free</td>
             <td>Included with every GPU, cleared on terminate</td>
           </tr>
@@ -263,7 +262,7 @@ export function BillingDoc() {
         </tbody>
       </table>
 
-      <h3>2. Use Ephemeral Storage When Possible</h3>
+      <h3>2. Use Local Storage When Possible</h3>
       <p>
         Only use persistent storage for data you need to keep across restarts
         (checkpoints, datasets, model weights).
@@ -275,10 +274,10 @@ export function BillingDoc() {
         $299/mo subscription is cheaper than hourly.
       </p>
 
-      <div className="not-prose bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 my-6">
-        <h4 className="text-red-800 dark:text-red-200 font-semibold mb-2 text-base">Warning</h4>
-        <p className="text-red-700 dark:text-red-300 text-sm mb-0">
-          Terminating an instance deletes all ephemeral data permanently.
+      <div className="docs-callout docs-callout-danger">
+        <h4>Warning</h4>
+        <p>
+          Terminating an instance deletes all local storage data permanently.
           Save important files to persistent storage or download them first.
         </p>
       </div>

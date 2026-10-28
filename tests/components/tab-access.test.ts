@@ -77,6 +77,31 @@ describe("isTabAllowed — PA-269 tab view-guard", () => {
     expect(isTabAllowed("billing", ro)).toBe(false);
   });
 
+  it("legacy baremetal tab is retired — never allowed (Spheron hidden)", () => {
+    expect(isTabAllowed("baremetal", canFor("teamAdmin", true))).toBe(false);
+    expect(isTabAllowed("baremetal", { "gpu.provision": true })).toBe(false);
+    // Even with the entitlement context, the legacy tab stays hidden
+    expect(isTabAllowed("baremetal", canFor("teamAdmin"), { bareMetalEnabled: true })).toBe(false);
+  });
+
+  it("bare-metal-orders requires BOTH billing.view and the bareMetalEnabled entitlement", () => {
+    // billing.view alone is not enough — the per-account flag must be on
+    expect(isTabAllowed("bare-metal-orders", { "billing.view": true })).toBe(false);
+    expect(
+      isTabAllowed("bare-metal-orders", { "billing.view": true }, { bareMetalEnabled: false }),
+    ).toBe(false);
+    // entitlement without billing.view is also not enough
+    expect(
+      isTabAllowed("bare-metal-orders", { "billing.view": false }, { bareMetalEnabled: true }),
+    ).toBe(false);
+    // both → allowed
+    expect(
+      isTabAllowed("bare-metal-orders", { "billing.view": true }, { bareMetalEnabled: true }),
+    ).toBe(true);
+    // first-paint (can-map not loaded) still must not redirect
+    expect(isTabAllowed("bare-metal-orders", null, { bareMetalEnabled: true })).toBe(true);
+  });
+
   it("every guarded tab has a predicate that denies an empty permission map", () => {
     for (const tab of Object.keys(TAB_VIEW_GUARDS)) {
       expect(isTabAllowed(tab as never, {})).toBe(false);

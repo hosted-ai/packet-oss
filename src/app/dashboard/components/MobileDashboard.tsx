@@ -40,6 +40,7 @@ export function MobileHeader({ balance, onMenuOpen, onTopUp, logoUrl }: MobileHe
 
         {balance !== undefined ? (
           <button
+            aria-label="Top up wallet"
             onClick={onTopUp}
             className="flex items-center gap-1.5 px-3 py-2 bg-zinc-900 text-white rounded-xl text-sm font-semibold"
           >
@@ -174,7 +175,7 @@ export function MobileMenuSheet({
               <p className="font-semibold text-[var(--ink)] truncate">{userName}</p>
               <p className="text-sm text-[var(--muted)] truncate">{userEmail}</p>
             </div>
-            <button
+            <button aria-label="Close dialog"
               onClick={onClose}
               className="w-10 h-10 flex items-center justify-center rounded-full bg-zinc-100"
             >
@@ -213,12 +214,12 @@ export function MobileMenuSheet({
               </button>
             )}
 
-            {bareMetalEnabled && check("gpu.provision") && (
-              <button onClick={() => handleTabClick("baremetal")} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-50 transition-colors">
+            {bareMetalEnabled && check("billing.view") && (
+              <button onClick={() => handleTabClick("bare-metal-orders")} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-zinc-50 transition-colors">
                 <svg className="w-5 h-5 text-zinc-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <span className="font-medium text-[var(--ink)]">Bare Metal</span>
+                <span className="font-medium text-[var(--ink)]">Bare Metal Orders</span>
               </button>
             )}
 
@@ -308,9 +309,11 @@ interface MobileMoreSheetProps {
   onTabChange: (tab: string) => void;
   hasUnreadSupport?: boolean;
   bareMetalEnabled?: boolean;
+  /** billing.view — the orders tab + its API both require it; mirror here */
+  canViewBilling?: boolean;
 }
 
-export function MobileMoreSheet({ isOpen, onClose, onTabChange, hasUnreadSupport, bareMetalEnabled }: MobileMoreSheetProps) {
+export function MobileMoreSheet({ isOpen, onClose, onTabChange, hasUnreadSupport, bareMetalEnabled, canViewBilling }: MobileMoreSheetProps) {
   if (!isOpen) return null;
 
   const handleTabClick = (tab: string) => {
@@ -356,14 +359,14 @@ export function MobileMoreSheet({ isOpen, onClose, onTabChange, hasUnreadSupport
               <span className="text-xs font-medium text-[var(--ink)]">Storage</span>
             </button>
 
-            {bareMetalEnabled && (
-              <button onClick={() => handleTabClick("baremetal")} className="flex flex-col items-center gap-2 p-4 rounded-2xl hover:bg-zinc-50 transition-colors">
+            {bareMetalEnabled && canViewBilling && (
+              <button onClick={() => handleTabClick("bare-metal-orders")} className="flex flex-col items-center gap-2 p-4 rounded-2xl hover:bg-zinc-50 transition-colors">
                 <div className="w-10 h-10 bg-teal-100 rounded-xl flex items-center justify-center">
                   <svg className="w-5 h-5 text-teal-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
-                <span className="text-xs font-medium text-[var(--ink)]">Bare Metal</span>
+                <span className="text-xs font-medium text-[var(--ink)]">Bare Metal Orders</span>
               </button>
             )}
 

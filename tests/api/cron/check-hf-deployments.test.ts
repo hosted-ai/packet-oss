@@ -65,6 +65,11 @@ vi.mock("@/lib/email", () => ({
 }));
 vi.mock("@/lib/customer-auth", () => ({
   generateCustomerToken: mockGenerateCustomerToken,
+  // PA-380: emailed sign-in links now mint via createLoginLink. Delegate to the
+  // same spy so existing email/customerId + token assertions still hold.
+  createLoginLink: vi.fn(async (o: { email: string; customerId: string }) =>
+    mockGenerateCustomerToken(o.email, o.customerId),
+  ),
 }));
 vi.mock("@/lib/activity", () => ({ logActivity: mockLogActivity }));
 vi.mock("@/lib/huggingface-status", () => ({

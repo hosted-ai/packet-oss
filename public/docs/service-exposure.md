@@ -20,8 +20,8 @@ The Service Exposure feature allows you to expose network ports from your GPU in
 
 Service Exposure creates a Kubernetes Service resource that routes external traffic to a specific port on your GPU pod. When you expose a service, the system:
 
-1. Creates a Kubernetes Service (NodePort or LoadBalancer)
-2. Assigns an external IP address and port
+1. Creates a Kubernetes Service for your pod
+2. Assigns an external IP address and port (the external port is chosen by the platform)
 3. Routes traffic from the internet to your pod
 4. Provides you with a public URL to access the service
 
@@ -32,7 +32,7 @@ Expose your vLLM OpenAI-compatible API server to access it from external applica
 
 - **Port**: `8000`
 - **Protocol**: `TCP`
-- **Type**: `NodePort` or `LoadBalancer`
+- **Service Type**: `HTTP`
 - **Example URL**: `http://34.123.45.67:31234`
 
 ```bash
@@ -45,7 +45,7 @@ Access Jupyter Lab or Notebook interfaces remotely without SSH tunneling.
 
 - **Port**: `8888`
 - **Protocol**: `TCP`
-- **Type**: `NodePort`
+- **Service Type**: `HTTP`
 - **Example URL**: `http://34.123.45.67:32567`
 
 ### 3. **TensorBoard**
@@ -53,7 +53,7 @@ Monitor training metrics and visualizations in real-time.
 
 - **Port**: `6006`
 - **Protocol**: `TCP`
-- **Type**: `NodePort`
+- **Service Type**: `HTTP`
 - **Example URL**: `http://34.123.45.67:30123`
 
 ### 4. **Custom Web UIs**
@@ -61,27 +61,27 @@ Expose Gradio, Streamlit, or custom web applications.
 
 - **Port**: Varies (commonly `7860` for Gradio, `8501` for Streamlit)
 - **Protocol**: `TCP`
-- **Type**: `NodePort`
+- **Service Type**: `HTTP`
 
 ### 5. **SSH Access**
 Expose SSH on a custom port for easier access.
 
 - **Port**: `22`
 - **Protocol**: `TCP`
-- **Type**: `NodePort`
+- **Service Type**: `Raw TCP (no prefix)`
 
 ### 6. **Ray Dashboard**
 Access Ray cluster monitoring dashboard.
 
 - **Port**: `8265`
 - **Protocol**: `TCP`
-- **Type**: `NodePort`
+- **Service Type**: `HTTP`
 
 ## How to Access
 
-The Service Exposure feature is integrated into your GPU instance cards:
+The Service Exposure feature is integrated into your GPU instance cards (the section is shown while the instance is active):
 
-1. **Navigate** to https://packet.ai/dashboard
+1. **Navigate** to https://dash.packet.ai/dashboard
 2. **Find** your active GPU instance in the list
 3. **Click** on the GPU card to expand it
 4. **Scroll** down to the "Exposed Services" section (below SSH connection info, above HuggingFace deployments)
@@ -90,6 +90,8 @@ You'll see:
 - A globe icon 🌐 with "Exposed Services" header
 - A **"+ Expose Port"** button in indigo color
 - List of currently exposed services (if any)
+
+**Note**: The "+ Expose Port" and delete controls are only shown to team members whose role allows provisioning GPUs. Read-only members can view the list without controls.
 
 ## Exposing a Service
 
@@ -119,8 +121,8 @@ A form will appear with the following fields:
 |-------|-------------|---------|
 | **Service Name** | A friendly name for your service (lowercase, no spaces) | `vllm-api` |
 | **Port** | The port number your application is listening on | `8000` |
-| **Protocol** | TCP (default) or UDP | `TCP` |
-| **Type** | NodePort (standard) or LoadBalancer (recommended for production) | `NodePort` |
+| **Protocol** | TCP (default, for HTTP/HTTPS and raw TCP services) or UDP | `TCP` |
+| **Service Type** | For TCP: HTTP (default), HTTPS, or Raw TCP (no prefix). For UDP: NodePort or LoadBalancer | `HTTP` |
 
 #### 4. Click "Expose Service"
 
@@ -132,9 +134,9 @@ The system will:
 #### 5. Access Your Service
 
 Once exposed, you'll see the service listed with:
-- Service name and type badge
-- Port and protocol details
-- **External URL** - Click to open in a new tab
+- Service name, type badge, and status badge
+- The port mapping (internal port → external port)
+- **External URL** - with a copy button to copy it to your clipboard
 
 Example URL: `http://34.123.45.67:31234`
 
@@ -145,18 +147,16 @@ Example URL: `http://34.123.45.67:31234`
 All exposed services are listed in the "Exposed Services" section of your GPU card. Each service shows:
 
 - **Name**: Your chosen service name
-- **Type**: NodePort or LoadBalancer badge
-- **Port**: Internal port number
-- **Protocol**: TCP or UDP
-- **External URL**: Public URL to access the service (if available)
+- **Type**: Service type badge (http, https, none/raw TCP, NodePort, or loadbalancer)
+- **Status**: Provisioning state reported by the platform
+- **Port**: Internal port → external port mapping
+- **External URL**: Public URL to access the service (if available), with a copy button
 
 ### Editing a Service
 
-1. Click the **pencil icon** ✏️ next to the service
-2. Modify the service name, port, protocol, or type
-3. Click **"Update Service"**
+Editing an existing service is not currently available in the dashboard. To change a service's name, port, protocol, or type, delete it and expose it again — or use the [API](#api-reference) (`PUT /api/services`).
 
-**Note**: Changing the service type or port will result in a new external IP/port being assigned.
+**Note**: Re-creating a service may result in a new external IP/port being assigned.
 
 ### Deleting a Service
 
@@ -168,50 +168,24 @@ All exposed services are listed in the "Exposed Services" section of your GPU ca
 
 ## Service Types
 
-### NodePort
+The available service types depend on the protocol you select in the form.
 
-**What it is**: Exposes the service on a static port (30000-32767 range) on each cluster node's IP address.
+### TCP Service Types
 
-**Pros**:
-- Simple and fast to set up
-- No additional cost
-- Works immediately
+For TCP, the service type tells the platform what kind of service is behind the port and how to present its external URL:
 
-**Cons**:
-- Random port assignment (e.g., 31234)
-- Less professional URLs
-- Port may change if service is recreated
+- **HTTP** (default): For web UIs and REST APIs. The external URL is shown as `http://<ip>:<port>`, e.g. `http://34.123.45.67:31234`.
+- **HTTPS**: For services that serve TLS themselves. The external URL is shown as `https://<ip>:<port>`.
+- **Raw TCP (no prefix)**: For non-HTTP TCP services such as SSH, databases, or gRPC. The address is shown as `<ip>:<port>` without a URL scheme.
 
-**Best for**:
-- Development and testing
-- Personal projects
-- Quick demos
-- SSH access
-- Internal tools
+### UDP Service Types
 
-**Example URL**: `http://34.123.45.67:31234`
+For UDP, the service type selects the Kubernetes service used to route traffic:
 
-### LoadBalancer
+- **NodePort**: Exposes the service on a platform-assigned external port on the node's IP address.
+- **LoadBalancer**: Routes the UDP service through a load balancer.
 
-**What it is**: Provisions a cloud load balancer with a dedicated external IP address and standard ports.
-
-**Pros**:
-- Clean URLs with standard ports (80, 443, etc.)
-- Stable external IP
-- Production-ready
-- Better for SSL/TLS termination
-
-**Cons**:
-- May incur additional cloud provider costs
-- Slightly longer provisioning time
-
-**Best for**:
-- Production deployments
-- Public APIs
-- Customer-facing applications
-- Long-running services
-
-**Example URL**: `http://35.123.45.67:8000` (cleaner, uses your specified port)
+**Note**: In all cases the external port is assigned by the platform when the service is created — you cannot choose it, and it may change if the service is recreated.
 
 ## Best Practices
 
@@ -223,7 +197,7 @@ All exposed services are listed in the "Exposed Services" section of your GPU ca
 
 2. **Use HTTPS when possible**
    - For production, set up SSL/TLS certificates
-   - Use LoadBalancer type with ingress controllers
+   - Use the HTTPS service type for services that serve TLS
 
 3. **Limit exposed ports**
    - Only expose ports you actively need
@@ -236,8 +210,9 @@ All exposed services are listed in the "Exposed Services" section of your GPU ca
 ### Performance
 
 1. **Choose the right service type**
-   - NodePort: Development, testing, internal tools
-   - LoadBalancer: Production, public APIs, high traffic
+   - HTTP/HTTPS: Web UIs and APIs
+   - Raw TCP: SSH, gRPC, databases, and other non-HTTP protocols
+   - NodePort/LoadBalancer: UDP services
 
 2. **Use TCP for most services**
    - HTTP/HTTPS APIs: TCP
@@ -323,12 +298,11 @@ python app.py --port 8001
 
 **Symptom**: Saved URL no longer works after recreating service.
 
-**Cause**: NodePort type assigns random ports. Each recreation gets a new port.
+**Cause**: External ports are assigned by the platform. Each recreation may get a new port.
 
 **Solutions**:
-1. Use LoadBalancer type for stable IPs
-2. Always check the current URL in the dashboard
-3. Don't hardcode NodePort URLs in production
+1. Always check the current URL in the dashboard
+2. Don't hardcode exposed-service URLs in production — keep them in configuration
 
 ### Permission denied
 
@@ -378,17 +352,21 @@ For developers building integrations or automation, the Service Exposure feature
 All endpoints require JWT authentication:
 
 ```bash
-curl https://packet.ai/api/services \
+curl https://dash.packet.ai/api/services \
   -H "Authorization: Bearer YOUR_JWT_TOKEN"
 ```
+
+Viewing services requires GPU access on your team; exposing, updating, and deleting services requires a role with GPU provisioning permission.
 
 ### Endpoints
 
 #### List Exposed Services
 
 ```http
-GET /api/services?instanceId={subscription_id}
+GET /api/services?instanceId={instance_id}
 ```
+
+`instanceId` is your instance's ID — either a unified instance ID (`i-...`) or a legacy numeric subscription ID.
 
 **Response**:
 ```json
@@ -397,11 +375,12 @@ GET /api/services?instanceId={subscription_id}
     {
       "id": 123,
       "service_name": "vllm-api",
-      "port": 8000,
+      "ip": "34.123.45.67",
+      "internal_port": 8000,
+      "external_port": 31234,
       "protocol": "TCP",
-      "service_type": "NodePort",
-      "external_url": "http://34.123.45.67:31234",
-      "created_at": "2025-01-15T10:30:00Z"
+      "type": "http",
+      "status": "ready"
     }
   ]
 }
@@ -419,24 +398,30 @@ Content-Type: application/json
   "port": 8000,
   "service_name": "vllm-api",
   "protocol": "TCP",
-  "service_type": "NodePort"
+  "service_type": "http"
 }
 ```
+
+All fields are required. For unified instances, pass the instance ID (`i-...`) as `pool_subscription_id`. `protocol` is `TCP` or `UDP`. `service_type` accepts `http`, `https`, or `none` (raw TCP) when the protocol is TCP, and `NodePort` or `loadbalancer` when the protocol is UDP; unrecognised values are normalised to the default for the protocol.
 
 **Response**:
 ```json
 {
   "service": {
     "id": 123,
+    "pod_name": "gpu-pool-abc123-0",
     "service_name": "vllm-api",
-    "port": 8000,
+    "ip": "34.123.45.67",
+    "node_port": 31234,
+    "pod_port": 8000,
     "protocol": "TCP",
-    "service_type": "NodePort",
-    "status": "provisioning",
-    "operation_id": "op_789"
+    "service_type": "http",
+    "status": "ready"
   }
 }
 ```
+
+If a service with the same name already exists, the endpoint returns `409` with `code: "SERVICE_EXISTS"`.
 
 #### Update Service
 
@@ -449,9 +434,11 @@ Content-Type: application/json
   "service_name": "vllm-api-v2",
   "port": 8001,
   "protocol": "TCP",
-  "service_type": "LoadBalancer"
+  "service_type": "http"
 }
 ```
+
+`id` is required; the other fields are optional. Changing the port or type may result in a new external port being assigned.
 
 #### Delete Service
 
@@ -459,12 +446,13 @@ Content-Type: application/json
 DELETE /api/services?id=123
 ```
 
-**Response**:
+**Response**: the deleted service record:
 ```json
 {
   "service": {
     "id": 123,
-    "status": "deleting"
+    "service_name": "vllm-api",
+    "...": "..."
   }
 }
 ```
@@ -475,24 +463,31 @@ DELETE /api/services?id=123
 GET /api/services/status?serviceName=vllm-api&poolSubscriptionId=456&operationId=op_789
 ```
 
+`serviceName` and `poolSubscriptionId` are required; `operationId` is optional.
+
 **Response**:
 ```json
 {
-  "status": "completed",
-  "external_url": "http://34.123.45.67:31234",
-  "external_ip": "34.123.45.67",
-  "external_port": 31234
+  "status": {
+    "status": "completed",
+    "message": "...",
+    "service_name": "vllm-api",
+    "service_ip": "34.123.45.67",
+    "node_port": 31234,
+    "pod_port": 8000,
+    "protocol": "TCP",
+    "service_type": "http",
+    "service_exists": true,
+    "kubernetes_active": true
+  }
 }
 ```
 
 ### Service Lifecycle
 
-1. **provisioning**: Service is being created
-2. **completed**: Service is ready and accessible
-3. **failed**: Service creation failed (check error message)
-4. **deleting**: Service is being removed
+Status values are reported by the platform. A service is healthy when its status is `ready`, `active`, or `EXPOSED` (shown with a green badge in the dashboard); other values mean the service is still provisioning or has failed.
 
-Poll the `/api/services/status` endpoint to track provisioning progress.
+Poll the `/api/services/status` endpoint to track provisioning progress — `service_exists` and `kubernetes_active` in the response confirm that the underlying Kubernetes service is live. Alternatively, re-fetch `GET /api/services` (this is what the dashboard does) until the service appears with an IP and external port.
 
 ## Examples
 
@@ -515,7 +510,7 @@ python -m vllm.entrypoints.openai.api_server \
 # - Service Name: llama2-chat-api
 # - Port: 8000
 # - Protocol: TCP
-# - Type: NodePort
+# - Service Type: HTTP
 
 # 4. Test the API
 curl http://34.123.45.67:31234/v1/models
@@ -534,7 +529,7 @@ jupyter lab --ip=0.0.0.0 --port=8888 --no-browser
 # - Service Name: jupyter-lab
 # - Port: 8888
 # - Protocol: TCP
-# - Type: NodePort
+# - Service Type: HTTP
 
 # 4. Access via browser:
 #    http://34.123.45.67:32567/lab?token=abc123def456...
@@ -561,7 +556,7 @@ python app.py
 # - Service Name: gradio-demo
 # - Port: 7860
 # - Protocol: TCP
-# - Type: NodePort
+# - Service Type: HTTP
 
 # 4. Share the URL with your team:
 #    http://34.123.45.67:30789
@@ -578,9 +573,9 @@ You can expose multiple ports from the same pod:
 # - Custom metrics API on port 9090
 
 # Expose all three:
-# Service 1: vllm-api, port 8000, TCP, NodePort
-# Service 2: tensorboard, port 6006, TCP, NodePort
-# Service 3: metrics-api, port 9090, TCP, NodePort
+# Service 1: vllm-api, port 8000, TCP, HTTP
+# Service 2: tensorboard, port 6006, TCP, HTTP
+# Service 3: metrics-api, port 9090, TCP, HTTP
 
 # Results:
 # - vLLM: http://34.123.45.67:31234
@@ -606,14 +601,14 @@ python -m vllm.entrypoints.openai.api_server \
   --port 8000 \
   --api-key $API_KEY
 
-# 3. Expose as LoadBalancer for production
+# 3. Expose the API
 # - Service Name: llama2-70b-production
 # - Port: 8000
 # - Protocol: TCP
-# - Type: LoadBalancer
+# - Service Type: HTTP
 
 # 4. Clients authenticate with:
-curl http://35.123.45.67:8000/v1/completions \
+curl http://34.123.45.67:31234/v1/completions \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -623,9 +618,9 @@ curl http://35.123.45.67:8000/v1/completions \
   }'
 ```
 
-### SSL/TLS Termination (LoadBalancer)
+### SSL/TLS Termination
 
-For HTTPS support with LoadBalancer:
+For HTTPS support:
 
 ```bash
 # 1. Install certbot in your pod
@@ -638,11 +633,11 @@ sudo certbot certonly --standalone -d your-domain.com
 # 3. Configure your app to use SSL
 # (Application-specific, varies by framework)
 
-# 4. Expose with LoadBalancer
+# 4. Expose the service
 # - Service Name: api-ssl
 # - Port: 443
 # - Protocol: TCP
-# - Type: LoadBalancer
+# - Service Type: HTTPS
 ```
 
 ### Health Checks
@@ -677,14 +672,13 @@ curl http://34.123.45.67:31234/health
 
 1. Get the external IP from the exposed service
 2. Create an A record in your DNS provider: `api.yourdomain.com → 34.123.45.67`
-3. If using LoadBalancer, you may get a stable IP
-4. For SSL, use Let's Encrypt with certbot
+3. For SSL, use Let's Encrypt with certbot
 
 ### Q: How many services can I expose per pod?
 
 **A**: No hard limit. You can expose as many ports as your pod has services running on. However:
 - Each service consumes cluster resources
-- NodePort range is limited (30000-32767)
+- External ports are assigned from a limited platform range
 - Be mindful of network bandwidth
 
 ### Q: What happens when I restart my pod?
@@ -697,19 +691,15 @@ curl http://34.123.45.67:31234/health
 
 ### Q: Can I change the external port number?
 
-**A**:
-- **NodePort**: Port is assigned by Kubernetes, cannot be customized
-- **LoadBalancer**: You can request specific ports, but it depends on the cloud provider
+**A**: No — the external port is assigned by the platform when the service is created and cannot be customised. Keep the current URL in configuration rather than hardcoding it.
 
 ### Q: Is there a cost for exposing services?
 
-**A**:
-- **NodePort**: No additional cost
-- **LoadBalancer**: May incur cloud provider load balancer costs (typically $10-30/month per load balancer)
+**A**: No — there is no separate charge in your dashboard billing for exposing services.
 
 ### Q: Can I expose UDP services?
 
-**A**: Yes! Select "UDP" in the protocol dropdown. Common uses:
+**A**: Yes! Select "UDP" in the protocol dropdown, then choose NodePort or LoadBalancer as the service type. Common uses:
 - Game servers
 - VoIP applications
 - Custom real-time protocols
@@ -718,7 +708,7 @@ curl http://34.123.45.67:31234/health
 ### Q: How do I expose SSH on a custom port?
 
 **A**:
-1. Expose port 22 with protocol TCP
+1. Expose port 22 with protocol TCP and service type Raw TCP (no prefix)
 2. Connect with: `ssh -p 31234 ubuntu@34.123.45.67`
 3. Or change SSH to listen on a different port in `/etc/ssh/sshd_config`
 
@@ -738,10 +728,9 @@ If you encounter issues or have questions:
 
 - Check the [Troubleshooting](#troubleshooting) section above
 - Review application logs in your pod
-- Contact support via the dashboard
-- Report bugs at https://github.com/packet-ai/support
+- Contact support via the Support tab in the dashboard
 
 ---
 
-**Last updated**: January 2025
-**Version**: 1.0
+**Last updated**: July 2026
+**Version**: 1.1

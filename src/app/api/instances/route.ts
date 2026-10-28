@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCustomerToken } from "@/lib/customer-auth";
 import { getStripe } from "@/lib/stripe";
-import { resolveAllTeamsForEmail } from "@/lib/customer-resolver";
 import { resolveOperatingContext } from "@/lib/auth/account-resolver";
 import {
   createInstance,
@@ -11,11 +10,13 @@ import {
 } from "@/lib/hostedai";
 import type { UnifiedInstance } from "@/lib/hostedai";
 import { logGPULaunched, getFirstGpuLaunch } from "@/lib/activity";
+import { getStoppedInstanceRatePercent } from "@/lib/pricing";
 import { sendOnboardingEvent } from "@/lib/email/onboarding-events";
 import { prisma } from "@/lib/prisma";
 import { sendGpuLaunchedEmail } from "@/lib/email";
-import { generateCustomerToken } from "@/lib/customer-auth";
+import { createLoginLink } from "@/lib/customer-auth";
 import { getWalletBalance, deductUsage, refundDeployment } from "@/lib/wallet";
+import { getInternalExclusions, makeIsInternalOrExcluded } from "@/lib/internal-accounts";
 import { monitorDeployStatus } from "@/lib/deploy-monitor";
 import { cacheCustomer } from "@/lib/customer-cache";
 // Pricing now comes from GpuProduct model, not static config
@@ -23,6 +24,11 @@ import { randomBytes } from "crypto";
 import Stripe from "stripe";
 import { installMetricsCollector } from "@/lib/metrics-collector";
 import { gatePermission } from "@/lib/auth/gate";
+import { isRegionInMaintenance, getMaintenanceMap, DEFAULT_MAINTENANCE_MESSAGE } from "@/lib/maintenance/regions";
+import { trackGA4Event } from "@/lib/analytics/ga4";
+import { posthogTrackEvent } from "@/lib/analytics/posthog";
+import { openSubscriptionHistory, closeSubscriptionHistory } from "@/lib/subscription-history";
+import { recordFirstGpuDeploy, recordProductProvisioned } from "@/lib/lifecycle";
 
 // Billing constants
 const MINIMUM_BILLING_MINUTES = 30; // Minimum billing period in minutes
@@ -63,29 +69,62 @@ export async function GET(request: NextRequest) {
     cacheCustomer(customer).catch(() => {});
     console.log(`[Instances GET] Resolved ${payload.email}: account=${customer.id}, teams=[${ctx.allTeamIds.join(",")}]`);
 
-    // HAI 2.2: Fetch unified instances from ALL teams in parallel
-    let poolSubscriptions: PoolSubscription[] = [];
+    // HAI 2.2: Fetch unified instances from ALL teams in parallel.
+    // PA-422: a failed team fetch must NOT be coerced to an empty list — that
+    // renders a convincing false-empty dashboard ("No active instances", 0 GPUs)
+    // while the team actually has running pods. getUnifiedInstances throws on a
+    // non-array "items" (HAI returns HTTP 200 with items:null during a hiccup);
+    // retry each team once. A team that still fails contributes `null` (not []),
+    // so we can distinguish "upstream failed" from "genuinely no instances":
+    //   • some team returned rows  → show them (multi-account degradation), 200
+    //   • a fetch failed AND nothing real to show → 503 (never a false-empty)
+    const poolSubscriptions: PoolSubscription[] = [];
     const teamFetchResults = await Promise.all(
-      ctx.allTeamIds.map(async (teamId) => {
+      ctx.allTeamIds.map(async (teamId): Promise<UnifiedInstance[] | null> => {
         try {
-          const result = await getUnifiedInstances(teamId);
-          return result.items || [];
-        } catch (error) {
-          console.error(`Failed to fetch unified instances for team ${teamId}:`, error);
-          return [];
+          return (await getUnifiedInstances(teamId)).items;
+        } catch (firstError) {
+          console.warn(`[Instances GET] Retrying unified instances for team ${teamId} after error:`, firstError);
+          try {
+            return (await getUnifiedInstances(teamId)).items;
+          } catch (retryError) {
+            console.error(`[Instances GET] Unified instances unavailable for team ${teamId} after retry:`, retryError);
+            return null; // sentinel: fetch failed; do NOT coerce to []
+          }
         }
       })
     );
 
     // Convert unified instances to PoolSubscription shape for dashboard compatibility
-    const allUnified = teamFetchResults.flat();
+    const allUnified = teamFetchResults.filter((r): r is UnifiedInstance[] => r !== null).flat();
+
+    // A failed fetch with nothing real left to show would be the PA-422
+    // false-empty state — surface it as a retryable 503 with a machine-readable
+    // hint instead of an empty instance list. (If other teams returned rows, the
+    // dashboard degrades gracefully and shows those.)
+    if (allUnified.length === 0 && teamFetchResults.some((r) => r === null)) {
+      return NextResponse.json(
+        {
+          error: "instances_unavailable",
+          message: "Couldn't load instances from the upstream service. Please retry shortly.",
+        },
+        { status: 503 }
+      );
+    }
     for (const ui of allUnified) {
       poolSubscriptions.push({
         id: ui.id,
         pool_id: ui.id, // use instance id as pool_id for compatibility
         pool_name: ui.name, // instance name (user-given), not pool_name
-        status: ui.status.toLowerCase(), // "Running" → "running" for card status checks
+        // "Running" → "running" for card status checks. Baremetal rows have
+        // their own vocabulary: requested|online|offline|rebooting|deleting
+        // (HAI surfaces the NODE status while the subscription is Active);
+        // status can be null when the node record is missing.
+        status: (ui.status || "unknown").toLowerCase(),
+        nature: ui.nature || undefined,
+        ip: Array.isArray(ui.ip) ? ui.ip.filter(Boolean) : undefined,
         region: ui.region ? {
+          id: ui.region.id, // needed for region-maintenance card stamping
           region_name: ui.region.region_name,
           city: ui.region.city,
         } : undefined,
@@ -97,18 +136,96 @@ export async function GET(request: NextRequest) {
         },
         pods: [{
           pod_name: ui.name,
-          pod_status: ui.status.toLowerCase(),
+          pod_status: (ui.status || "unknown").toLowerCase(),
           gpu_count: ui.pod_info?.vgpu_count || 1,
         }],
       });
     }
 
+    // Link baremetal rows to their term-prepay orders. A multi-server order has
+    // one HAI sub per BareMetalServer row, so match against EVERY server's sub —
+    // not just the order's denormalised primary (else the 2nd..Nth instances
+    // render unlinked: raw name, no GPU type/term). Falls back to invoiceNumber
+    // === instance name, or its base (HAI suffixes multi-server names -1..-N).
+    // Scoped to this account — same boundary as the Bare Metal Orders tab.
+    const baremetalRows = poolSubscriptions.filter((s) => s.nature === "baremetal");
+    if (baremetalRows.length > 0) {
+      try {
+        const subIds = baremetalRows.map((s) => String(s.id));
+        const names = baremetalRows.map((s) => s.pool_name || "").filter(Boolean);
+        const invoicePrefixes = Array.from(new Set(names.map((n) => n.replace(/-\d+$/, ""))));
+        const orders = await prisma.bareMetalOrder.findMany({
+          where: {
+            stripeCustomerId: customer.id,
+            OR: [
+              { haiSubscriptionId: { in: subIds } },
+              { servers: { some: { haiSubscriptionId: { in: subIds } } } },
+              { invoiceNumber: { in: [...names, ...invoicePrefixes] } },
+            ],
+          },
+          select: {
+            id: true,
+            haiSubscriptionId: true,
+            invoiceNumber: true,
+            gpuType: true,
+            gpuCount: true,
+            contractMonths: true,
+            status: true,
+            servers: { select: { haiSubscriptionId: true } },
+          },
+        });
+        for (const sub of baremetalRows) {
+          const subId = String(sub.id);
+          const base = (sub.pool_name || "").replace(/-\d+$/, "");
+          const order =
+            orders.find((o) => o.haiSubscriptionId === subId) ??
+            orders.find((o) => o.servers.some((srv) => srv.haiSubscriptionId === subId)) ??
+            orders.find((o) => o.invoiceNumber === sub.pool_name) ??
+            orders.find((o) => o.invoiceNumber === base);
+          sub.baremetal = order
+            ? {
+                orderId: order.id,
+                gpuType: order.gpuType,
+                gpuCount: order.gpuCount,
+                contractMonths: order.contractMonths,
+                orderStatus: order.status,
+              }
+            : { orderId: null };
+          if (order && sub.pods?.[0]) sub.pods[0].gpu_count = order.gpuCount;
+        }
+      } catch (error) {
+        console.error("[Instances GET] baremetal order linkage failed (non-fatal):", error);
+      }
+    }
+
+    // Region maintenance stamp: load the active set ONCE (cached), then flag
+    // each instance whose region is under maintenance so the card hides its
+    // actions and shows a banner. Region-granular (the card has no GPU pool id).
+    // Fails open inside the resolver — on error nothing is stamped (actions stay).
+    if (poolSubscriptions.length > 0) {
+      const maintMap = await getMaintenanceMap();
+      if (maintMap.size > 0) {
+        for (const sub of poolSubscriptions) {
+          const entry = sub.region?.id != null ? maintMap.get(sub.region.id) : undefined;
+          if (entry) {
+            sub.maintenance = {
+              active: true,
+              message: entry.message?.trim() || DEFAULT_MAINTENANCE_MESSAGE,
+            };
+          }
+        }
+      }
+    }
+
     console.log(`[Instances GET] Fetched ${poolSubscriptions.length} unified instances across ${ctx.allTeamIds.length} team(s)`);
 
-    // Fetch instance details in parallel to get shared_volumes and root_disk info
+    // Fetch instance details in parallel to get shared_volumes and root_disk info.
+    // Skip baremetal rows: GET /instances/unified/{id} covers the instances
+    // table only and 404s on baremetal ids (they live in /baremetal/instances).
     if (poolSubscriptions.length > 0) {
       const detailResults = await Promise.all(
         poolSubscriptions.map(async (sub) => {
+          if (sub.nature === "baremetal") return null;
           try {
             return await getUnifiedInstanceDetail(String(sub.id));
           } catch {
@@ -116,6 +233,30 @@ export async function GET(request: NextRequest) {
           }
         })
       );
+
+      // PA-80: latest local/ephemeral (root disk) usage per instance, for the
+      // "storage almost full" warning banner on the card. One grouped query over
+      // recent metrics rows (indexed by [subscriptionId, timestamp]); the newest
+      // row wins per id. Metrics are keyed by the HAI instance id, same as sub.id.
+      const rootDiskUsage = new Map<string, { usedMb: number | null; percent: number | null }>();
+      try {
+        const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+        const usageRows = await prisma.gpuHardwareMetrics.findMany({
+          where: {
+            subscriptionId: { in: poolSubscriptions.map((s) => String(s.id)) },
+            timestamp: { gte: fiveMinAgo },
+          },
+          orderBy: { timestamp: "desc" },
+          select: { subscriptionId: true, diskRootUsedMb: true, diskRootPercent: true },
+        });
+        for (const row of usageRows) {
+          if (!rootDiskUsage.has(row.subscriptionId)) {
+            rootDiskUsage.set(row.subscriptionId, { usedMb: row.diskRootUsedMb, percent: row.diskRootPercent });
+          }
+        }
+      } catch (err) {
+        console.error("[instances] Failed to load ephemeral storage usage:", err);
+      }
 
       for (let i = 0; i < poolSubscriptions.length; i++) {
         const detail = detailResults[i];
@@ -135,6 +276,15 @@ export async function GET(request: NextRequest) {
             mount_operation: v.mount_operation,
           })),
         };
+
+        // PA-80: surface latest ephemeral usage so the card can warn at 80/90%.
+        const usage = rootDiskUsage.get(String(poolSubscriptions[i].id));
+        if (usage && usage.percent != null) {
+          poolSubscriptions[i].storage_details!.ephemeral_storage_percent = usage.percent;
+          if (usage.usedMb != null) {
+            poolSubscriptions[i].storage_details!.ephemeral_storage_used_gb = usage.usedMb / 1024;
+          }
+        }
 
         // Backfill CPU/RAM from detail if not already set from list response
         if (detail.instance_type && !poolSubscriptions[i].per_pod_info?.vcpu_count) {
@@ -249,7 +399,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ instances: [], poolSubscriptions, podMetadata, hfDeployments });
+    return NextResponse.json({ instances: [], poolSubscriptions, podMetadata, hfDeployments, stoppedRatePercent: getStoppedInstanceRatePercent() });
   } catch (error) {
     console.error("List instances error:", error);
     return NextResponse.json(
@@ -281,7 +431,6 @@ export async function POST(request: NextRequest) {
     // team_id, SSH keys, predeploy lock all live there). Before this fix
     // the deploy went against the JWT user's OWN primary customer, which
     // is wrong when they're operating in a team they don't own.
-    const stripe = await getStripe();
     const ctx = await resolveOperatingContext({
       email: payload.email,
       jwtCustomerId: payload.customerId,
@@ -295,13 +444,17 @@ export async function POST(request: NextRequest) {
     }
     const customer = ctx.customer;
     cacheCustomer(customer).catch(() => {});
-    const teamId = customer.metadata?.hostedai_team_id;
+    const teamId = ctx.teamId;
     if (!teamId) {
       return NextResponse.json(
         { error: "No team associated with this account" },
         { status: 400 }
       );
     }
+
+    // Hourly usage is charged to the wallet that entitled the product, wherever
+    // it sits on the context; the operating account only owns the instance.
+    const hourlyWalletId = ctx.hourlyCustomerId ?? customer.id;
 
     // PA-175 gate: provisioning a new GPU requires gpu.provision on the
     // OPERATING team (not the JWT user's own customer).
@@ -317,28 +470,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const {
       name,
-      pool_id,
       product_id, // GPU product ID for per-product pricing
-      instance_type_id,
       // GPUaaS fields
-      ephemeral_storage_block_id,
-      persistent_storage_block_id, // Create new volume with this storage block (legacy)
-      new_storage_block_id, // Create new volume with this block (from launch modal)
-      existing_shared_volume_id, // Attach existing shared volume by ID
-      shared_volume_ids, // Pre-created shared volume IDs to attach
-      image_uuid,
-      vgpus,
-      startup_script, // Custom startup script to run after pod starts
-      startup_script_preset_id, // Preset ID for automatic port exposure
       // Monthly subscription fields
-      billingType, // "monthly" for subscription-based deploy
-      stripeSubscriptionId, // Stripe subscription ID for monthly deploys
       // Region (HAI 2.2 unified instances)
-      region_id,
       // Legacy fields for traditional instance creation
-      service_id,
-      image_hash_id,
-      storage_block_id
     } = body;
 
     if (!name) {
@@ -365,6 +501,7 @@ export async function POST(request: NextRequest) {
           gpuProduct,
           teamId,
           customer,
+          hourlyWalletId,
           payload,
           stripe: await getStripe(),
         });
@@ -402,11 +539,14 @@ interface UnifiedCreateParams {
     name: string;
     serviceId: string | null;
     pricePerHourCents: number;
+    pricePerMonthCents: number | null;
     billingType: string;
     stripePriceId: string | null;
+    supportsSharedStorage: boolean;
   };
   teamId: string;
   customer: Stripe.Customer;
+  hourlyWalletId: string;
   payload: { email: string; customerId: string };
   stripe: Stripe;
 }
@@ -416,6 +556,7 @@ async function handleUnifiedInstanceCreate({
   gpuProduct,
   teamId,
   customer,
+  hourlyWalletId,
   payload,
   stripe,
 }: UnifiedCreateParams): Promise<NextResponse> {
@@ -438,6 +579,22 @@ async function handleUnifiedInstanceCreate({
     ssh_key_ids, // Optional: saved SSH key IDs to bake into the instance at deploy time
   } = body as Record<string, string | number | boolean | number[] | string[] | undefined>;
 
+  // PA-327: root-cause guard — reject shared-storage requests up front for
+  // products that can't attach it, instead of forwarding them to HAI where
+  // the attach silently hangs and the instance never leaves "Deploying".
+  const requestsSharedStorage = Boolean(
+    new_storage_block_id ||
+    persistent_storage_block_id ||
+    existing_shared_volume_id ||
+    (Array.isArray(shared_volume_ids) && (shared_volume_ids as number[]).length > 0)
+  );
+  if (requestsSharedStorage && !gpuProduct.supportsSharedStorage) {
+    return NextResponse.json(
+      { error: `${gpuProduct.name} does not support persistent shared storage. Choose "None" for storage or a different GPU type.` },
+      { status: 400 }
+    );
+  }
+
   // Product's service — used for provisioning-info, compatible-pools, region checks
   const serviceId = gpuProduct.serviceId!;
   // Instance creation service — either the app's service (recipe) or the product's service (bare GPU)
@@ -448,6 +605,19 @@ async function handleUnifiedInstanceCreate({
     return NextResponse.json(
       { error: "Region is required. Please select a region and try again." },
       { status: 400 }
+    );
+  }
+
+  // Region maintenance gate (uniform hard gate). Placed here — region resolved,
+  // before the deploy lock / wallet deduct / HAI call — so a blocked request
+  // never acquires the lock or pre-charges. Region-granular: the GPU pool is
+  // HAI-chosen later, so we can only gate on region here (fine — Ariel takes
+  // whole regions down). Fails open inside the resolver on DB error.
+  const gpuMaint = await isRegionInMaintenance(resolvedRegionId);
+  if (gpuMaint.inMaintenance) {
+    return NextResponse.json(
+      { error: gpuMaint.message, maintenanceMessage: gpuMaint.message },
+      { status: 503 }
     );
   }
 
@@ -549,18 +719,37 @@ async function handleUnifiedInstanceCreate({
       );
     }
 
-    // Get compatible pool from HAI (replaces selectOptimalPool)
+    // Get compatible pool from HAI (replaces selectOptimalPool). An empty
+    // successful answer is a real answer — the region has no room.
+    let capacityKnown = false;
+    let bestAvailableVgpus = 0;
     try {
       const pools = await getServiceCompatibleGPUPools(serviceId, teamId, resolvedRegionId);
+      capacityKnown = true;
       if (pools.length > 0) {
         // Pick pool with most available vGPUs
         const sorted = [...pools].sort((a, b) => (b.available_vgpus || 0) - (a.available_vgpus || 0));
         selectedPoolId = sorted[0].id;
-        console.log(`[HAI 2.2] Selected pool: ${sorted[0].name} (id=${selectedPoolId}, available=${sorted[0].available_vgpus})`);
+        bestAvailableVgpus = sorted[0].available_vgpus || 0;
+        console.log(`[HAI 2.2] Selected pool: ${sorted[0].name} (id=${selectedPoolId}, available=${bestAvailableVgpus})`);
       }
     } catch (poolErr) {
       console.error("[HAI 2.2] Compatible pools lookup failed:", poolErr);
-      // Pool selection is optional — HAI will auto-select if service has gpu_pool_locked
+      // A failed lookup is not a "no": full and unreachable are indistinguishable
+      // here, so the deploy proceeds and HAI stays the authority.
+    }
+
+    // Refuse a placement the platform has already ruled out, BEFORE charging.
+    if (capacityKnown && bestAvailableVgpus < gpuCount) {
+      const detail = bestAvailableVgpus > 0
+        ? `Only ${bestAvailableVgpus} vGPU(s) are free there.`
+        : "Every GPU in it is currently in use.";
+      return NextResponse.json(
+        {
+          error: `${gpuProduct.name} has no free capacity in this region right now. ${detail} Try another region or retry once one frees up.`,
+        },
+        { status: 409 }
+      );
     }
 
     // Handle persistent storage — attach shared volumes via pod_opts.shared_volumes
@@ -653,7 +842,12 @@ async function handleUnifiedInstanceCreate({
     // === WALLET CHECK (hourly only) ===
     const hourlyRateCents = gpuProduct.pricePerHourCents;
     const prepaidMinutes = MINIMUM_BILLING_MINUTES;
-    const prepaidAmountCents = Math.round((prepaidMinutes / 60) * hourlyRateCents * gpuCount);
+    // PA-644: internal/excluded accounts (PA-410 lists) pre-charge $0.00 — no
+    // balance required, nothing deducted, so every downstream refund/monitor
+    // path naturally sees 0. A $0 gpu_deploy ledger row is still written below.
+    const billingExempt = !isMonthlyDeploy && !!customer.email
+      && makeIsInternalOrExcluded(await getInternalExclusions())(customer.email);
+    const prepaidAmountCents = billingExempt ? 0 : Math.round((prepaidMinutes / 60) * hourlyRateCents * gpuCount);
     let deployTime = new Date();
     let prepaidUntil: Date | null = null;
 
@@ -697,8 +891,11 @@ async function handleUnifiedInstanceCreate({
           return NextResponse.json({ error: msg }, { status: 409 });
         }
 
-        // Free up stale metadata so the slot can be reused
+        // Free up stale metadata so the slot can be reused. Close any open
+        // PA-354 history window first — the new deploy below opens a fresh one,
+        // so the subscription's windows stay contiguous.
         for (const stale of stalePods) {
+          await closeSubscriptionHistory({ id: stale.id });
           await prisma.podMetadata.delete({ where: { id: stale.id } });
         }
       }
@@ -712,35 +909,42 @@ async function handleUnifiedInstanceCreate({
         );
       }
 
-      const walletBalance = await getWalletBalance(customer.id);
-      if (walletBalance.availableBalance < prepaidAmountCents) {
-        await clearDeployLock();
-        return NextResponse.json(
-          { error: `Insufficient wallet balance. Need $${(prepaidAmountCents / 100).toFixed(2)}, have $${(walletBalance.availableBalance / 100).toFixed(2)}.` },
-          { status: 402 }
-        );
+      // PA-644: internal accounts skip the balance gate and the deduction —
+      // a $0-balance internal account can still deploy.
+      if (!billingExempt) {
+        const walletBalance = await getWalletBalance(hourlyWalletId);
+        if (walletBalance.availableBalance < prepaidAmountCents) {
+          await clearDeployLock();
+          return NextResponse.json(
+            { error: `Insufficient wallet balance. Need $${(prepaidAmountCents / 100).toFixed(2)}, have $${(walletBalance.availableBalance / 100).toFixed(2)}.` },
+            { status: 402 }
+          );
+        }
       }
 
       deployTime = new Date();
       prepaidUntil = new Date(deployTime.getTime() + prepaidMinutes * 60 * 1000);
-      const preDeployId = `predeploy_${customer.id}_${Date.now()}`;
 
-      const deductResult = await deductUsage(
-        customer.id,
-        (prepaidMinutes / 60) * gpuCount,
-        `GPU deploy: ${gpuProduct.name} @ $${(hourlyRateCents / 100).toFixed(2)}/hr`,
-        hourlyRateCents,
-        preDeployId
-      );
+      if (!billingExempt) {
+        const preDeployId = `predeploy_${hourlyWalletId}_${Date.now()}`;
 
-      if (!deductResult.success) {
-        await clearDeployLock();
-        return NextResponse.json(
-          { error: "Failed to process payment. Please try again." },
-          { status: 402 }
+        const deductResult = await deductUsage(
+          hourlyWalletId,
+          (prepaidMinutes / 60) * gpuCount,
+          `GPU deploy: ${gpuProduct.name} @ $${(hourlyRateCents / 100).toFixed(2)}/hr`,
+          hourlyRateCents,
+          preDeployId
         );
+
+        if (!deductResult.success) {
+          await clearDeployLock();
+          return NextResponse.json(
+            { error: "Failed to process payment. Please try again." },
+            { status: 402 }
+          );
+        }
+        prechargedCents = prepaidAmountCents;
       }
-      prechargedCents = prepaidAmountCents;
     }
 
     // === DEPLOY via create-instance ===
@@ -801,7 +1005,7 @@ async function handleUnifiedInstanceCreate({
         const errMsg = deployError instanceof Error ? deployError.message : "";
         console.log(`[Billing] Deployment failed, refunding $${(prepaidAmountCents / 100).toFixed(2)}`);
         await refundDeployment(
-          customer.id,
+          hourlyWalletId,
           prepaidAmountCents,
           `Refund: deployment failed - ${errMsg.slice(0, 100)}`
         );
@@ -833,13 +1037,14 @@ async function handleUnifiedInstanceCreate({
         data: {
           subscriptionId: `instance-${instanceId}`, // Unique placeholder for legacy compat
           instanceId,
-          stripeCustomerId: customer.id,
+          stripeCustomerId: isMonthlyDeploy ? customer.id : hourlyWalletId,
           displayName: name as string,
           deployTime,
           prepaidUntil: isMonthlyDeploy ? null : prepaidUntil,
           prepaidAmountCents: isMonthlyDeploy ? 0 : prepaidAmountCents,
           poolId: derivedPoolId,
           productId: gpuProduct.id,
+          productName: gpuProduct.name,
           hourlyRateCents: isMonthlyDeploy ? 0 : hourlyRateCents,
           metricsToken,
           startupScript: (startup_script as string) || null,
@@ -853,6 +1058,24 @@ async function handleUnifiedInstanceCreate({
       metadataSaved = true;
       console.log(`[HAI 2.2] Saved PodMetadata for instance ${instanceId}`);
 
+      // PA-354: open the durable subscription window for investor revenue.
+      // Monthly pods never write wallet transactions, and this metadata row is
+      // hard-deleted at termination — SubscriptionHistory is the only record.
+      if (isMonthlyDeploy) {
+        await openSubscriptionHistory(
+          {
+            subscriptionId: `instance-${instanceId}`,
+            stripeCustomerId: customer.id,
+            stripeSubscriptionId: resolvedStripeSubId || null,
+            poolId: derivedPoolId,
+            billingType: "monthly",
+            deployTime,
+            createdAt: new Date(),
+          },
+          gpuProduct.pricePerMonthCents,
+        );
+      }
+
       // Install metrics collector and run startup script. Both internally
       // wait for the pod to reach "running" before doing real work, so
       // it's safe to schedule them now.
@@ -865,16 +1088,23 @@ async function handleUnifiedInstanceCreate({
         console.error(`[Startup] Failed for ${instanceId}:`, err);
       });
     } catch (metaErr) {
-      console.error("[HAI 2.2] Failed to save PodMetadata:", metaErr);
+      // Losing this row silently leaves a running, billable pod the dashboard
+      // cannot see. Say so loudly enough to alert on; reconcile-monthly-deploys
+      // repairs a monthly one on its next pass.
+      console.error(
+        `[HAI 2.2] ORPHAN INSTANCE ${instanceId}: PodMetadata was not saved (team ${teamId}, customer ${customer.id})`,
+        metaErr,
+      );
     }
 
     // Log wallet transaction (hourly only). The pre-charge is real regardless
     // of whether the pod ultimately runs; a refund (if any) appears as its
-    // own Stripe balance transaction.
-    if (!isMonthlyDeploy && prepaidAmountCents > 0) {
+    // own Stripe balance transaction. Internal accounts (PA-644) log a $0 row
+    // so the deploy stays auditable.
+    if (!isMonthlyDeploy && (prepaidAmountCents > 0 || billingExempt)) {
       await prisma.walletTransaction.create({
         data: {
-          stripeCustomerId: customer.id,
+          stripeCustomerId: hourlyWalletId,
           teamId,
           type: "gpu_deploy",
           amountCents: prepaidAmountCents,
@@ -907,7 +1137,7 @@ async function handleUnifiedInstanceCreate({
         try {
           const result = await monitorDeployStatus({
             instanceId,
-            customerId: customer.id,
+            customerId: hourlyWalletId,
             prechargedCents: isMonthlyDeploy ? 0 : prepaidAmountCents,
             isMonthlyDeploy: !!isMonthlyDeploy,
           });
@@ -916,6 +1146,21 @@ async function handleUnifiedInstanceCreate({
           // Confirmed running — fire post-launch side effects.
           try {
             const priorLaunch = await getFirstGpuLaunch(launchedCustomerId);
+
+            // Lifecycle: record product provisioning with verbatim product name
+            recordFirstGpuDeploy(launchedCustomerId, launchedProductName).catch(() => {});
+            recordProductProvisioned(launchedCustomerId, launchedProductName).catch(() => {});
+
+            // GA4 + PostHog: gpu_deploy_success — GPU instance live, SSH access confirmed
+            trackGA4Event(launchedCustomerId, "gpu_deploy_success").catch(() => {});
+            posthogTrackEvent(launchedCustomerId, "gpu_deploy_success").catch(() => {});
+
+            // GA4 + PostHog: gpu_redeploy — second+ GPU deploy on the account
+            if (priorLaunch) {
+              trackGA4Event(launchedCustomerId, "gpu_redeploy").catch(() => {});
+              posthogTrackEvent(launchedCustomerId, "gpu_redeploy").catch(() => {});
+            }
+
             await logGPULaunched(launchedCustomerId, launchedProductName, gpuCount, launchedPodName, instanceId);
             sendOnboardingEvent({
               type: "gpu.launched",
@@ -931,7 +1176,7 @@ async function handleUnifiedInstanceCreate({
                 "First GPU": !priorLaunch ? "Yes" : "No",
               },
             });
-            const dashboardToken = generateCustomerToken(launchedEmailLower.toLowerCase(), launchedCustomerId);
+            const dashboardToken = await createLoginLink({ email: launchedEmailLower.toLowerCase(), customerId: launchedCustomerId });
             const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${dashboardToken}`;
             await sendGpuLaunchedEmail({
               to: launchedEmail,
@@ -968,7 +1213,7 @@ async function handleUnifiedInstanceCreate({
     if (prechargedCents > 0) {
       try {
         await refundDeployment(
-          customer.id,
+          hourlyWalletId,
           prechargedCents,
           `Refund: deployment aborted before HAI call - ${errorMessage.slice(0, 100)}`
         );

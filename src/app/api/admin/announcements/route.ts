@@ -8,6 +8,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
 import { prisma } from "@/lib/prisma";
+import {
+  DISPLAY_TYPES,
+  TARGET_TYPES,
+  isDisplayType,
+  isTargetType,
+} from "@/lib/announcements/targeting";
 
 export async function GET(request: NextRequest) {
   try {
@@ -54,6 +60,11 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: "Title and message are required" }, { status: 400 });
         }
 
+        const createInvalid = invalidTypeError(data);
+        if (createInvalid) {
+          return NextResponse.json({ error: createInvalid }, { status: 400 });
+        }
+
         const announcement = await prisma.dashboardAnnouncement.create({
           data: {
             title: data.title,
@@ -76,6 +87,11 @@ export async function POST(request: NextRequest) {
       case "update": {
         if (!id) {
           return NextResponse.json({ error: "Announcement ID is required" }, { status: 400 });
+        }
+
+        const updateInvalid = invalidTypeError(data);
+        if (updateInvalid) {
+          return NextResponse.json({ error: updateInvalid }, { status: 400 });
         }
 
         const updateData: Record<string, unknown> = { updatedBy: adminEmail };
@@ -113,4 +129,16 @@ export async function POST(request: NextRequest) {
     console.error("Announcements POST error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
+}
+
+// Both write branches store these columns verbatim, and every reader tests them
+// by equality, so a non-member value would make the announcement unreachable.
+function invalidTypeError(data: Record<string, unknown>): string | null {
+  if (data.displayType != null && !isDisplayType(data.displayType)) {
+    return `displayType must be one of: ${DISPLAY_TYPES.join(", ")}`;
+  }
+  if (data.targetType != null && !isTargetType(data.targetType)) {
+    return `targetType must be one of: ${TARGET_TYPES.join(", ")}`;
+  }
+  return null;
 }

@@ -2,16 +2,15 @@
 
 export function PersistentStorageDoc() {
   return (
-    <div className="prose prose-zinc max-w-none">
-      <h1>Persistent Storage Guide</h1>
-      <p className="lead">Keep your data safe across restarts and scaling operations.</p>
+    <div>
+      <p className="lead">Keep your data safe across restarts, stop/start cycles, and pod termination.</p>
 
       <h2>Overview</h2>
       <p>
-        Persistent storage allows your data to survive pod restarts and scaling
-        operations. Unlike ephemeral storage (which is cleared when pods are
-        stopped), persistent storage uses network-attached NFS volumes that
-        retain data across all pod lifecycle events.
+        Persistent storage allows your data to survive pod restarts, stop/start
+        cycles, and even pod termination. Unlike local ephemeral storage (which
+        is lost when a pod is terminated), persistent storage uses
+        network-attached NFS volumes that exist independently of your pods.
       </p>
 
       <h3>Key Features</h3>
@@ -19,10 +18,6 @@ export function PersistentStorageDoc() {
         <li>
           <strong>Survives Restarts</strong>: Data persists when pods are
           restarted
-        </li>
-        <li>
-          <strong>Survives Scaling</strong>: Data persists through scale up/down
-          operations
         </li>
         <li>
           <strong>Survives Termination</strong>: Volumes are independent and can
@@ -43,28 +38,28 @@ export function PersistentStorageDoc() {
       <p>When launching a new GPU pod:</p>
       <ol>
         <li>Click <strong>Launch GPU</strong></li>
-        <li>Select your GPU pool and instance type</li>
-        <li>Under <strong>Persistent Storage</strong>, choose one of:
+        <li>Select your GPU type, product, and region</li>
+        <li>Under <strong>Shared Storage</strong>, choose one of:
           <ul>
-            <li><strong>Use existing storage</strong>: Attach a volume you already own (preserves your data)</li>
-            <li><strong>Create new storage</strong>: Provision a new persistent volume</li>
+            <li><strong>None</strong>: Root disk only. It survives reboots, but is lost when the instance is terminated</li>
+            <li><strong>Create new volume</strong>: Pick a size; the volume is created and attached automatically</li>
+            <li><strong>Use existing volume</strong>: Re-attach a volume you already own in that region (preserves your data)</li>
           </ul>
         </li>
-        <li>Click <strong>Launch</strong></li>
+        <li>Click <strong>Launch GPU</strong></li>
       </ol>
 
       <h3>To an Existing Instance</h3>
       <p>You can add persistent storage to a running instance:</p>
       <ol>
         <li>Find your GPU card in the dashboard</li>
-        <li>Click <strong>Add Storage</strong></li>
-        <li>Select a storage size from available options</li>
+        <li>Click <strong>Storage</strong> on the card</li>
+        <li>Attach an existing available volume, or create a new one from the listed sizes</li>
         <li>Confirm the addition</li>
       </ol>
       <p>
-        <strong>Note:</strong> Adding storage requires the pod to restart. Your
-        ephemeral data will be lost, but the new persistent storage will be
-        attached.
+        <strong>Note:</strong> Attaching storage to a running GPU briefly
+        restarts the pod. Data on the persistent volume is unaffected.
       </p>
 
       <h2>Using Your Storage</h2>
@@ -88,10 +83,10 @@ df -h | grep data`}</code>
       <h4>Storing HuggingFace Models</h4>
       <pre>
         <code>{`# Set HuggingFace cache to persistent storage
-sudo export HF_HOME=/data/shareXX/hf-cache
+export HF_HOME=/data/shareXX/hf-cache
 
 # Models will now be cached to persistent storage
-sudo python -c "from transformers import AutoModel; AutoModel.from_pretrained('bert-base-uncased')"`}</code>
+python -c "from transformers import AutoModel; AutoModel.from_pretrained('bert-base-uncased')"`}</code>
       </pre>
 
       <h4>Storing Training Checkpoints</h4>
@@ -106,9 +101,9 @@ torch.save(model.state_dict(), f"{checkpoint_dir}/model_epoch_{epoch}.pt")`}</co
       <h4>Using with vLLM</h4>
       <pre>
         <code>{`# Run vLLM with model cache on persistent storage
-sudo export HF_HOME=/data/shareXX/models
+export HF_HOME=/data/shareXX/models
 
-sudo python -m vllm.entrypoints.openai.api_server \\
+python -m vllm.entrypoints.openai.api_server \\
   --model Qwen/Qwen2.5-7B-Instruct \\
   --host 0.0.0.0 \\
   --port 8000`}</code>
@@ -141,13 +136,15 @@ sudo rsync -av /tmp/results/ /data/shareXX/results/`}</code>
       </pre>
 
       <h2>Billing</h2>
-      <p>Persistent storage is billed per hour:</p>
+      <p>Persistent storage is billed per GB per hour:</p>
       <ul>
         <li>Billing starts when the volume is created</li>
         <li>
-          Billing continues while the volume exists (even if pod is stopped)
+          Billing continues while the volume exists (even if the pod is stopped
+          or terminated) — delete unused volumes from the <strong>Storage</strong> tab
+          to stop charges
         </li>
-        <li>Pricing varies by storage size - check the launch modal for current rates</li>
+        <li>Available sizes and prices vary by region — the dashboard shows the hourly price for each size before you create a volume</li>
       </ul>
 
       <h2>Troubleshooting</h2>
@@ -184,29 +181,29 @@ sudo chown $USER:$USER /data/shareXX/new-folder`}</code>
       </ul>
 
       <h3>What Data Survives?</h3>
-      <table className="w-full border-collapse border border-zinc-200 dark:border-zinc-700 my-4">
+      <table>
         <thead>
-          <tr className="bg-zinc-100 dark:bg-zinc-800">
-            <th className="border border-zinc-200 dark:border-zinc-700 p-2 text-left">Storage Type</th>
-            <th className="border border-zinc-200 dark:border-zinc-700 p-2 text-left">Location</th>
-            <th className="border border-zinc-200 dark:border-zinc-700 p-2 text-left">Survives Termination?</th>
+          <tr>
+            <th>Storage Type</th>
+            <th>Location</th>
+            <th>Survives Termination?</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td className="border border-zinc-200 dark:border-zinc-700 p-2"><strong>Persistent Storage</strong></td>
-            <td className="border border-zinc-200 dark:border-zinc-700 p-2"><code>/data/shareXX/</code></td>
-            <td className="border border-zinc-200 dark:border-zinc-700 p-2 text-green-600 dark:text-green-400">Yes</td>
+            <td><strong>Persistent Storage</strong></td>
+            <td><code>/data/shareXX/</code></td>
+            <td className="docs-yes">Yes</td>
           </tr>
           <tr>
-            <td className="border border-zinc-200 dark:border-zinc-700 p-2"><strong>Ephemeral Storage</strong></td>
-            <td className="border border-zinc-200 dark:border-zinc-700 p-2"><code>/home/ubuntu</code>, <code>/tmp</code>, <code>/root</code></td>
-            <td className="border border-zinc-200 dark:border-zinc-700 p-2 text-red-600 dark:text-red-400">No</td>
+            <td><strong>Local Storage</strong></td>
+            <td><code>/home/ubuntu</code>, <code>/tmp</code>, <code>/root</code></td>
+            <td className="docs-no">No</td>
           </tr>
         </tbody>
       </table>
       <p>
-        <strong>Important:</strong> Ephemeral storage (local SSD) is wiped on termination.
+        <strong>Important:</strong> Local storage (local SSD) is wiped on termination.
         This includes pip packages, downloaded files, and anything not in <code>/data/</code>.
         Always store important data in persistent storage.
       </p>
@@ -221,7 +218,7 @@ sudo chown $USER:$USER /data/shareXX/new-folder`}</code>
 
       <h3>Common Misconception</h3>
       <p>
-        Snapshots do <strong>not</strong> capture ephemeral disk contents. They save a reference
+        Snapshots do <strong>not</strong> capture local storage contents. They save a reference
         to your persistent storage volume. When you restore, you get:
       </p>
       <ul>
@@ -248,22 +245,20 @@ sudo chown $USER:$USER /data/shareXX/new-folder`}</code>
         storage volume and your data will be there. This makes it easy to:
       </p>
       <ul>
-        <li>Scale up/down while preserving your environment</li>
         <li>Switch between GPU types without losing data</li>
         <li>Save costs by terminating pods when not in use</li>
       </ul>
 
-      <h3>Is ephemeral or persistent storage faster?</h3>
+      <h3>Is local or persistent storage faster?</h3>
       <p>
-        Ephemeral storage uses local SSD and is faster for I/O operations.
+        Local storage uses local SSD and is faster for I/O operations.
         Persistent storage uses NFS and has some network latency. For maximum
         performance, copy working files to local storage.
       </p>
 
       <h2>Need Help?</h2>
       <p>
-        Contact us at{" "}
-        our support team via the <strong>Support</strong> tab
+        Contact our support team via the <strong>Support</strong> tab
       </p>
     </div>
   );

@@ -33,6 +33,7 @@ export function ItemCard({ item, onDeploy }: ItemCardProps) {
         {/* Logo */}
         {logo ? (
           <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center overflow-hidden">
+            {/* eslint-disable-next-line @next/next/no-img-element -- provider logos come from arbitrary Hugging Face origins, with onError fallback */}
             <img
               src={logo}
               alt={`${provider || item.name} logo`}

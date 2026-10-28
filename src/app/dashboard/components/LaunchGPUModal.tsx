@@ -1,8 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { STARTUP_SCRIPT_PRESETS, type StartupScriptPreset } from "@/lib/startup-scripts";
+import { useState, useEffect, useCallback } from "react";
+import { STARTUP_SCRIPT_PRESETS } from "@/lib/startup-scripts";
 import { deriveMinStep, clampStep, backAction } from "./launch-stepper";
+import { launchBlocker } from "./launch-blocker";
+import { slugMatches } from "./utils";
+import { trackEvent } from "@/lib/analytics/track-event";
+import type { TopupHandler } from "@/hooks/useWalletTopup";
+import { formatSmartPrice } from "@/lib/format";
 
 // MAINTENANCE MODE — set to false when hosted.ai instance creation is fixed
 const DEPLOY_MAINTENANCE = false;
@@ -25,6 +30,7 @@ interface LaunchProduct {
   cudaCores: number | null;
   categoryIds?: string[];
   gpuFamily: string | null;
+  supportsSharedStorage: boolean;
   available: boolean | null; // null = not yet checked (deferred to category-check)
   regions?: Array<{ id: number; region_name: string; name?: string }>;
 }
@@ -43,7 +49,8 @@ interface StorageBlockOption {
   id: string;
   name: string;
   size: number;
-  cost: string;
+  /** $/hr, derived from our configured storage rate (see getSharedStorageBlocks). */
+  cost: number;
 }
 
 interface SSHKeyOption {
@@ -102,7 +109,8 @@ interface LaunchGPUModalProps {
   onSuccess: (launchInfo: { name: string; poolName: string }) => void;
   onError?: (message: string) => void;
   gpuDashboardUrl?: string | null;
-  onTopup?: (amount: number, voucherCode?: string, launchProductId?: string) => void;
+  /** Wallet gates are dead without this, so every embedder must supply it. */
+  onTopup: TopupHandler;
   topupLoading?: boolean;
   initialProductId?: string;
   /** Pre-select a GPU category by slug (deep-link). Lands the user on the
@@ -111,7 +119,7 @@ interface LaunchGPUModalProps {
   initialCategorySlug?: string;
   /** When set, the product picker is locked to this product — used when
    *  deploying against an existing monthly subscription. */
-  lockedProductId?: string;
+  lockedProductId?: string | null;
   /** Stripe subscription ID to bill the deploy against (monthly flow). */
   stripeSubscriptionId?: string;
   deployContext?: DeployContext;
@@ -121,10 +129,8 @@ export function LaunchGPUModal({
   isOpen,
   onClose,
   token,
-  customerEmail,
   onSuccess,
   onError,
-  gpuDashboardUrl,
   onTopup,
   topupLoading,
   initialProductId,
@@ -134,9 +140,9 @@ export function LaunchGPUModal({
   deployContext,
 }: LaunchGPUModalProps) {
   const [loading, setLoading] = useState(true);
-  const [loadingSeconds, setLoadingSeconds] = useState(0);
+  const [, setLoadingSeconds] = useState(0);
   const [launching, setLaunching] = useState(false);
-  const [launchSeconds, setLaunchSeconds] = useState(0);
+  const [, setLaunchSeconds] = useState(0);
   const [error, setError] = useState("");
   const [options, setOptions] = useState<LaunchOptionsData | null>(null);
 
@@ -153,6 +159,10 @@ export function LaunchGPUModal({
     categoryId: string;
     compatibleServiceIds: string[];
     serviceRegions: Record<string, Array<{ id: number; region_name: string; city?: string; country?: string; country_code?: string }>>;
+    // PA-407: true when the HAI compat check failed transiently (timeout /
+    // network / 5xx) rather than genuinely returning zero inventory — the UI
+    // offers a retry instead of a misleading "No GPUs available".
+    checkFailed?: boolean;
   } | null>(null);
   const [instanceName, setInstanceName] = useState(
     deployContext?.modelId
@@ -194,11 +204,34 @@ export function LaunchGPUModal({
           if (lockedProductId) {
             setSelectedProduct(lockedProductId);
           } else {
+            // Monthly-billed products are never shown in the on-demand card
+            // list (see filteredProducts below) — they're only reachable via
+            // the locked "Deploy GPU" flow off an existing subscription. If
+            // one sorts first by displayOrder, auto-selecting it here leaves
+            // selectedProduct pointing at a product with no visible card, so
+            // its (possibly incompatible) regions render with nothing shown
+            // as selected. Exclude monthly here to match filteredProducts.
             const firstAvailable = cat.products
-              .filter(p => data.compatibleServiceIds.includes(p.serviceId))
+              .filter(p => p.billingType !== "monthly" && data.compatibleServiceIds.includes(p.serviceId))
               .sort((a, b) => a.displayOrder - b.displayOrder)[0];
-            if (firstAvailable) setSelectedProduct(firstAvailable.id);
-            else setSelectedProduct("");
+            if (firstAvailable) {
+              // Funnel step 2: product auto-selected after category check
+              trackEvent("product_selected", {
+                flow: "on_demand",
+                gpu_type: cat.name || "",
+                product_name: firstAvailable.name,
+                price_hourly: firstAvailable.pricePerHourCents / 100,
+              });
+              trackEvent("on_demand_product_selected", {
+                gpu_type: cat.name || "",
+                product_name: firstAvailable.name,
+                price_hourly: firstAvailable.pricePerHourCents / 100,
+                vram_gb: firstAvailable.vramGb ?? undefined,
+              });
+              setSelectedProduct(firstAvailable.id);
+            } else {
+              setSelectedProduct("");
+            }
           }
         }
       }
@@ -243,6 +276,18 @@ export function LaunchGPUModal({
 
   const selectedProductDetails = options?.products?.find((p) => p.id === selectedProduct);
 
+  /* A subscription whose product row cannot be found: the deploy needs a
+     configuration, and the on-demand list would charge the wallet instead. */
+  const subscriptionUnmatched =
+    !!stripeSubscriptionId &&
+    !options?.products?.some((p) => p.id === lockedProductId);
+
+  // PA-327: not every GPU type/mesh node can attach shared storage — gate the
+  // storage step on the selected product's own capability, not just region.
+  const sharedStorageSupported = selectedProductDetails
+    ? selectedProductDetails.supportsSharedStorage !== false
+    : true;
+
   // Use categories from API if available, fall back to gpuFamily derivation
   const hasCategories = (options?.categories?.length ?? 0) > 0;
 
@@ -250,7 +295,7 @@ export function LaunchGPUModal({
   // legacy no-category catalog) must never expose the GPU-type step. All step
   // changes (footer Back + indicator pills) funnel through goToStep so the floor
   // is enforced in exactly one place.
-  const minStep = deriveMinStep({ lockedProductId, hasCategories });
+  const minStep = deriveMinStep({ lockedProductId: lockedProductId ?? undefined, hasCategories });
   const goToStep = (n: number) => setStep(clampStep(n, minStep));
 
   const gpuFamilies: string[] = hasCategories
@@ -305,7 +350,7 @@ export function LaunchGPUModal({
   useEffect(() => {
     setStorageMode("none");
     setSelectedExistingVolume(null);
-    if (!selectedRegion || !token) {
+    if (!selectedRegion || !token || !sharedStorageSupported) {
       setStorageBlocks([]);
       setSelectedStorageBlock("");
       return;
@@ -334,7 +379,7 @@ export function LaunchGPUModal({
     }
     fetchStorageBlocks();
     return () => { cancelled = true; };
-  }, [selectedRegion, token]);
+  }, [selectedRegion, token, sharedStorageSupported]);
 
   // Countdown timer while loading GPU options
   useEffect(() => {
@@ -374,6 +419,11 @@ export function LaunchGPUModal({
           const data: LaunchOptionsData = await response.json();
           setOptions(data);
 
+          // GA4: user views GPU cluster listing
+          trackEvent("gpu_browse");
+          // On-demand flow: modal opened
+          trackEvent("on_demand_gpu_browse");
+
           // Auto-select all SSH keys
           if (data.sshKeys?.length > 0) {
             setSelectedSSHKeyIds(new Set(data.sshKeys.map(k => k.id)));
@@ -404,7 +454,17 @@ export function LaunchGPUModal({
               // step with the family chosen; leave the product empty so
               // checkCategoryAvailability auto-selects the first compatible one.
               // Unknown slug falls through to the normal step-1 picker.
-              const cat = data.categories.find(c => c.slug === initialCategorySlug);
+              // PA-456: case/whitespace-insensitive, matching B200Banner's own
+              // defensive slug lookup — an admin-edited slug that differs only
+              // in casing must not silently drop the user back to step 1.
+              // Normalized-exact first; slugMatches then covers vendor-prefix
+              // drift ("b200" ↔ "nvidia-b200") and pre-rename URLs.
+              const normalizedSlug = initialCategorySlug.trim().toLowerCase();
+              const cat =
+                data.categories.find(
+                  c => c.slug?.trim().toLowerCase() === normalizedSlug
+                ) ??
+                data.categories.find(c => slugMatches(c.slug, initialCategorySlug));
               if (cat) {
                 setSelectedGpuFamily(cat.name);
                 setStep(2);
@@ -437,7 +497,48 @@ export function LaunchGPUModal({
       }
     }
     fetchOptions();
+    // Keyed to the modal opening on purpose: re-running refetches the options
+    // and discards the user's picks, and its callee closes over what it sets.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, token]);
+
+  // The wallet figure is fetched with the rest of the launch options when the
+  // modal opens, so a top-up completed while it is open left the balance — and
+  // the "insufficient funds" gate — showing the pre-payment number. Refresh
+  // just the balance; re-running the full fetch would reset the user's picks.
+  const refreshWalletBalance = useCallback(async (): Promise<number | null> => {
+    if (!token) return null;
+    try {
+      const res = await fetch("/api/instances/launch-options", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      const data: LaunchOptionsData = await res.json();
+      if (typeof data.walletBalanceCents !== "number") return null;
+      setOptions((prev) =>
+        prev ? { ...prev, walletBalanceCents: data.walletBalanceCents } : prev
+      );
+      return data.walletBalanceCents;
+    } catch {
+      // Keep the figure we have rather than blanking the modal.
+      return null;
+    }
+  }, [token]);
+
+  // A top-up finishes in Stripe, not here — so re-read the balance whenever the
+  // customer comes back to the tab with the modal open.
+  useEffect(() => {
+    if (!isOpen) return;
+    const onFocus = () => {
+      if (document.visibilityState === "visible") refreshWalletBalance();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [isOpen, refreshWalletBalance]);
 
   // Reset state when modal closes
   useEffect(() => {
@@ -462,8 +563,12 @@ export function LaunchGPUModal({
     }
   }, [isOpen]);
 
-  // Wallet balance check — returns true if sufficient (or monthly billing)
-  const checkWalletBalance = (): boolean => {
+  // Wallet balance check — returns true if sufficient (or monthly billing).
+  // `freshCents` lets the gate decide on a just-read figure, not modal state.
+  const checkWalletBalance = (freshCents?: number | null): boolean => {
+    // A subscription already paid for this deploy, so the wallet is not what
+    // funds it — asked ahead of the product, which may not resolve at all.
+    if (stripeSubscriptionId) return true;
     if (!selectedProductDetails) return false;
 
     // Monthly products are billed via Stripe subscription, no wallet check needed
@@ -472,7 +577,7 @@ export function LaunchGPUModal({
     const MINIMUM_BILLING_MINUTES = 30;
     const hourlyRateCents = selectedProductDetails.pricePerHourCents;
     const requiredCents = Math.round((MINIMUM_BILLING_MINUTES / 60) * hourlyRateCents * 1);
-    const walletCents = options?.walletBalanceCents ?? 0;
+    const walletCents = freshCents ?? options?.walletBalanceCents ?? 0;
 
     return requiredCents <= 0 || walletCents >= requiredCents;
   };
@@ -495,8 +600,26 @@ export function LaunchGPUModal({
       return;
     }
 
-    // Wallet balance gate (skip for monthly billing)
-    if (!checkWalletBalance()) {
+    // GA4: deploy button clicked
+    trackEvent("gpu_deploy_attempt");
+    trackEvent("on_demand_launch_attempted", {
+      gpu_type: selectedGpuFamily || selectedProductDetails?.gpuFamily || "",
+      product_name: selectedProductDetails?.name || "",
+    });
+
+    // Wallet balance gate (skip for monthly billing). A credit applied while
+    // the modal sat open is only visible if we re-read it here, at the gate.
+    const gatesOnWallet =
+      !stripeSubscriptionId && selectedProductDetails?.billingType !== "monthly";
+    const freshCents = gatesOnWallet ? await refreshWalletBalance() : null;
+
+    if (!checkWalletBalance(freshCents)) {
+      trackEvent("on_demand_wallet_topup_shown", {
+        gpu_type: selectedGpuFamily || selectedProductDetails?.gpuFamily || "",
+        product_name: selectedProductDetails?.name || "",
+        wallet_balance: (freshCents ?? options?.walletBalanceCents ?? 0) / 100,
+        minimum_required: Number(getMinimumRequired()),
+      });
       setShowFundWallet(true);
       return;
     }
@@ -522,11 +645,11 @@ export function LaunchGPUModal({
       import("@/lib/plerdy")
         .then(({ trackPlerdy, PLERDY_EVENTS }) => trackPlerdy(PLERDY_EVENTS.GPU_DEPLOYED))
         .catch(() => {});
-      if (typeof (window as any).my_analytics !== "undefined") {
-        (window as any).my_analytics.goal("dc2zgi7efaqu6o3h");
+      if (typeof window.my_analytics !== "undefined") {
+        window.my_analytics.goal("dc2zgi7efaqu6o3h");
       }
-      if (typeof (window as any).lintrk === "function") {
-        (window as any).lintrk("track", { conversion_id: 24436340 });
+      if (typeof window.lintrk === "function") {
+        window.lintrk("track", { conversion_id: 24436340 });
       }
       onSuccess({ name: instanceName.trim(), poolName: productName });
       onClose();
@@ -578,12 +701,32 @@ export function LaunchGPUModal({
   if (!isOpen) return null;
 
   const walletBalanceDollars = ((options?.walletBalanceCents ?? 0) / 100).toFixed(2);
+
+  // PA-356: shared storage is billed on top of the GPU (/api/sync charges
+  // size_in_gb * the configured storage rate), so the estimate has to include it.
+  // Both `cost` fields are already $/hr at our own rate — see getSharedStorageBlocks
+  // and the launch-options route.
+  const storageCostPerHour =
+    storageMode === "create"
+      ? storageBlocks.find(b => b.id === selectedStorageBlock)?.cost ?? 0
+      : storageMode === "existing"
+        ? Number(options?.existingSharedVolumes?.find(v => v.id === selectedExistingVolume)?.cost ?? 0)
+        : 0;
+
   const canLaunch =
     !!selectedProduct &&
     !!selectedRegion &&
     !!instanceName.trim() &&
     !!(selectedProductDetails && getProductAvailability(selectedProductDetails)) &&
     !launching;
+
+  const blocker = launchBlocker({
+    hasProduct: !!selectedProduct,
+    hasRegion: !!selectedRegion,
+    name: instanceName,
+    productAvailable: !!(selectedProductDetails && getProductAvailability(selectedProductDetails)),
+    launching,
+  });
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -599,7 +742,7 @@ export function LaunchGPUModal({
                 <p className="text-sm text-[var(--muted)] mt-1 line-clamp-2">{deployContext.subtitle}</p>
               )}
             </div>
-            <button
+            <button aria-label="Close dialog"
               onClick={onClose}
               className="p-1.5 text-zinc-400 hover:text-zinc-600 transition-colors shrink-0"
             >
@@ -652,6 +795,25 @@ export function LaunchGPUModal({
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-zinc-900"></div>
               <p className="text-sm text-[var(--muted)]">Loading GPU options...</p>
             </div>
+          ) : subscriptionUnmatched ? (
+            <div className="text-center py-8">
+              <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h3 className="font-semibold text-[var(--ink)] mb-2">
+                We can&apos;t match your subscription to a GPU
+              </h3>
+              <p className="text-sm text-[var(--muted)] mb-1">
+                Your subscription is active and nothing further is owed — this is not a
+                billing problem, so please don&apos;t add funds.
+              </p>
+              <p className="text-sm text-[var(--muted)]">
+                Our team needs to relink it before it can deploy. Contact support and
+                quote subscription <span className="font-mono text-xs">{stripeSubscriptionId}</span>.
+              </p>
+            </div>
           ) : error && !options ? (
             <div className="text-center py-8">
               {error.includes("No team") ? (
@@ -682,7 +844,7 @@ export function LaunchGPUModal({
                         type="button"
                         disabled={topupLoading}
                         onClick={() =>
-                          onTopup?.(amount * 100, undefined, selectedProduct || undefined)
+                          onTopup(amount * 100, undefined, selectedProduct || undefined)
                         }
                         className="px-4 py-3 border-2 border-[var(--line)] rounded-xl text-center font-semibold text-[var(--ink)] hover:border-teal-500 hover:bg-teal-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       >
@@ -737,9 +899,24 @@ export function LaunchGPUModal({
                     key={amount}
                     type="button"
                     disabled={topupLoading}
-                    onClick={() =>
-                      onTopup?.(amount * 100, undefined, selectedProduct || undefined)
-                    }
+                    onClick={async () => {
+                      trackEvent("on_demand_wallet_topup_amount_selected", {
+                        amount,
+                        gpu_type: selectedGpuFamily || selectedProductDetails?.gpuFamily || "",
+                        product_name: selectedProductDetails?.name || "",
+                      });
+                      const started = await onTopup(
+                        amount * 100,
+                        undefined,
+                        selectedProduct || undefined
+                      );
+                      if (!started) return;
+                      trackEvent("on_demand_checkout_started", {
+                        amount,
+                        gpu_type: selectedGpuFamily || selectedProductDetails?.gpuFamily || "",
+                        product_name: selectedProductDetails?.name || "",
+                      });
+                    }}
                     className="px-4 py-3 border-2 border-[var(--line)] rounded-xl text-center font-semibold text-[var(--ink)] hover:border-teal-500 hover:bg-teal-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {topupLoading ? "..." : `$${amount}`}
@@ -808,6 +985,14 @@ export function LaunchGPUModal({
                             type="button"
                             disabled={!!isPending}
                             onClick={() => {
+                              // Funnel step 1: GPU type selected (on-demand flow)
+                              trackEvent("gpu_type_selected", {
+                                flow: "on_demand",
+                                gpu_type: family,
+                              });
+                              trackEvent("on_demand_gpu_type_selected", {
+                                gpu_type: family,
+                              });
                               setSelectedGpuFamily(family);
                               setSelectedProduct("");
                               setCategoryCheckResult(null);
@@ -849,6 +1034,26 @@ export function LaunchGPUModal({
                       </div>
                       <p className="text-xs text-zinc-400">This can take a few seconds</p>
                     </div>
+                  ) : categoryCheckResult?.checkFailed ? (
+                    // PA-407: the compat check timed out / errored — this is NOT
+                    // a genuine "no inventory" result, so offer a retry rather
+                    // than the misleading "No GPUs available" state.
+                    <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
+                      <p className="text-sm font-medium text-amber-800">
+                        We couldn&apos;t check GPU availability just now
+                      </p>
+                      <p className="text-xs text-zinc-500 max-w-xs">
+                        The availability service is taking longer than usual. This is
+                        usually temporary — please try again.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => categoryCheckResult && checkCategoryAvailability(categoryCheckResult.categoryId)}
+                        className="px-4 py-2 rounded-lg border-2 border-teal-500 text-teal-600 text-sm font-medium hover:bg-teal-50 transition-colors"
+                      >
+                        Retry
+                      </button>
+                    </div>
                   ) : filteredProducts.length > 0 ? (
                 <div className="mb-5">
                   <label className="block text-xs font-medium text-[var(--muted)] mb-3 uppercase tracking-wide">
@@ -889,7 +1094,22 @@ export function LaunchGPUModal({
                           type="button"
                           disabled={!isAvailable}
                           onClick={() => {
-                            if (isAvailable) setSelectedProduct(product.id);
+                            if (isAvailable) {
+                              // Funnel step 2: product selected (on-demand flow)
+                              trackEvent("product_selected", {
+                                flow: "on_demand",
+                                gpu_type: selectedGpuFamily || product.gpuFamily || "",
+                                product_name: product.name,
+                                price_hourly: product.pricePerHourCents / 100,
+                              });
+                              trackEvent("on_demand_product_selected", {
+                                gpu_type: selectedGpuFamily || product.gpuFamily || "",
+                                product_name: product.name,
+                                price_hourly: product.pricePerHourCents / 100,
+                                vram_gb: product.vramGb ?? undefined,
+                              });
+                              setSelectedProduct(product.id);
+                            }
                           }}
                           className={`w-full p-4 rounded-xl border-2 text-left transition-all ${
                             !isAvailable
@@ -1061,7 +1281,27 @@ export function LaunchGPUModal({
                   {selectedProduct && selectedRegion && (
                     <button
                       type="button"
-                      onClick={() => setStep(3)}
+                      onClick={() => {
+                        // GA4: deploy configuration opened
+                        trackEvent("gpu_configure_start");
+                        // Funnel step 3: checkout/configure reached (on-demand flow)
+                        const configProduct = filteredProducts.find(p => p.id === selectedProduct);
+                        const regionObj = selectedProductRegions.find(r => r.id === selectedRegion);
+                        trackEvent("checkout_reached", {
+                          flow: "on_demand",
+                          gpu_type: selectedGpuFamily || configProduct?.gpuFamily || "",
+                          product_name: configProduct?.name || "",
+                          region: (regionObj as { city?: string })?.city || regionObj?.region_name || "",
+                          price_hourly: configProduct ? configProduct.pricePerHourCents / 100 : 0,
+                        });
+                        trackEvent("on_demand_configure_reached", {
+                          gpu_type: selectedGpuFamily || configProduct?.gpuFamily || "",
+                          product_name: configProduct?.name || "",
+                          region: (regionObj as { city?: string })?.city || regionObj?.region_name || "",
+                          price_hourly: configProduct ? configProduct.pricePerHourCents / 100 : 0,
+                        });
+                        setStep(3);
+                      }}
                       className="w-full mt-4 px-4 py-3 bg-teal-600 text-white rounded-xl font-medium hover:bg-teal-700 transition-colors"
                     >
                       Continue to Configuration
@@ -1075,24 +1315,40 @@ export function LaunchGPUModal({
                 <>
               {/* Instance Name */}
               <div className="mb-5">
-                <label className="block text-xs font-medium text-[var(--muted)] mb-2 uppercase tracking-wide">
-                  Name
+                <label htmlFor="instance-name" className="block text-xs font-medium text-[var(--muted)] mb-2 uppercase tracking-wide">
+                  Name <span className="text-amber-700 normal-case">(required)</span>
                 </label>
                 <input
+                  id="instance-name"
                   type="text"
+                  required
                   value={instanceName}
                   onChange={(e) => setInstanceName(e.target.value)}
-                  placeholder="my-gpu-workspace"
+                  placeholder="e.g. my-gpu-workspace"
                   className="w-full px-4 py-3 rounded-xl border border-[var(--line)] focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 outline-none transition-all text-sm"
                 />
               </div>
 
-              {/* Persistent Storage (visible by default) */}
+              {/* Shared Storage (visible by default) */}
               {selectedRegion && (
                 <div className="mb-5">
                   <label className="block text-xs font-medium text-[var(--muted)] mb-2 uppercase tracking-wide">
-                    Persistent Storage
+                    Shared Storage
                   </label>
+                  {/* PA-356: rootfs persistence is enabled on every provision path
+                      (see createInstance), so state this up front. It's the thing
+                      users assume they need a volume for. Info only, not a choice. */}
+                  <div className="flex items-start gap-2 mb-2 p-3 rounded-xl bg-sky-50 border border-sky-200">
+                    <svg className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-xs text-sky-900">
+                      <span className="font-medium">Your root disk is persistent.</span>{" "}
+                      Anything you install or save on the instance survives a reboot, so you
+                      don&apos;t need a volume for that. Add shared storage below only if you
+                      want data that outlives the instance itself.
+                    </p>
+                  </div>
                   {storageBlocksLoading ? (
                     <div className="flex items-center gap-2 p-3 text-sm text-[var(--muted)]">
                       <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
@@ -1107,7 +1363,7 @@ export function LaunchGPUModal({
                         <input type="radio" name="storage-mode-top" checked={storageMode === "none"} onChange={() => { setStorageMode("none"); setSelectedExistingVolume(null); }} className="w-4 h-4 accent-teal-500" />
                         <div>
                           <span className="text-sm font-medium text-[var(--ink)]">None</span>
-                          <p className="text-xs text-[var(--muted)]">Ephemeral storage only (data lost on termination)</p>
+                          <p className="text-xs text-[var(--muted)]">Root disk only (data lost when the instance is terminated)</p>
                         </div>
                       </label>
                       {storageBlocks.length > 0 && (
@@ -1115,12 +1371,17 @@ export function LaunchGPUModal({
                           <input type="radio" name="storage-mode-top" checked={storageMode === "create"} onChange={() => { setStorageMode("create"); setSelectedExistingVolume(null); if (storageBlocks.length > 0 && !selectedStorageBlock) setSelectedStorageBlock(storageBlocks[0].id); }} className="w-4 h-4 accent-teal-500" />
                           <div>
                             <span className="text-sm font-medium text-[var(--ink)]">Create new volume</span>
-                            <p className="text-xs text-[var(--muted)]">Persistent storage that survives termination</p>
+                            <p className="text-xs text-[var(--muted)]">
+                              Shared storage that outlives the instance
+                              {storageBlocks.some(b => b.cost > 0) && ". Billed hourly on top of the GPU"}
+                            </p>
                           </div>
                         </label>
                       )}
                       {(() => {
-                        const regionVolumes = options?.existingSharedVolumes?.filter(v => v.region_id === selectedRegion) || [];
+                        const regionVolumes = sharedStorageSupported
+                          ? options?.existingSharedVolumes?.filter(v => v.region_id === selectedRegion) || []
+                          : [];
                         if (regionVolumes.length === 0) return null;
                         return (
                           <label className="flex items-center gap-3 p-3 rounded-xl border border-[var(--line)] cursor-pointer hover:border-teal-300 transition-colors">
@@ -1139,12 +1400,12 @@ export function LaunchGPUModal({
                     <div className="mt-2 flex flex-wrap gap-2">
                       {storageBlocks.map(block => (
                         <button key={block.id} type="button" onClick={() => setSelectedStorageBlock(block.id)} className={`px-3 py-2 text-sm rounded-lg border transition-colors ${selectedStorageBlock === block.id ? "border-teal-500 bg-teal-50 text-teal-700 font-medium" : "border-[var(--line)] text-[var(--muted)] hover:border-zinc-300"}`}>
-                          {block.size}GB{block.cost !== "0" && block.cost !== "0.00" && <span className="text-xs ml-1">(${block.cost}/hr)</span>}
+                          {block.size}GB{block.cost > 0 && <span className="text-xs ml-1">({formatSmartPrice(block.cost)}/hr)</span>}
                         </button>
                       ))}
                     </div>
                   )}
-                  {storageMode === "existing" && options?.existingSharedVolumes && (
+                  {storageMode === "existing" && sharedStorageSupported && options?.existingSharedVolumes && (
                     <select value={selectedExistingVolume || ""} onChange={e => setSelectedExistingVolume(Number(e.target.value))} className="w-full mt-2 px-4 py-3 rounded-xl border border-[var(--line)] bg-white text-sm focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 outline-none">
                       {options.existingSharedVolumes.filter(v => v.region_id === selectedRegion).map(vol => (
                         <option key={vol.id} value={vol.id}>{vol.name} ({vol.size_in_gb}GB) - {vol.status}</option>
@@ -1298,11 +1559,16 @@ export function LaunchGPUModal({
                       Wallet:{" "}
                       <span className="font-medium text-[var(--ink)]">${walletBalanceDollars}</span>
                     </div>
-                    <div className="text-sm text-[var(--muted)]">
+                    <div className="text-sm text-[var(--muted)] text-right">
                       Est:{" "}
                       <span className="font-bold text-[var(--ink)]">
-                        ${(selectedProductDetails.pricePerHourCents / 100).toFixed(2)}/hr
+                        {formatSmartPrice(selectedProductDetails.pricePerHourCents / 100 + storageCostPerHour)}/hr
                       </span>
+                      {storageCostPerHour > 0 && (
+                        <div className="text-xs text-[var(--muted)]">
+                          GPU ${(selectedProductDetails.pricePerHourCents / 100).toFixed(2)} + storage {formatSmartPrice(storageCostPerHour)}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1430,8 +1696,25 @@ export function LaunchGPUModal({
         </div>
 
         {/* Footer */}
-        {!DEPLOY_MAINTENANCE && !loading && options && !showFundWallet && !(error && !options) && (
-          <div className="border-t border-[var(--line)] p-6 flex gap-3">
+        {!DEPLOY_MAINTENANCE && !loading && options && !showFundWallet && !subscriptionUnmatched && !(error && !options) && (
+          <div className="border-t border-[var(--line)] p-6">
+            {step === 3 && blocker && (
+              <p
+                id="launch-blocker"
+                data-testid="launch-blocker"
+                role="status"
+                className={`text-sm mb-3 ${
+                  blocker.tone === "action"
+                    ? "text-amber-700"
+                    : blocker.tone === "capacity"
+                      ? "text-zinc-600"
+                      : "text-[var(--muted)]"
+                }`}
+              >
+                {blocker.message}
+              </p>
+            )}
+            <div className="flex gap-3">
             <button
               onClick={() => {
                 const next = backAction(step, minStep);
@@ -1446,6 +1729,7 @@ export function LaunchGPUModal({
               <button
                 onClick={handleLaunch}
                 disabled={!canLaunch}
+                aria-describedby={blocker ? "launch-blocker" : undefined}
                 className="flex-1 py-3 px-4 bg-[var(--blue)] hover:bg-[var(--blue-dark)] text-white font-medium rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 <svg
@@ -1464,6 +1748,7 @@ export function LaunchGPUModal({
                 {deployContext ? "Deploy" : "Launch GPU"}
               </button>
             )}
+            </div>
           </div>
         )}
 
@@ -1471,7 +1756,10 @@ export function LaunchGPUModal({
         {showFundWallet && (
           <div className="border-t border-[var(--line)] p-6 flex gap-3">
             <button
-              onClick={() => setShowFundWallet(false)}
+              onClick={() => {
+                setShowFundWallet(false);
+                refreshWalletBalance();
+              }}
               className="flex-1 py-3 px-4 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 font-medium rounded-xl transition-colors"
             >
               Back

@@ -26,7 +26,6 @@ export default function robots(): MetadataRoute.Robots {
           "/gpu",
           "/privacy",
           "/providers/apply",
-          "/pxl",
           "/request-quote",
           "/sla",
           "/technology",

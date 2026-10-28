@@ -22,7 +22,7 @@ export const gpusCommand = new Command("gpus")
 
       let products = data.products || [];
       if (!options.all) {
-        products = products.filter((p) => p.totalAvailableGpus > 0);
+        products = products.filter((p) => (p.totalAvailableGpus ?? 0) > 0);
       }
 
       if (products.length === 0) {
@@ -49,9 +49,9 @@ export const gpusCommand = new Command("gpus")
       });
 
       for (const product of products) {
-        const slug = product.name.toLowerCase().replace(/\s+/g, "-");
-        const available = product.totalAvailableGpus;
-        const price = `$${(product.pricePerHourCents / 100).toFixed(2)}`;
+        const slug = (product.name ?? "").toLowerCase().replace(/\s+/g, "-");
+        const available = product.totalAvailableGpus ?? 0;
+        const price = `$${((product.pricePerHourCents ?? 0) / 100).toFixed(2)}`;
         const vram = product.vramGb ? `${product.vramGb}GB` : "-";
         const status = available > 0
           ? chalk.green("available")

@@ -6,10 +6,24 @@
 // Team Types
 // ============================================
 
+// Policy reference in HAI's team `policy_info` ({id, name} or null when unset)
+export type TeamPolicyRef = { id: string; name?: string } | null;
+
 export interface Team {
   id: string;
   name: string;
   description?: string;
+  // PA-353: current policy assignments, returned by GET /team/{id}. We only
+  // type the baremetal set — needed to round-trip it on PUT /team/{id}
+  // (ariel 400s an update that omits has_baremetal_policies while the team
+  // has baremetal policies assigned).
+  policy_info?: {
+    baremetal_resource_policy?: TeamPolicyRef;
+    baremetal_service_policy?: TeamPolicyRef;
+    baremetal_pricing_policy?: TeamPolicyRef;
+    baremetal_image_policy?: TeamPolicyRef;
+    baremetal_instance_type_policy?: TeamPolicyRef;
+  };
 }
 
 // Single row in GET /team/{teamId}/members. We only use the fields we
@@ -210,7 +224,9 @@ export interface CreateInstanceParams {
   workspace_id?: string;
   network_assignment?: string;
   public_keys?: string[];
-  pod_opts?: { pool_id?: number; vgpus?: number; shared_volumes?: number[] };
+  // rootfs_enabled: Ariel (HAI 2.2) rootfs persistence for GPUaaS pods.
+  // createInstance() defaults it to true for every provision.
+  pod_opts?: { pool_id?: number; vgpus?: number; shared_volumes?: number[]; rootfs_enabled?: boolean };
 }
 
 export interface InstanceCredentials {
@@ -263,12 +279,37 @@ export interface PoolSubscription {
   pool_label?: string; // Marketplace display label — prefer over pool_name when present
   gpu_count?: number;
   status: string;
+  // HAI 2.2 unified `nature` ("vm" | "pod" | "baremetal"). Baremetal rows are
+  // term-prepay servers with their own status vocabulary
+  // (requested|online|offline|rebooting|deleting) and numeric string ids —
+  // the VM/pod action and detail endpoints reject them.
+  nature?: string;
+  ip?: string[];
+  // Linked term-prepay BareMetalOrder (set by /api/instances for baremetal rows)
+  baremetal?: {
+    orderId: string | null;
+    gpuType?: string;
+    gpuCount?: number;
+    contractMonths?: number;
+    orderStatus?: string;
+  };
   region?: {
+    id?: number; // HAI region id — used to stamp region-maintenance status
     region_name?: string;
     city?: string;
   };
+  // Set by GET /api/instances when this instance's region is under maintenance:
+  // the card hides actions and shows the message in an amber banner.
+  maintenance?: {
+    active: boolean;
+    message?: string;
+  };
   storage_details?: {
     ephemeral_storage_gb?: number;
+    // PA-80: latest local/ephemeral (root disk) usage from GpuHardwareMetrics,
+    // attached by GET /api/instances for the 80%/90% storage-full warning.
+    ephemeral_storage_used_gb?: number;
+    ephemeral_storage_percent?: number;
     persistent_storage_gb?: number; // Present when persistent storage is attached
     persistent_storage_block_id?: string;
     shared_volumes?: Array<{
@@ -394,8 +435,9 @@ export interface PodConnectionInfo {
   internal_ip?: string; // Internal/private IP fetched via SSH
 }
 
+// `id` is numeric for a pool subscription, `i-<uuid>` for a HAI 2.2 instance.
 export interface SubscriptionConnectionInfo {
-  id: number;
+  id: number | string;
   pool_name: string;
   pool_label?: string; // Marketplace display label — prefer over pool_name when present
   region_id: number;
@@ -456,9 +498,11 @@ export interface PodExposeServiceOpts {
   port: number;
   service_name: string;
   protocol: "TCP" | "UDP";
-  // For TCP: "http", "https", or "NodePort" (raw TCP without http prefix)
-  // For UDP: "NodePort" or "loadbalancer" (Kubernetes types)
-  service_type: "http" | "https" | "NodePort" | "loadbalancer";
+  // TCP: "http", "https", or "none" (raw TCP, no prefix) — hostedai-user only ever
+  // accepts these (PA-479). "NodePort"/"loadbalancer" remain in this union only
+  // because the internal dashboard route (src/app/api/services/route.ts) still
+  // constructs them for UDP — a separate, already-broken bug (PA-627), not fixed here.
+  service_type: "http" | "https" | "none" | "NodePort" | "loadbalancer";
 }
 
 export interface PodDiscoveredServices {
@@ -480,7 +524,7 @@ export interface PodUpdateExposedServiceOpts {
   service_name?: string;
   port?: number;
   protocol?: "TCP" | "UDP";
-  service_type?: "http" | "https" | "NodePort" | "loadbalancer";
+  service_type?: "http" | "https" | "none" | "NodePort" | "loadbalancer";
 }
 
 export interface ExposeServiceStatusResponse {

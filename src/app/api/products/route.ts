@@ -6,11 +6,13 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { SELLABLE_WHERE } from "@/lib/product-availability";
 
 export async function GET() {
   try {
+    // Sellable: this is the public catalogue.
     const products = await prisma.gpuProduct.findMany({
-      where: { active: true },
+      where: SELLABLE_WHERE,
       orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
       select: {
         id: true,

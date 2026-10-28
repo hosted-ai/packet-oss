@@ -33,13 +33,13 @@
     cmd: python3 -m venv /opt/axolotl/venv
     creates: /opt/axolotl/venv/bin/python
 
-- name: Install PyTorch nightly with CUDA 12.8
+- name: Install PyTorch (CUDA 12.8)
   ansible.builtin.pip:
     name:
-      - torch
-      - torchvision
-      - torchaudio
-    extra_args: "--index-url https://download.pytorch.org/whl/nightly/cu128"
+      - torch==2.11.0+cu128
+      - torchvision==0.26.0+cu128
+      - torchaudio==2.11.0+cu128
+    extra_args: "--index-url https://download.pytorch.org/whl/cu128"
     virtualenv: /opt/axolotl/venv
   retries: 3
   delay: 10

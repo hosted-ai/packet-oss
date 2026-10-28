@@ -1,38 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken } from "@/lib/customer-auth";
+import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import { prisma } from "@/lib/prisma";
-import { getStripe } from "@/lib/stripe";
 
-// GET /api/account/settings - Get customer settings
+// GET /api/account/settings - Get settings for the operating account
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.replace("Bearer ", "");
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
+    const { accountId } = auth;
 
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { success: false, error: "Invalid token" },
-        { status: 401 }
-      );
-    }
-
-    // Get or create settings for this customer
     let settings = await prisma.customerSettings.findUnique({
-      where: { stripeCustomerId: payload.customerId },
+      where: { stripeCustomerId: accountId },
     });
 
     if (!settings) {
       settings = await prisma.customerSettings.create({
         data: {
-          stripeCustomerId: payload.customerId,
+          stripeCustomerId: accountId,
           sessionTimeoutHours: 1, // Default 1 hour
         },
       });
@@ -53,26 +37,12 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PUT /api/account/settings - Update customer settings
+// PUT /api/account/settings - Update settings for the operating account
 export async function PUT(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("Authorization");
-    const token = authHeader?.replace("Bearer ", "");
-
-    if (!token) {
-      return NextResponse.json(
-        { success: false, error: "Unauthorized" },
-        { status: 401 }
-      );
-    }
-
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { success: false, error: "Invalid token" },
-        { status: 401 }
-      );
-    }
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
+    const { accountId } = auth;
 
     const body = await request.json();
     const { sessionTimeoutHours } = body;
@@ -91,10 +61,10 @@ export async function PUT(request: NextRequest) {
 
     // Upsert settings
     const settings = await prisma.customerSettings.upsert({
-      where: { stripeCustomerId: payload.customerId },
+      where: { stripeCustomerId: accountId },
       update: { sessionTimeoutHours },
       create: {
-        stripeCustomerId: payload.customerId,
+        stripeCustomerId: accountId,
         sessionTimeoutHours,
       },
     });

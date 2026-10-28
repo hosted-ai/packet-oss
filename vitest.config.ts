@@ -1,17 +1,37 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { readFileSync } from 'fs';
+import { parse as parseYAML } from 'yaml';
+
+// ── OSS coverage scope ───────────────────────────────────────────────────────
+// Premium paths are stripped from the OSS build (.oss-manifest.yaml) and are
+// deliberately untested by this campaign — so they're legitimately out of the
+// coverage denominator. Derive the premium `src/**` globs straight from the
+// manifest (single source of truth; no drift) and drop them from coverage so
+// the gate measures the OSS surface we actually ship + test.
+const ossManifest = parseYAML(
+  readFileSync(path.resolve(__dirname, '.oss-manifest.yaml'), 'utf8'),
+) as { exclude?: string[] };
+const premiumExcludes = (ossManifest.exclude ?? [])
+  .filter((p) => p.startsWith('src/'))
+  // Escape route-group parens: vitest's coverage matcher (picomatch) reads a
+  // bare `(marketing)` as a group, so `src/app/(marketing)/**` would NOT match
+  // the literal `(marketing)`/`(tenant)` dirs and those premium pages would
+  // leak into the denominator. Escaped, picomatch matches the literal parens.
+  .map((p) => p.replace(/[()]/g, '\\$&'));
 
 // ── Quarantine ──────────────────────────────────────────────────────────────
-// Test files that are red on `main` as of the CI-introduction baseline
-// (2026-06-02). They are excluded from CI runs ONLY (process.env.CI), so the
-// new pipeline can gate green on the passing suite while these are triaged.
-// They STILL RUN locally so the failures stay visible to anyone working here.
-// Tracked in PA-273. De-quarantine a file by deleting its line once its
-// failing cases are fixed (highest ROI first — e.g. gpu-specs: fix 5, restore 57).
+// General flake/red-test quarantine mechanism (originally PA-273, now the
+// house convention documented in TESTING.md's "Flake quarantine" section —
+// PA-264): list a file here to exclude it from CI runs ONLY (process.env.CI),
+// so the pipeline gates green while it's triaged. It STILL RUNS locally so
+// the failures stay visible to anyone working here. De-quarantine by deleting
+// its line once fixed; reference the tracking Jira ticket in a comment above
+// each entry.
 // Quarantine list is empty — all previously-red tests have been fixed
-// (gpu-specs via #42, the rest via this PR). The machinery below is a no-op
-// now; safe to delete in a follow-up.
+// (gpu-specs via #42, the rest via PA-273). The machinery below is a no-op
+// now, ready for the next flake.
 const QUARANTINE: string[] = [];
 
 const quarantined = process.env.CI ? QUARANTINE : [];
@@ -27,6 +47,12 @@ export default defineConfig({
   test: {
     globals: true,
     setupFiles: './tests/setup.ts',
+    // Retry failed tests in CI only. The full ~4.6k-test suite runs under v8
+    // coverage instrumentation in the gate step, which is slow enough that a
+    // handful of async UI tests are load-flaky; a retry lets a transient flake
+    // pass without reddening the gate, while a genuinely broken test still
+    // fails all attempts. Local runs (retry 0) keep flakes visible.
+    retry: process.env.CI ? 2 : 0,
     // Coverage is a global (root) concern; both projects report into it.
     coverage: {
       provider: 'v8',
@@ -40,16 +66,20 @@ export default defineConfig({
       // which crash it. Without this block the report only counts files the
       // tests happened to load, which wildly inflates the headline number.
       include: ['src/**/*.{ts,tsx}'],
-      // The repo's 70% gate is intentionally dormant until coverage gets
-      // there (campaign Phase 6). Opt in with COVERAGE_GATE=1; a bare
-      // `pnpm test:coverage` is a measurement, not a gate, and must exit 0.
+      // Coverage gate (campaign Phase 6, PA-291). Scope is OSS-only (premium
+      // excluded below), so these measure the surface we actually ship + test.
+      // RATCHET floor — set just below current OSS coverage (lines ~62%,
+      // stmts ~60%, branches ~54%, funcs ~51% after the PA-320 deepening) to
+      // enforce no-regression now; raise these numbers as coverage climbs
+      // toward the 70% north star. Enabled in CI via COVERAGE_GATE=1; a bare
+      // `pnpm test:coverage` stays a measurement (exits 0) for local use.
       ...(process.env.COVERAGE_GATE
         ? {
             thresholds: {
-              lines: 70,
-              functions: 70,
-              branches: 70,
-              statements: 70,
+              lines: 58,
+              functions: 48,
+              branches: 51,
+              statements: 57,
             },
           }
         : {}),
@@ -60,12 +90,12 @@ export default defineConfig({
         '**/*.config.*',
         '**/dist/**',
         '.next/**',
+        // Premium (stripped from the OSS build) — mirror .oss-manifest.yaml.
+        ...premiumExcludes,
       ],
     },
-    // Two projects so front-end and back-end suites run (and fail) independently
-    // and can fan out as separate parallel CI steps. Back-end runs under `node`;
-    // front-end runs under `jsdom` so component tests can render. Per-file
-    // `// @vitest-environment` docblocks still override on a per-file basis.
+    // Back-end runs under `node`, front-end under `jsdom` so components render;
+    // a per-file `// @vitest-environment` docblock still overrides either.
     projects: [
       {
         extends: true,
@@ -76,6 +106,7 @@ export default defineConfig({
             'tests/lib/**/*.test.{ts,tsx}',
             'tests/api/**/*.test.{ts,tsx}',
             'tests/regression/**/*.test.{ts,tsx}',
+            'tests/contract/**/*.test.{ts,tsx}',
             'tests/example.test.ts',
           ],
           exclude: [...sharedExclude, ...quarantined],

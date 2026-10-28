@@ -11,6 +11,8 @@
 
 import { getSetting } from "@/lib/settings";
 
+const HAI_DEBUG = process.env.HOSTEDAI_DEBUG === "1";
+
 // In-memory cache for API responses (10 second TTL)
 const apiCache = new Map<string, { data: unknown; timestamp: number }>();
 const CACHE_TTL_MS = 120 * 1000; // 2 minutes — shared across cron jobs to reduce hosted.ai API load
@@ -21,7 +23,7 @@ const CACHE_TTL_MS = 120 * 1000; // 2 minutes — shared across cron jobs to red
  */
 export function getCached<T>(key: string): T | null {
   const cached = apiCache.get(key);
-  if (cached && (Date.now() - cached.timestamp) < CACHE_TTL_MS) {
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
     console.log(`[Hosted.AI] Cache hit for ${key}`);
     return cached.data as T;
   }
@@ -61,7 +63,7 @@ export async function hostedaiRequest<T>(
   method: string,
   endpoint: string,
   data?: Record<string, unknown>,
-  timeoutMs?: number
+  timeoutMs?: number,
 ): Promise<T> {
   const [apiUrl, apiKey] = await Promise.all([getApiUrl(), getApiKey()]);
   const url = `${apiUrl}/api${endpoint}`;
@@ -69,16 +71,20 @@ export async function hostedaiRequest<T>(
   // Default timeout: 15s for GET, 30s for POST (prevents indefinite hangs)
   const effectiveTimeout = timeoutMs ?? (method === "GET" ? 15_000 : 30_000);
 
-  console.log(`[Hosted.AI] ${method} ${url} (timeout: ${effectiveTimeout}ms)`);
-  if (data) {
-    console.log(`[Hosted.AI] Request body:`, JSON.stringify(data, null, 2));
+  // Full request/response dumps only behind HOSTEDAI_DEBUG=1 — unconditional
+  if (HAI_DEBUG) {
+    console.log(
+      `[Hosted.AI] ${method} ${url} (timeout: ${effectiveTimeout}ms)`,
+    );
+    if (data) {
+      console.log(`[Hosted.AI] Request body:`, JSON.stringify(data, null, 2));
+    }
   }
+  const startedAt = Date.now();
 
   // Create abort controller for timeout
   const controller = new AbortController();
-  let timeoutId: NodeJS.Timeout | undefined;
-
-  timeoutId = setTimeout(() => {
+  const timeoutId = setTimeout(() => {
     controller.abort();
   }, effectiveTimeout);
 
@@ -98,8 +104,15 @@ export async function hostedaiRequest<T>(
     // Always read the response body
     const text = await response.text();
 
+    console.log(
+      `[Hosted.AI] ${method} ${endpoint} → ${response.status} (${text.length}B, ${Date.now() - startedAt}ms)`,
+    );
+
     if (!response.ok) {
-      console.error(`[Hosted.AI] API error ${response.status}:`, text);
+      console.error(
+        `[Hosted.AI] API error ${response.status}:`,
+        text.slice(0, 2000),
+      );
 
       // Try to parse error as JSON for better error messages
       let errorMessage = text;
@@ -107,16 +120,21 @@ export async function hostedaiRequest<T>(
         const errorData = JSON.parse(text);
         errorMessage = errorData.message || errorData.error || text;
         if (errorData.errors && Array.isArray(errorData.errors)) {
-          const fieldErrors = errorData.errors.map((e: { field?: string; message?: string }) =>
-            `${e.field}: ${e.message}`
-          ).join(", ");
+          const fieldErrors = errorData.errors
+            .map(
+              (e: { field?: string; message?: string }) =>
+                `${e.field}: ${e.message}`,
+            )
+            .join(", ");
           errorMessage = `${errorMessage} (${fieldErrors})`;
         }
       } catch {
         // Text is not JSON, use as-is
       }
 
-      throw new Error(`Hosted.ai API error (${response.status}): ${errorMessage}`);
+      throw new Error(
+        `Hosted.ai API error (${response.status}): ${errorMessage}`,
+      );
     }
 
     // Handle empty responses (some endpoints return 200 with no body)
@@ -127,19 +145,25 @@ export async function hostedaiRequest<T>(
 
     try {
       const parsed = JSON.parse(text);
-      console.log(`[Hosted.AI] Response:`, JSON.stringify(parsed, null, 2));
+      if (HAI_DEBUG) {
+        console.log(`[Hosted.AI] Response:`, JSON.stringify(parsed, null, 2));
+      }
       return parsed;
     } catch {
-      console.log(`[Hosted.AI] Non-JSON response:`, text);
+      console.log(`[Hosted.AI] Non-JSON response:`, text.slice(0, 500));
       return { success: true } as T;
     }
   } catch (error) {
     if (timeoutId) clearTimeout(timeoutId);
 
     // Handle abort/timeout
-    if (error instanceof Error && error.name === 'AbortError') {
-      console.log(`[Hosted.AI] Request timed out after ${effectiveTimeout}ms: ${endpoint}`);
-      throw new Error(`TIMEOUT: Request to ${endpoint} timed out after ${effectiveTimeout}ms`);
+    if (error instanceof Error && error.name === "AbortError") {
+      console.log(
+        `[Hosted.AI] Request timed out after ${effectiveTimeout}ms: ${endpoint}`,
+      );
+      throw new Error(
+        `TIMEOUT: Request to ${endpoint} timed out after ${effectiveTimeout}ms`,
+      );
     }
 
     throw error;
@@ -152,7 +176,10 @@ export async function hostedaiRequest<T>(
  */
 export async function getApiUrl(): Promise<string> {
   const url = await getSetting("HOSTEDAI_API_URL");
-  if (!url) throw new Error("HOSTEDAI_API_URL is not set — configure in Platform Settings or .env.local");
+  if (!url)
+    throw new Error(
+      "HOSTEDAI_API_URL is not set — configure in Platform Settings or .env.local",
+    );
   return url;
 }
 
@@ -162,6 +189,9 @@ export async function getApiUrl(): Promise<string> {
  */
 export async function getApiKey(): Promise<string> {
   const key = await getSetting("HOSTEDAI_API_KEY");
-  if (!key) throw new Error("HOSTEDAI_API_KEY is not set — configure in Platform Settings or .env.local");
+  if (!key)
+    throw new Error(
+      "HOSTEDAI_API_KEY is not set — configure in Platform Settings or .env.local",
+    );
   return key;
 }

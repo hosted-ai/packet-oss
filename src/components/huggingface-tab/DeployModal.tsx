@@ -65,7 +65,6 @@ export function DeployModal({
   setSelectedSubscription,
   selectedProduct,
   setSelectedProduct,
-  selectedRegion,
   setSelectedRegion,
   hfToken,
   setHfToken,
@@ -116,7 +115,7 @@ export function DeployModal({
                 {selectedItem.name}
               </p>
             </div>
-            <button
+            <button aria-label="Close dialog"
               onClick={onClose}
               className="text-[var(--muted)] hover:text-[var(--ink)] p-1"
             >

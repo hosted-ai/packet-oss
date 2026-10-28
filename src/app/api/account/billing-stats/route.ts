@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await getAuthenticatedCustomer(request);
     if (auth instanceof NextResponse) return auth;
-    const { customer, teamId } = auth;
+    const { teamId } = auth;
 
     // PA-202 gate: billing.view required (Team Admin + Finance Manager allowed,
     // Team Member + Read-only Member denied).

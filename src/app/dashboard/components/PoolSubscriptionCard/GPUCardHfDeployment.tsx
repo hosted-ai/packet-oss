@@ -44,7 +44,6 @@ export function GPUCardHfDeployment({
   const [showFullLogsModal, setShowFullLogsModal] = useState(false);
   const [showPlayground, setShowPlayground] = useState(false);
 
-  const isDeploymentActive = ["pending", "deploying", "installing", "starting"].includes(hfDeployment.status);
 
   return (
     <div className="border-t border-[var(--line)]">

@@ -68,7 +68,7 @@ export function GpuaasProvisioningModal({
   const [node, setNode] = useState<NodeData | null>(null);
   const [gpuaasStatus, setGpuaasStatus] = useState<GpuaasNodeStatus | null>(null);
   const [regions, setRegions] = useState<Region[]>([]);
-  const [clusters, setClusters] = useState<Cluster[]>([]);
+  const [, setClusters] = useState<Cluster[]>([]);
   const [sshKeys, setSshKeys] = useState<string[]>([]);
 
   // Form state

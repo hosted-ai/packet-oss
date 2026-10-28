@@ -348,86 +348,88 @@ export function VouchersTab() {
             No vouchers created yet
           </div>
         ) : (
-          <table className="w-full">
-            <thead className="bg-gray-50">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Code</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Name</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Credit</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Redemptions</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Expires</th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-[#5b6476] uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#e4e7ef]">
-              {vouchers.map((voucher) => (
-                <tr key={voucher.id} className={!voucher.active ? "opacity-60" : ""}>
-                  <td className="px-4 py-3">
-                    <span className="font-mono text-sm font-bold text-[#1a4fff]">{voucher.code}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="text-sm text-[#0b0f1c]">{voucher.name}</div>
-                    {voucher.description && (
-                      <div className="text-xs text-[#5b6476]">{voucher.description}</div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-sm font-medium text-green-600">
-                      +${(voucher.creditCents / 100).toFixed(0)}
-                    </span>
-                    {voucher.minTopupCents && (
-                      <div className="text-xs text-[#5b6476]">
-                        Min ${(voucher.minTopupCents / 100).toFixed(0)}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleViewRedemptions(voucher)}
-                      className="text-sm text-[#0b0f1c] hover:text-[#1a4fff]"
-                    >
-                      {voucher.redemptionCount}
-                      {voucher.maxRedemptions && `/${voucher.maxRedemptions}`}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleToggleActive(voucher)}
-                      className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium cursor-pointer ${
-                        voucher.active
-                          ? "bg-green-100 text-green-800"
-                          : "bg-gray-100 text-gray-800"
-                      }`}
-                    >
-                      {voucher.active ? "Active" : "Inactive"}
-                    </button>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-[#5b6476]">
-                    {voucher.expiresAt ? formatDate(voucher.expiresAt) : "Never"}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleEditClick(voucher)}
-                        className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-[#0b0f1c] text-xs rounded"
-                      >
-                        Edit
-                      </button>
-                      {voucher.redemptionCount === 0 && (
-                        <button
-                          onClick={() => handleDelete(voucher)}
-                          className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded"
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </div>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Code</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Name</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Credit</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Redemptions</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-[#5b6476] uppercase">Expires</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-[#5b6476] uppercase">Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-[#e4e7ef]">
+                {vouchers.map((voucher) => (
+                  <tr key={voucher.id} className={!voucher.active ? "opacity-60" : ""}>
+                    <td className="px-4 py-3 truncate max-w-[200px]" title={voucher.code}>
+                      <span className="font-mono text-sm font-bold text-[#1a4fff]">{voucher.code}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="text-sm text-[#0b0f1c] truncate max-w-[240px]" title={voucher.name}>{voucher.name}</div>
+                      {voucher.description && (
+                        <div className="text-xs text-[#5b6476] truncate max-w-[240px]" title={voucher.description}>{voucher.description}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-sm font-medium text-green-600">
+                        +${(voucher.creditCents / 100).toFixed(0)}
+                      </span>
+                      {voucher.minTopupCents && (
+                        <div className="text-xs text-[#5b6476]">
+                          Min ${(voucher.minTopupCents / 100).toFixed(0)}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleViewRedemptions(voucher)}
+                        className="text-sm text-[#0b0f1c] hover:text-[#1a4fff]"
+                      >
+                        {voucher.redemptionCount}
+                        {voucher.maxRedemptions && `/${voucher.maxRedemptions}`}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3">
+                      <button
+                        onClick={() => handleToggleActive(voucher)}
+                        className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium cursor-pointer ${
+                          voucher.active
+                            ? "bg-green-100 text-green-800"
+                            : "bg-gray-100 text-gray-800"
+                        }`}
+                      >
+                        {voucher.active ? "Active" : "Inactive"}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 text-sm text-[#5b6476]">
+                      {voucher.expiresAt ? formatDate(voucher.expiresAt) : "Never"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => handleEditClick(voucher)}
+                          className="px-3 py-1 bg-gray-100 hover:bg-gray-200 text-[#0b0f1c] text-xs rounded"
+                        >
+                          Edit
+                        </button>
+                        {voucher.redemptionCount === 0 && (
+                          <button
+                            onClick={() => handleDelete(voucher)}
+                            className="px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 text-xs rounded"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

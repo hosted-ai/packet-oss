@@ -25,7 +25,6 @@ import {
   createPool,
   scanGPUs,
   addGPUToPool,
-  getGpuaasIdForRegion,
   getUnassignedClusterGPUs,
 } from "@/lib/gpuaas-admin";
 import { addRegionToDefaultPolicy } from "@/lib/hostedai";
@@ -110,7 +109,7 @@ function generatePoolName(gpuModel?: string | null): string {
   }
 
   // Clean and normalize the GPU model name
-  let name = gpuModel
+  const name = gpuModel
     .toLowerCase()
     .replace(/nvidia\s*/gi, "") // Remove NVIDIA prefix
     .replace(/geforce\s*/gi, "") // Remove GeForce prefix

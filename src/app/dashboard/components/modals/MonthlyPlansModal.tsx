@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { trackEvent } from "@/lib/analytics/track-event";
 import {
   groupMonthlyByCategory,
   shouldShowCategoryStep,
@@ -56,9 +57,11 @@ export function MonthlyPlansModal({
     if (!isOpen) return;
     let cancelled = false;
 
-    async function fetchProducts() {
-      setLoading(true);
-      setError(null);
+    async function fetchProducts(isBackgroundRefresh = false) {
+      if (!isBackgroundRefresh) {
+        setLoading(true);
+        setError(null);
+      }
       try {
         const res = await fetch("/api/products");
         if (!res.ok) throw new Error("Failed to load plans");
@@ -69,16 +72,30 @@ export function MonthlyPlansModal({
           (p) => p.billingType === "monthly" && p.stripePriceId
         );
         setProducts(monthly);
+
+        // GA4: user views monthly plans/pricing page
+        if (!isBackgroundRefresh) {
+          trackEvent("plan_page_view");
+          // Monthly flow: modal opened
+          trackEvent("monthly_gpu_browse");
+        }
       } catch {
-        if (!cancelled) setError("Could not load plans. Please try again.");
+        // A background refresh failing silently is fine — the visible
+        // prices just stay at their last-known value until the next tick.
+        if (!cancelled && !isBackgroundRefresh) setError("Could not load plans. Please try again.");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !isBackgroundRefresh) setLoading(false);
       }
     }
 
     fetchProducts();
+    // PA-349: an admin price edit elsewhere shouldn't require the customer
+    // to close and reopen this modal to see it — keep prices live while
+    // it's open, matching the dashboard's own 30s poll cadence.
+    const interval = setInterval(() => fetchProducts(true), 30000);
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, [isOpen]);
 
@@ -97,14 +114,18 @@ export function MonthlyPlansModal({
       setSelectedBucketKey(null);
       return;
     }
-    if (initialCategorySlug) {
-      const match = findBucketBySlug(buckets, initialCategorySlug);
-      if (match) {
-        setSelectedBucketKey(match.key);
-        return;
+    // PA-349: `buckets` gets a new array identity on every background price
+    // refetch even when its contents are unchanged. Keep whatever bucket the
+    // user already drilled into instead of bouncing them back to the
+    // category step underneath their cursor.
+    setSelectedBucketKey((current) => {
+      if (current && buckets.some((b) => b.key === current)) return current;
+      if (initialCategorySlug) {
+        const match = findBucketBySlug(buckets, initialCategorySlug);
+        if (match) return match.key;
       }
-    }
-    setSelectedBucketKey(shouldShowCategoryStep(buckets) ? null : buckets[0].key);
+      return shouldShowCategoryStep(buckets) ? null : buckets[0].key;
+    });
   }, [buckets, initialCategorySlug]);
 
   const handleSubscribe = async (product: MonthlyProduct) => {
@@ -113,8 +134,53 @@ export function MonthlyPlansModal({
       return;
     }
 
+    // GA4: user selects a plan
+    const planType = product.badgeText?.toLowerCase().includes("dedicated")
+      ? "dedicated"
+      : product.badgeText?.toLowerCase().includes("dynamic")
+        ? "dynamic"
+        : product.name.toLowerCase().includes("dedicated")
+          ? "dedicated"
+          : "dynamic";
+    trackEvent("plan_selected", {
+      plan_type: planType,
+      price_monthly: (product.pricePerMonthCents ?? 0) / 100,
+    });
+
+    // Funnel step 2: product selected (monthly flow)
+    trackEvent("product_selected", {
+      flow: "monthly",
+      gpu_type: selectedBucket?.name || "",
+      product_name: product.name,
+      price_monthly: (product.pricePerMonthCents ?? 0) / 100,
+    });
+    trackEvent("monthly_plan_selected", {
+      gpu_type: selectedBucket?.name || "",
+      product_name: product.name,
+      plan_type: planType,
+      price_monthly: (product.pricePerMonthCents ?? 0) / 100,
+      vram_gb: product.vramGb ?? undefined,
+    });
+
     setSubscribingId(product.id);
     setError(null);
+
+    // GA4: checkout flow initiated
+    trackEvent("plan_checkout_start");
+
+    // Funnel step 3: checkout reached (monthly flow — redirects to Stripe)
+    trackEvent("checkout_reached", {
+      flow: "monthly",
+      gpu_type: selectedBucket?.name || "",
+      product_name: product.name,
+      price_monthly: (product.pricePerMonthCents ?? 0) / 100,
+    });
+    trackEvent("monthly_checkout_started", {
+      gpu_type: selectedBucket?.name || "",
+      product_name: product.name,
+      plan_type: planType,
+      price_monthly: (product.pricePerMonthCents ?? 0) / 100,
+    });
 
     try {
       const res = await fetch("/api/checkout", {
@@ -170,7 +236,7 @@ export function MonthlyPlansModal({
           <button
             onClick={onClose}
             className="text-zinc-400 hover:text-zinc-600 p-1 shrink-0"
-            aria-label="Close"
+            aria-label="Close dialog"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -199,7 +265,17 @@ export function MonthlyPlansModal({
                 <button
                   key={bucket.key}
                   type="button"
-                  onClick={() => setSelectedBucketKey(bucket.key)}
+                  onClick={() => {
+                    // Funnel step 1: GPU type selected (monthly flow)
+                    trackEvent("gpu_type_selected", {
+                      flow: "monthly",
+                      gpu_type: bucket.name,
+                    });
+                    trackEvent("monthly_gpu_type_selected", {
+                      gpu_type: bucket.name,
+                    });
+                    setSelectedBucketKey(bucket.key);
+                  }}
                   className="w-full text-left px-4 py-3 rounded-lg border-2 border-[var(--line)] hover:border-teal-400 hover:bg-teal-50/50 transition-all"
                 >
                   <div className="flex items-center justify-between">

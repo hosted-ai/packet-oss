@@ -2,127 +2,104 @@
 
 export function GPUMetricsDoc() {
   return (
-    <div className="prose prose-zinc prose-pre:overflow-x-auto prose-pre:max-w-full">
-      <h1>GPU Metrics Dashboard</h1>
+    <div>
       <p className="lead">
-        Real-time GPU monitoring and analytics for optimal performance tracking.
+        GPU monitoring and analytics for your instances and AI workloads.
       </p>
 
       <h2>Overview</h2>
       <p>
-        The GPU Metrics Dashboard provides comprehensive monitoring of your GPU instances.
-        Track utilization, memory usage, temperature, and inference performance in real-time
-        to optimize your AI workloads.
+        The Metrics dashboard provides monitoring and visualization of your GPU instances.
+        Track compute usage, memory usage, and inference performance metrics to optimize
+        your deployments and troubleshoot issues.
       </p>
 
       <h3>Key Features</h3>
       <ul>
-        <li><strong>Real-time Monitoring</strong> - Live updates every 5 seconds</li>
-        <li><strong>GPU Utilization</strong> - Track compute usage percentage</li>
-        <li><strong>Memory Tracking</strong> - Monitor VRAM allocation and usage</li>
-        <li><strong>Temperature Monitoring</strong> - Watch GPU thermals</li>
-        <li><strong>Inference Metrics</strong> - Tokens/sec, queue depth, latency</li>
-        <li><strong>Historical Data</strong> - View trends over time</li>
+        <li><strong>Compute & VRAM Tracking</strong> - Account-wide TFLOPs and GPU memory usage</li>
+        <li><strong>Automatic Refresh</strong> - The Metrics tab updates every 60 seconds</li>
+        <li><strong>Per-Pod Breakdown</strong> - TFLOPs and VRAM usage for each individual pod</li>
+        <li><strong>Historical Data</strong> - View trends from the last 5 minutes up to all time</li>
+        <li><strong>Inference Metrics</strong> - Tokens/sec, cache usage, queue depth for deployed models</li>
+        <li><strong>Automatic Storage Alerts</strong> - Email warnings when pod storage approaches capacity</li>
       </ul>
 
       <h2>Dashboard Sections</h2>
 
-      <h3>GPU Overview Cards</h3>
+      <h3>Overview Cards</h3>
       <p>Quick summary at the top showing:</p>
       <ul>
-        <li><strong>GPU Utilization</strong> - Current compute usage (%)</li>
-        <li><strong>Memory Usage</strong> - VRAM used / total (e.g., 42GB / 96GB)</li>
-        <li><strong>Temperature</strong> - Current GPU temperature</li>
-        <li><strong>Power Draw</strong> - Current power consumption (W)</li>
+        <li><strong>Compute</strong> - Average TFLOPs consumed over the selected window</li>
+        <li><strong>VRAM</strong> - Average GPU memory used (GB)</li>
+        <li><strong>Active Pods</strong> - Number of pods currently running</li>
       </ul>
 
-      <h3>Utilization Chart</h3>
+      <h3>Usage Over Time Chart</h3>
       <p>Time-series graph showing GPU usage over time:</p>
       <ul>
-        <li>Compute utilization percentage</li>
-        <li>Memory utilization percentage</li>
+        <li>Compute (TFLOPs) over time</li>
+        <li>VRAM usage over time</li>
         <li>Hover for exact values at any point</li>
-        <li>Zoom and pan for detailed analysis</li>
       </ul>
 
-      <h3>Memory Breakdown</h3>
-      <p>Detailed VRAM allocation:</p>
-      <table>
-        <thead>
-          <tr>
-            <th>Component</th>
-            <th>Description</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Model Weights</td>
-            <td>Memory used by model parameters</td>
-          </tr>
-          <tr>
-            <td>KV Cache</td>
-            <td>Memory for attention key-value cache</td>
-          </tr>
-          <tr>
-            <td>Activation Memory</td>
-            <td>Memory for intermediate computations</td>
-          </tr>
-          <tr>
-            <td>System Reserved</td>
-            <td>CUDA and driver overhead</td>
-          </tr>
-        </tbody>
-      </table>
+      <h3>Pod Metrics</h3>
+      <p>Per-pod table showing status, TFLOPs, and VRAM for each of your pods.</p>
 
       <h3>Inference Metrics</h3>
-      <p>Performance statistics for your model:</p>
+      <p>
+        When a vLLM-based model is running on your pod and port 8000 is exposed as a
+        service, a <strong>GPU Metrics</strong> panel appears on the instance card showing:
+      </p>
       <table>
         <thead>
           <tr>
             <th>Metric</th>
             <th>Description</th>
-            <th>Typical Range</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>Tokens/sec</td>
-            <td>Output generation speed</td>
-            <td>30-150 t/s</td>
+            <td>Health & Model ID</td>
+            <td>Server health status and the loaded model</td>
           </tr>
           <tr>
-            <td>TTFT</td>
-            <td>Time to first token</td>
-            <td>20-200 ms</td>
+            <td>GPU Cache</td>
+            <td>KV cache usage percentage</td>
           </tr>
           <tr>
-            <td>Queue Depth</td>
-            <td>Pending requests</td>
-            <td>0-32</td>
+            <td>Gen / Prompt Throughput</td>
+            <td>Generation and prompt processing speed (tokens/sec)</td>
           </tr>
           <tr>
-            <td>Active Requests</td>
-            <td>Currently processing</td>
-            <td>1-64</td>
+            <td>Time to First Token</td>
+            <td>Latency before generation starts (ms)</td>
           </tr>
           <tr>
-            <td>Batch Size</td>
-            <td>Current batch size</td>
-            <td>1-128</td>
+            <td>Running / Waiting</td>
+            <td>Active and queued request counts</td>
+          </tr>
+          <tr>
+            <td>Total Tokens</td>
+            <td>Prompt + generation tokens processed</td>
           </tr>
         </tbody>
       </table>
+      <p>The panel refreshes every 10 seconds while visible.</p>
 
       <h2>Understanding Metrics</h2>
 
       <h3>GPU Utilization</h3>
       <p>Percentage of GPU compute being used:</p>
       <ul>
-        <li><strong>0-20%</strong> - Underutilized, consider smaller instance</li>
-        <li><strong>20-60%</strong> - Light load, room for more requests</li>
-        <li><strong>60-85%</strong> - Healthy utilization</li>
-        <li><strong>85-100%</strong> - Heavy load, may need more capacity</li>
+        <li><strong>0-20%</strong> - Idle or light load, consider a smaller GPU</li>
+        <li><strong>20-60%</strong> - Moderate use, normal for variable workloads</li>
+        <li><strong>60-90%</strong> - Good utilization, optimal for most inference</li>
+        <li><strong>90-100%</strong> - Heavy load, monitor for throttling</li>
       </ul>
+      <p>
+        The Metrics tab expresses compute as TFLOPs; per-pod GPU utilization percentages
+        are collected in the background and available through the metrics history API.
+      </p>
 
       <h3>Memory Usage</h3>
       <p>VRAM consumption guidelines:</p>
@@ -133,23 +110,30 @@ export function GPUMetricsDoc() {
       </ul>
 
       <h3>Temperature</h3>
-      <p>GPU thermal status:</p>
+      <p>
+        GPU core temperature, collected in the background and available through the
+        metrics history API:
+      </p>
       <ul>
-        <li><strong>&lt;70°C</strong> - Cool, excellent</li>
-        <li><strong>70-80°C</strong> - Normal operating range</li>
-        <li><strong>80-85°C</strong> - Warm but safe</li>
-        <li><strong>&gt;85°C</strong> - Hot, may throttle</li>
+        <li><strong>&lt;50°C</strong> - Cool, normal idle</li>
+        <li><strong>50-70°C</strong> - Warm, normal under load</li>
+        <li><strong>70-83°C</strong> - Hot, heavy load - monitor</li>
+        <li><strong>&gt;83°C</strong> - Thermal limit, throttling may occur</li>
       </ul>
 
       <h2>Time Range Selection</h2>
       <p>View metrics over different periods:</p>
       <ul>
-        <li><strong>Live</strong> - Real-time streaming (5s intervals)</li>
+        <li><strong>5 Min</strong> - Most recent activity</li>
         <li><strong>1 Hour</strong> - Recent performance</li>
         <li><strong>24 Hours</strong> - Daily patterns</li>
-        <li><strong>7 Days</strong> - Weekly trends</li>
-        <li><strong>Custom</strong> - Select specific date range</li>
+        <li><strong>Week</strong> - Weekly trends</li>
+        <li><strong>All Time</strong> - Full available history</li>
       </ul>
+      <p>
+        The Metrics tab refreshes automatically every 60 seconds; the refresh interval is
+        not configurable.
+      </p>
 
       <h2>Performance Optimization</h2>
 
@@ -178,38 +162,39 @@ export function GPUMetricsDoc() {
       </ul>
 
       <h2>Alerting</h2>
-      <p>Set up alerts for important thresholds:</p>
+      <p>The platform automatically emails you when pod storage approaches capacity:</p>
       <table>
         <thead>
           <tr>
-            <th>Alert Type</th>
+            <th>Storage</th>
             <th>Threshold</th>
-            <th>Action</th>
+            <th>Behaviour</th>
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td>High Temperature</td>
-            <td>&gt;85°C</td>
-            <td>Check cooling, reduce load</td>
+            <td>Persistent storage (<code>/workspace</code>)</td>
+            <td>&ge;80%</td>
+            <td>One email per pod</td>
           </tr>
           <tr>
-            <td>Memory Full</td>
-            <td>&gt;95%</td>
-            <td>Reduce batch size or context</td>
+            <td>Root disk (<code>/</code>)</td>
+            <td>&ge;80%</td>
+            <td>One email per pod</td>
           </tr>
           <tr>
-            <td>Low Utilization</td>
-            <td>&lt;10%</td>
-            <td>Consider smaller instance</td>
-          </tr>
-          <tr>
-            <td>High Queue Depth</td>
-            <td>&gt;50</td>
-            <td>Add capacity or optimize</td>
+            <td>Root disk (<code>/</code>)</td>
+            <td>&ge;90%</td>
+            <td>One additional email per pod</td>
           </tr>
         </tbody>
       </table>
+      <p>
+        Alerts are sent to your account email address; thresholds are fixed and no
+        configuration is required. A full root disk can cause your pod to be evicted, so
+        act on these alerts promptly. Configurable per-metric alerts (for example on GPU
+        utilization or temperature) are not currently available.
+      </p>
 
       <h2>CLI Monitoring</h2>
       <p>SSH into your instance for detailed monitoring:</p>
@@ -239,10 +224,13 @@ tail -f ~/hf-workspace/vllm.log | grep "tokens/s"`}</code>
       </pre>
 
       <h2>Prometheus Integration</h2>
-      <p>Export metrics to Prometheus for advanced monitoring:</p>
+      <p>
+        vLLM exposes Prometheus metrics on its API port. Once port 8000 is exposed as a
+        service on your pod, you can scrape them directly:
+      </p>
       <pre>
         <code>{`# vLLM exposes metrics at /metrics
-curl http://YOUR-IP:PORT/metrics
+curl http://YOUR_EXPOSED_HOST:YOUR_EXPOSED_PORT/metrics
 
 # Example metrics:
 vllm:num_requests_running
@@ -250,11 +238,14 @@ vllm:num_requests_waiting
 vllm:gpu_cache_usage_perc
 vllm:avg_generation_throughput_toks_per_s`}</code>
       </pre>
+      <p>
+        You can also point your own Prometheus or Grafana instance at the exposed{" "}
+        <code>/metrics</code> endpoint to build custom dashboards.
+      </p>
 
       <h2>Need Help?</h2>
       <p>
-        Contact us at{" "}
-        our support team via the <strong>Support</strong> tab
+        Contact our support team via the <strong>Support</strong> tab.
       </p>
     </div>
   );

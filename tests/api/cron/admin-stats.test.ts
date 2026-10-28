@@ -26,6 +26,7 @@ const {
   mockSubscriptionsList,
   mockGetGlobalInstanceSummary,
   mockHostedaiRequest,
+  mockCustomerLifecycleCount,
 } = vi.hoisted(() => ({
   mockCustomerCacheFindMany: vi.fn(),
   mockCustomerCacheUpdateMany: vi.fn(),
@@ -37,6 +38,7 @@ const {
   mockSubscriptionsList: vi.fn(),
   mockGetGlobalInstanceSummary: vi.fn(),
   mockHostedaiRequest: vi.fn(),
+  mockCustomerLifecycleCount: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -50,6 +52,9 @@ vi.mock("@/lib/prisma", () => ({
       findFirst: mockSnapshotFindFirst,
       upsert: mockSnapshotUpsert,
     },
+    // Total Customers is now a live count from customer_lifecycle (Total
+    // Signups), decoupled from the CustomerCache length the route used to count.
+    customerLifecycle: { count: mockCustomerLifecycleCount },
   },
 }));
 vi.mock("@/lib/stripe", () => ({ getStripe: mockGetStripe }));
@@ -112,6 +117,8 @@ describe("POST /api/cron/admin-stats", () => {
       totalItems: 0,
     });
     mockHostedaiRequest.mockResolvedValue({ items: [], total_items: 0 });
+    // Default live customer count; the test that asserts on it overrides.
+    mockCustomerLifecycleCount.mockResolvedValue(0);
   });
 
   afterEach(() => {
@@ -175,11 +182,14 @@ describe("POST /api/cron/admin-stats", () => {
         stripeCreatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
       }),
     ]);
+    // Total Customers is the live customerLifecycle count (5), independent of
+    // the cache; newThisWeek is still derived from the cache (1 of 2 within 7d).
+    mockCustomerLifecycleCount.mockResolvedValue(5);
 
     const res = await POST(makeRequest(SECRET));
     const body = await res.json();
 
-    expect(body.totalCustomers).toBe(2);
+    expect(body.totalCustomers).toBe(5);
     expect(body.newThisWeek).toBe(1);
   });
 
@@ -216,6 +226,34 @@ describe("POST /api/cron/admin-stats", () => {
     expect(mockCustomerCacheUpdate).toHaveBeenCalledWith({
       where: { id: "cus_1" },
       data: { activePods: 2 },
+    });
+  });
+
+  // PA-134: /instances/unified returns both pods and VMs. A live VM reports
+  // status "active" (Confluence HP/600178689 §2 — the VM analog of a pod's
+  // "running"), not "running". Before the fix ACTIVE_STATUSES omitted "active",
+  // so a customer's live VM GPU was counted on their own dashboard but dropped
+  // from this admin per-customer count — the reported divergence.
+  it("counts a live VM instance (status 'active') toward its customer's pod count (PA-134)", async () => {
+    mockCustomerCacheFindMany.mockResolvedValue([
+      cachedCustomer({ id: "cus_1", teamId: "team-1" }),
+    ]);
+    mockGetGlobalInstanceSummary.mockResolvedValue({
+      statusCounts: [{ status: "active", count: 1 }],
+      totalItems: 1,
+    });
+    mockHostedaiRequest.mockResolvedValue({
+      items: [{ status: "active", team: { id: "team-1" } }],
+      total_items: 1,
+    });
+
+    const res = await POST(makeRequest(SECRET));
+    const body = await res.json();
+
+    expect(body.activePods).toBe(1); // VM "active" now counts as live
+    expect(mockCustomerCacheUpdate).toHaveBeenCalledWith({
+      where: { id: "cus_1" },
+      data: { activePods: 1 },
     });
   });
 

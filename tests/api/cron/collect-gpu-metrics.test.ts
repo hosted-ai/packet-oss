@@ -30,6 +30,7 @@ const {
   mockReadPoolOverviewCache,
   mockValidateSSHParams,
   mockSpawn,
+  mockLifecycleUpdateMany,
 } = vi.hoisted(() => ({
   mockCustomerCacheFindMany: vi.fn(),
   mockMetricsCreateMany: vi.fn(),
@@ -40,11 +41,13 @@ const {
   mockReadPoolOverviewCache: vi.fn(),
   mockValidateSSHParams: vi.fn(),
   mockSpawn: vi.fn(),
+  mockLifecycleUpdateMany: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     customerCache: { findMany: mockCustomerCacheFindMany },
+    customerLifecycle: { updateMany: mockLifecycleUpdateMany },
     gpuHardwareMetrics: {
       createMany: mockMetricsCreateMany,
       deleteMany: mockMetricsDeleteMany,
@@ -140,6 +143,7 @@ describe("GET /api/cron/collect-gpu-metrics", () => {
     mockMetricsCreateMany.mockResolvedValue({ count: 0 });
     mockMetricsDeleteMany.mockResolvedValue({ count: 0 });
     mockExecuteRaw.mockResolvedValue(0);
+    mockLifecycleUpdateMany.mockResolvedValue({ count: 1 });
     mockSpawn.mockReturnValue(fakeProc(NVIDIA_OUTPUT));
   });
 
@@ -252,6 +256,49 @@ describe("GET /api/cron/collect-gpu-metrics", () => {
     expect(res.status).toBe(200);
     expect(body.results.failed).toBe(1);
     expect(body.results.collected).toBe(0);
+  });
+
+  // PA-693: the sweep stamps CustomerLifecycle.firstWorkloadAt on the first
+  // sample with real GPU utilization (activation milestone for metric #2).
+  it("stamps firstWorkloadAt for customers whose sample shows real utilization", async () => {
+    mockReadPoolOverviewCache.mockReturnValue(poolCacheWith());
+    mockGetPoolSubscriptions.mockResolvedValue([subscription()]);
+    mockGetConnectionInfo.mockResolvedValue(connectionInfo());
+    // NVIDIA_OUTPUT's per-process SM = 42% ≥ threshold → stamps cus_1.
+    await GET(makeRequest(SECRET));
+
+    expect(mockLifecycleUpdateMany).toHaveBeenCalledWith({
+      where: { stripeCustomerId: { in: ["cus_1"] }, firstWorkloadAt: null },
+      data: { firstWorkloadAt: expect.any(Date) },
+    });
+  });
+
+  it("does not stamp on idle samples (utilization below the workload threshold)", async () => {
+    mockReadPoolOverviewCache.mockReturnValue(poolCacheWith());
+    mockGetPoolSubscriptions.mockResolvedValue([subscription()]);
+    mockGetConnectionInfo.mockResolvedValue(connectionInfo());
+    mockSpawn.mockReturnValue(
+      fakeProc(
+        ["NVIDIA_SMI=2, 100, 81920, 40, 60, 700, 0", "PERPROC_VRAM_OK=0", "PERPROC_SM_OK=0"].join("\n"),
+      ),
+    );
+
+    await GET(makeRequest(SECRET));
+
+    expect(mockMetricsCreateMany).toHaveBeenCalledTimes(1); // sample still recorded
+    expect(mockLifecycleUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("a milestone-stamp failure never fails the sweep", async () => {
+    mockReadPoolOverviewCache.mockReturnValue(poolCacheWith());
+    mockGetPoolSubscriptions.mockResolvedValue([subscription()]);
+    mockGetConnectionInfo.mockResolvedValue(connectionInfo());
+    mockLifecycleUpdateMany.mockRejectedValue(new Error("db down"));
+
+    const res = await GET(makeRequest(SECRET));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).results.collected).toBe(1);
   });
 
   it("always sweeps metrics older than 7 days", async () => {

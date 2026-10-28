@@ -9,12 +9,19 @@
  * tab you open warms it for the rest.
  */
 
-import { getPoolSubscriptions } from "@/lib/hostedai";
+import { getPoolSubscriptions, getAllUnifiedInstances } from "@/lib/hostedai";
 import type { PoolSubscription } from "@/lib/hostedai/types";
 import { getDefaultResourcePolicy } from "@/lib/hostedai/policies";
 import { prisma } from "@/lib/prisma";
 
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+// A unified instance (pod OR VM) counts as a live "Active GPU" in these
+// statuses. /instances/unified spans both natures: a live pod reports
+// "running"; a live VM reports "active" (Confluence HP/600178689 §2 — the VM
+// analog of "running"). Kept in lock-step with the admin-stats counters (see
+// PA-134); pending/starting/restarting are transitional-up states.
+const ACTIVE_INSTANCE_STATUSES = ["running", "active", "pending", "starting", "restarting"];
 
 // ── Stripe team→customer map (reads from local CustomerCache) ──
 interface StripeCustomerInfo {
@@ -138,6 +145,44 @@ export async function getAllTeamSubscriptions(): Promise<Map<string, PoolSubscri
   return poolSubsFetch;
 }
 
+// ── Live active-pod count per team (PA-400) ──
+// One global /instances/unified fetch, grouped by team id, so the admin
+// Customers tab can show a current "Active GPUs" count (≤5 min old) instead of
+// the 12h admin-stats snapshot. A team absent from a SUCCESSFUL fetch genuinely
+// has 0 active instances — callers must treat a returned map's misses as 0, and
+// only fall back to the snapshot when this throws (HAI unreachable).
+let activePodsByTeam: Map<string, number> | null = null;
+let activePodsByTeamTime = 0;
+let activePodsByTeamFetch: Promise<Map<string, number>> | null = null;
+
+export async function getActivePodCountsByTeam(): Promise<Map<string, number>> {
+  if (activePodsByTeam && Date.now() - activePodsByTeamTime < CACHE_TTL) {
+    return activePodsByTeam;
+  }
+
+  if (activePodsByTeamFetch) return activePodsByTeamFetch;
+
+  activePodsByTeamFetch = (async () => {
+    const instances = await getAllUnifiedInstances();
+    const counts = new Map<string, number>();
+    for (const inst of instances) {
+      const status = (inst.status || "").toLowerCase();
+      if (!ACTIVE_INSTANCE_STATUSES.includes(status)) continue;
+      const teamId = inst.team?.id;
+      if (!teamId) continue;
+      counts.set(teamId, (counts.get(teamId) || 0) + 1);
+    }
+
+    activePodsByTeam = counts;
+    activePodsByTeamTime = Date.now();
+    return counts;
+  })().finally(() => {
+    activePodsByTeamFetch = null;
+  });
+
+  return activePodsByTeamFetch;
+}
+
 /**
  * Invalidate all caches. Call after making changes that affect the data.
  */
@@ -145,4 +190,5 @@ export function invalidateAdminCache() {
   stripeTeamMap = null;
   policyTeamsCache = null;
   poolSubsCache = null;
+  activePodsByTeam = null;
 }

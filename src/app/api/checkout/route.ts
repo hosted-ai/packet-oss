@@ -11,13 +11,14 @@ import {
   ensureDefaultPolicies,
   ensureRoles,
 } from "@/lib/hostedai";
-import { generateCustomerToken } from "@/lib/customer-auth";
+import { createLoginLink } from "@/lib/customer-auth";
 import { isPro } from "@/lib/edition";
 import { checkAndProcessReferralQualification } from "@/lib/referral";
 import { cacheCustomer } from "@/lib/customer-cache";
 import { getBrandName } from "@/lib/branding";
 import { embargoCheck } from "@/lib/embargo";
 import crypto from "crypto";
+import { isSellable } from "@/lib/product-availability";
 
 // Generate a secure password for hosted.ai account
 function generateSecurePassword(): string {
@@ -83,7 +84,8 @@ export async function POST(request: NextRequest) {
       where: { id: productId },
     });
 
-    if (!product || !product.active) {
+    // Sellable: checkout IS the sale, so a withdrawn plan is correctly refused.
+    if (!product || !isSellable(product)) {
       return NextResponse.json({ error: "Product not found" }, { status: 404 });
     }
 
@@ -267,7 +269,7 @@ export async function POST(request: NextRequest) {
       cacheCustomer(updatedVoucherCustomer as import("stripe").default.Customer).catch(() => {});
 
       // Generate dashboard URL with token
-      const token = generateCustomerToken(customerEmail, stripeCustomer.id);
+      const token = await createLoginLink({ email: customerEmail, customerId: stripeCustomer.id });
       const dashboardUrl = `${process.env.NEXT_PUBLIC_APP_URL}/dashboard?token=${token}`;
 
       // Send welcome email
@@ -330,6 +332,7 @@ export async function POST(request: NextRequest) {
         mode: "subscription",
         payment_method_types: ["card"],
         customer_email: email,
+        allow_promotion_codes: true,
         line_items: [
           {
             price: product.stripePriceId,

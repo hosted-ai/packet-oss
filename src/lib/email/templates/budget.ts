@@ -212,7 +212,8 @@ export async function sendNegativeBalanceShutdownEmail(params: {
   customerName: string;
   balanceOwedCents: number;
   podsTerminated: number;
-  volumesDeleted: number;
+  volumesRetained: number;
+  retentionDays: number;
   dashboardUrl: string;
 }): Promise<void> {
   const {
@@ -220,7 +221,8 @@ export async function sendNegativeBalanceShutdownEmail(params: {
     customerName,
     balanceOwedCents,
     podsTerminated,
-    volumesDeleted,
+    volumesRetained,
+    retentionDays,
     dashboardUrl,
   } = params;
 
@@ -243,16 +245,18 @@ export async function sendNegativeBalanceShutdownEmail(params: {
           <td style="padding: 0 0 12px 0; font-size: 14px; font-weight: 600; color: #0b0f1c; text-align: right;">${podsTerminated}</td>
         </tr>
         ` : ""}
-        ${volumesDeleted > 0 ? `
+        ${volumesRetained > 0 ? `
         <tr>
-          <td style="font-size: 14px; color: #5b6476;">Storage Volumes Deleted:</td>
-          <td style="font-size: 14px; font-weight: 600; color: #0b0f1c; text-align: right;">${volumesDeleted}</td>
+          <td style="font-size: 14px; color: #5b6476;">Storage Volumes Preserved:</td>
+          <td style="font-size: 14px; font-weight: 600; color: #0b0f1c; text-align: right;">${volumesRetained}</td>
         </tr>
         ` : ""}
       </table>
     </div>
-    ${emailDangerBox(`<p style="margin: 0; color: #991b1b; font-size: 14px;">
-      <strong>Important:</strong> Any data stored on deleted volumes has been permanently removed. To continue using ${getBrandName()}, please add funds to your wallet.
+    ${volumesRetained > 0 ? emailDangerBox(`<p style="margin: 0; color: #991b1b; font-size: 14px;">
+      <strong>Important:</strong> Your storage is preserved for <strong>${retentionDays} days</strong>. Add funds to your wallet within ${retentionDays} days to keep your data — after that, any preserved volumes are permanently deleted.
+    </p>`) : emailDangerBox(`<p style="margin: 0; color: #991b1b; font-size: 14px;">
+      <strong>Important:</strong> To continue using ${getBrandName()}, please add funds to your wallet.
     </p>`)}
     ${emailButton("Add Funds to Wallet", dashboardUrl)}
     ${emailMuted(`If you believe this was an error, please contact support at ${getSupportEmail()}`)}
@@ -269,9 +273,11 @@ Your account balance has gone negative. To prevent further charges, we have term
 
 Balance Owed: ${balanceOwed}
 ${podsTerminated > 0 ? `GPU Pods Terminated: ${podsTerminated}` : ""}
-${volumesDeleted > 0 ? `Storage Volumes Deleted: ${volumesDeleted}` : ""}
+${volumesRetained > 0 ? `Storage Volumes Preserved: ${volumesRetained}` : ""}
 
-Important: Any data stored on deleted volumes has been permanently removed. To continue using ${getBrandName()}, please add funds to your wallet.
+Important: ${volumesRetained > 0
+  ? `Your storage is preserved for ${retentionDays} days. Add funds to your wallet within ${retentionDays} days to keep your data — after that, any preserved volumes are permanently deleted.`
+  : `To continue using ${getBrandName()}, please add funds to your wallet.`}
 
 Add funds: ${dashboardUrl}
 
@@ -282,7 +288,7 @@ ${plainTextFooter()}`;
 
   const template = await loadTemplate(
     "negative-balance",
-    { customerName: safeCustomerName, balanceOwed, dashboardUrl, podsTerminated: String(podsTerminated), volumesDeleted: String(volumesDeleted) },
+    { customerName: safeCustomerName, balanceOwed, dashboardUrl, podsTerminated: String(podsTerminated), volumesRetained: String(volumesRetained), retentionDays: String(retentionDays) },
     { subject, html: fallbackHtml, text: fallbackText }
   );
 

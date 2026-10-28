@@ -6,88 +6,6 @@ Welcome to the Packet.ai documentation! This guide covers all features for deplo
 
 ---
 
-## 🤖 AI Inference Features
-
-### 5. [OpenAI-Compatible API Gateway](./openai-api-gateway.md)
-
-**🔌 Drop-in replacement for OpenAI APIs**
-
-Use your deployed models with existing OpenAI SDKs and tools:
-
-- Chat completions and text completions endpoints
-- Streaming responses with Server-Sent Events
-- Authentication and API key management
-- SDK examples (Python, JavaScript, LangChain, LlamaIndex)
-- Full API reference with request/response examples
-
-**Recommended for**: Developers integrating AI models into applications
-
----
-
-### 6. [Inference Playground](./inference-playground.md)
-
-**🎮 Interactive chat interface for testing models**
-
-Test and experiment with your deployed models without writing code:
-
-- Real-time streaming chat interface
-- Configurable system prompts and parameters
-- Temperature, max tokens, top-p controls
-- Multi-turn conversation support
-- Export conversations as JSON
-
-**Recommended for**: Testing models, prompt engineering, demos
-
----
-
-### 7. [GPU Metrics Dashboard](./gpu-metrics.md)
-
-**📊 Real-time GPU monitoring and analytics**
-
-Monitor your GPU instances for optimal performance:
-
-- GPU utilization, memory, temperature tracking
-- Inference metrics (tokens/sec, queue depth)
-- Historical data and trend analysis
-- Prometheus integration
-- Alert configuration
-
-**Recommended for**: DevOps, performance optimization, capacity planning
-
----
-
-### 8. [Token Usage Dashboard](./token-usage.md)
-
-**📈 Track and analyze token consumption**
-
-Comprehensive analytics on your AI model usage:
-
-- Prompt and completion token tracking
-- Usage by model, time period, API key
-- Cost estimation and comparisons
-- Export reports as CSV/JSON
-- Usage alerts and thresholds
-
-**Recommended for**: Cost management, usage analytics, billing
-
----
-
-### 9. [Pro 6000 Blackwell Optimized Models](./pro-6000-blackwell.md)
-
-**⚡ One-click deploy for 48GB VRAM GPUs**
-
-Pre-configured templates for NVIDIA Pro 6000 Blackwell:
-
-- 70B+ parameter models (Llama 3.1, Qwen 2.5, DeepSeek)
-- AWQ/GPTQ quantized models for efficiency
-- Optimal vLLM configurations
-- Performance benchmarks
-- Deployment commands and troubleshooting
-
-**Recommended for**: Quick deployment of large language models
-
----
-
 ## 🌐 Service Exposure
 
 ### 1. [Service Exposure - Complete Guide](./service-exposure.md)
@@ -99,7 +17,7 @@ The complete guide covers everything you need to know about exposing ports and s
 - What is Service Exposure?
 - Common use cases (vLLM, Jupyter, TensorBoard, Gradio, etc.)
 - Step-by-step tutorials
-- NodePort vs LoadBalancer comparison
+- Service types (HTTP, HTTPS, raw TCP, UDP)
 - Security best practices
 - Troubleshooting guide
 - Full API reference
@@ -158,6 +76,71 @@ System architecture and technical details:
 
 ---
 
+## 🤖 AI Inference Features
+
+### 5. [Inference Playground](./inference-playground.md)
+
+**🎮 Interactive chat interface for testing models**
+
+Test and experiment with your deployed models without writing code:
+
+- Real-time streaming chat interface
+- Automatic model detection — zero configuration
+- Multi-turn conversation support
+- Performance stats (latency, tokens/sec, token count)
+
+**Recommended for**: Testing models, prompt engineering, demos
+
+---
+
+### 6. [GPU Metrics Dashboard](./gpu-metrics.md)
+
+**📊 Real-time GPU monitoring and analytics**
+
+Monitor your GPU instances for optimal performance:
+
+- GPU utilization, memory, temperature tracking
+- Inference metrics (tokens/sec, queue depth)
+- Historical data and trend analysis
+- Prometheus integration
+- Automatic storage alerts
+
+**Recommended for**: DevOps, performance optimization, capacity planning
+
+---
+
+### 7. [Token Usage Dashboard](./token-usage.md)
+
+**📈 Track and analyze token consumption**
+
+Comprehensive analytics on your AI model usage:
+
+- Prompt and generation token tracking
+- Usage by instance and time period
+- Cost estimation
+- Export reports as CSV (JSON via the API)
+- Spend-based budget alerts
+
+**Recommended for**: Cost management, usage analytics, billing
+
+---
+
+### 8. [Pro 6000 Blackwell Optimized Models](./pro-6000-blackwell.md)
+
+**⚡ One-click deploy for 96GB VRAM GPUs**
+
+Pre-configured templates for NVIDIA Pro 6000 Blackwell:
+
+- 70B+ parameter models (Llama 3.1, Qwen 2.5, DeepSeek)
+- AWQ/GPTQ quantized models for efficiency
+- Optimal vLLM configurations
+- Performance benchmarks
+- Deployment commands and troubleshooting
+
+**Recommended for**: Quick deployment of large language models
+
+---
+
 ## 🚀 Quick Links
 
 - **Live Documentation Site**: https://dash.packet.ai/docs
@@ -180,7 +163,7 @@ System architecture and technical details:
 
 #### ...integrate my model into an application
 
-→ Read the [OpenAI API Gateway](./openai-api-gateway.md) docs
+→ Expose your model's API with [Service Exposure](./service-exposure.md)
 
 #### ...monitor my GPU performance
 
@@ -226,22 +209,20 @@ System architecture and technical details:
 docs/
 ├── README.md (this file)
 │
-├── # AI Inference Features
-├── openai-api-gateway.md (OpenAI-compatible API)
-├── inference-playground.md (Interactive chat testing)
-├── gpu-metrics.md (GPU monitoring dashboard)
-├── token-usage.md (Token analytics)
-├── pro-6000-blackwell.md (Pro 6000 Blackwell templates)
-│
 ├── # Service Exposure
 ├── service-exposure.md (Complete guide)
 ├── service-exposure-quickstart.md (Quick start)
 ├── service-exposure-use-cases.md (Use cases)
 ├── service-exposure-architecture.md (Architecture)
 │
+├── # AI Inference Features
+├── inference-playground.md (Interactive chat testing)
+├── gpu-metrics.md (GPU monitoring dashboard)
+├── token-usage.md (Token analytics)
+├── pro-6000-blackwell.md (Pro 6000 Blackwell templates)
+│
 ├── # Advanced Topics
 ├── vllm-multi-gpu-scaling.md (Multi-GPU scaling)
-├── ray-cluster-management.md (Ray clusters)
 └── persistent-storage.md (Storage)
 ```
 
@@ -251,8 +232,7 @@ docs/
 
 ### January 2025
 
-- ⚡ **Pro 6000 Blackwell support** - Deploy 70B+ models on 48GB GPUs
-- 🔌 **OpenAI-Compatible API Gateway** - Drop-in replacement for OpenAI
+- ⚡ **Pro 6000 Blackwell support** - Deploy 70B+ models on 96GB GPUs
 - 🎮 **Inference Playground** - Interactive model testing
 - 📊 **GPU Metrics Dashboard** - Real-time GPU monitoring
 - 📈 **Token Usage Dashboard** - Comprehensive usage analytics
@@ -283,11 +263,10 @@ Documentation © 2025 Packet.ai. All rights reserved.
 ## 🔗 Related Documentation
 
 - [vLLM Multi-GPU Scaling](./vllm-multi-gpu-scaling.md)
-- [Ray Cluster Management](./ray-cluster-management.md)
 - [Persistent Storage](./persistent-storage.md)
 
 ---
 
-**Last Updated**: January 2025
-**Version**: 2.0
+**Last Updated**: July 2026
+**Version**: 2.1
 **Maintained by**: Packet.ai Team

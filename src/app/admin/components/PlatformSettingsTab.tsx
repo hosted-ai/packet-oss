@@ -21,10 +21,18 @@ interface EmbargoData {
   defaultCountries: string[];
 }
 
+interface InternalExclusionsData {
+  domains: string[];
+  emails: string[];
+  defaultDomains: string[];
+  defaultEmails: string[];
+}
+
 interface PlatformSettingsData {
   services: Record<string, ServiceConfig>;
   emailBlocklist?: EmailBlocklistData;
   embargo?: EmbargoData;
+  internalExclusions?: InternalExclusionsData;
 }
 
 const SERVICE_KEY_LABELS: Record<string, string> = {
@@ -651,6 +659,135 @@ function EmbargoScreeningSection({ enabled, countries, defaultCountries, message
   );
 }
 
+// ── Internal / Test Account Exclusion Section (PA-410) ──────────────────────
+// A small add/remove list editor, reused for both the domain and email lists.
+function ListEditor({ label, help, mono, items, placeholder, validate, onChange }: {
+  label: string;
+  help: string;
+  mono?: boolean;
+  items: string[];
+  placeholder: string;
+  validate: (v: string) => boolean;
+  onChange: (items: string[]) => void;
+}) {
+  const [input, setInput] = useState("");
+  const valid = validate(input.toLowerCase().trim());
+
+  function add() {
+    const v = input.toLowerCase().trim();
+    if (!validate(v) || items.includes(v)) return;
+    onChange([...items, v].sort());
+    setInput("");
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-sm font-medium text-[#0b0f1c]">{label}</label>
+        <span className="text-xs text-[#5b6476]">{items.length} entr{items.length !== 1 ? "ies" : "y"}</span>
+      </div>
+      <p className="text-xs text-[#5b6476] mb-2">{help}</p>
+      <div className="flex gap-2 mb-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+          placeholder={placeholder}
+          className="flex-1 px-3 py-1.5 bg-white border border-[#e4e7ef] rounded-lg text-sm text-[#0b0f1c] placeholder-[#5b6476]/50 focus:outline-none focus:ring-2 focus:ring-[#1a4fff]"
+        />
+        <button
+          onClick={add}
+          disabled={!valid || items.includes(input.toLowerCase().trim())}
+          className="px-3 py-1.5 bg-[#1a4fff] hover:bg-[#1a4fff]/90 text-white rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Add
+        </button>
+      </div>
+      <div className="max-h-52 overflow-y-auto border border-[#e4e7ef] rounded-lg divide-y divide-[#e4e7ef]">
+        {items.length === 0 ? (
+          <div className="p-3 text-sm text-[#5b6476] text-center">None — nothing is excluded on this list.</div>
+        ) : (
+          items.map((it) => (
+            <div key={it} className="flex items-center justify-between px-3 py-1.5 hover:bg-zinc-50">
+              <span className={`text-sm text-[#0b0f1c] ${mono ? "font-mono" : ""}`}>{it}</span>
+              <button
+                onClick={() => onChange(items.filter((x) => x !== it))}
+                className="text-xs text-red-500 hover:text-red-700 font-medium"
+              >
+                Remove
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InternalExclusionsSection({ domains, emails, defaultDomains, defaultEmails, message, onSave }: {
+  domains: string[];
+  emails: string[];
+  defaultDomains: string[];
+  defaultEmails: string[];
+  message: { type: "success" | "error"; text: string } | null;
+  onSave: (patch: { domains?: string[]; emails?: string[] }) => void;
+}) {
+  const isDomain = (v: string) => /^[a-z0-9.-]+$/.test(v) && v.includes(".");
+  const isEmail = (v: string) => /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z0-9]{2,}$/.test(v);
+
+  return (
+    <div className="bg-white border border-[#e4e7ef] rounded-lg overflow-hidden">
+      <div className="p-5">
+        <div className="flex items-center gap-3 mb-1">
+          <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+          <div>
+            <h3 className="font-semibold text-[#0b0f1c]">Internal / Test Account Exclusion</h3>
+            <p className="text-xs text-[#5b6476] mt-0.5">
+              Accounts matching these are kept out of signups, customer, revenue, and investor metrics,
+              and are <strong>billed at $0.00</strong> (GPU usage, storage, stopped reservations, deploy pre-charge).
+              Editing these lists changes who gets billed, not just who appears in reports.
+            </p>
+          </div>
+        </div>
+
+        {message && (
+          <div className={`mt-3 p-2 rounded text-xs ${message.type === "success" ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700"}`}>
+            {message.text}
+          </div>
+        )}
+
+        <div className="mt-4 border-t border-[#e4e7ef] pt-4 space-y-5">
+          <ListEditor
+            label="Email domains"
+            help="Any account whose email ends in @domain is treated as internal (e.g. hosted.ai)."
+            mono
+            items={domains}
+            placeholder="Add domain (e.g., hosted.ai)"
+            validate={isDomain}
+            onChange={(d) => onSave({ domains: d })}
+          />
+          <ListEditor
+            label="Individual emails"
+            help="Specific addresses to exclude (staff or test accounts on external domains)."
+            mono
+            items={emails}
+            placeholder="Add email (e.g., test@example.com)"
+            validate={isEmail}
+            onChange={(e) => onSave({ emails: e })}
+          />
+          <button
+            onClick={() => onSave({ domains: [...defaultDomains].sort(), emails: [...defaultEmails].sort() })}
+            className="text-xs text-[#5b6476] hover:text-[#0b0f1c] underline"
+          >
+            Reset to defaults ({defaultDomains.length} domain{defaultDomains.length !== 1 ? "s" : ""}, {defaultEmails.length} email{defaultEmails.length !== 1 ? "s" : ""})
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PlatformSettingsTab() {
   const [data, setData] = useState<PlatformSettingsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -663,12 +800,15 @@ export function PlatformSettingsTab() {
   const [blocklistEnabled, setBlocklistEnabled] = useState(false);
   const [blocklistDomains, setBlocklistDomains] = useState<string[]>([]);
   const [blocklistNewDomain, setBlocklistNewDomain] = useState("");
-  const [blocklistSaving, setBlocklistSaving] = useState(false);
+  const [, setBlocklistSaving] = useState(false);
   const [blocklistMessage, setBlocklistMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [embargoEnabled, setEmbargoEnabled] = useState(false);
   const [embargoCountries, setEmbargoCountries] = useState<string[]>([]);
   const [embargoSaving, setEmbargoSaving] = useState(false);
   const [embargoMessage, setEmbargoMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [internalDomains, setInternalDomains] = useState<string[]>([]);
+  const [internalEmails, setInternalEmails] = useState<string[]>([]);
+  const [internalMessage, setInternalMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
   const fetchSettings = useCallback(async () => {
     try {
@@ -696,7 +836,29 @@ export function PlatformSettingsTab() {
       setEmbargoEnabled(data.embargo.enabled);
       setEmbargoCountries(data.embargo.countries);
     }
+    if (data?.internalExclusions) {
+      setInternalDomains(data.internalExclusions.domains);
+      setInternalEmails(data.internalExclusions.emails);
+    }
   }, [data]);
+
+  function saveInternalExclusions(patch: { domains?: string[]; emails?: string[] }) {
+    if (patch.domains) setInternalDomains(patch.domains);
+    if (patch.emails) setInternalEmails(patch.emails);
+    fetch("/api/admin/platform-settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ internalExclusions: patch }),
+    }).then((res) => {
+      setInternalMessage(res.ok
+        ? { type: "success", text: "Exclusion list updated" }
+        : { type: "error", text: "Failed to save" });
+      setTimeout(() => setInternalMessage(null), 3000);
+    }).catch(() => {
+      setInternalMessage({ type: "error", text: "Failed to save" });
+      setTimeout(() => setInternalMessage(null), 3000);
+    });
+  }
 
   function startEditing(serviceName: string) {
     if (!data) return;
@@ -1167,6 +1329,16 @@ export function PlatformSettingsTab() {
             setTimeout(() => setEmbargoMessage(null), 3000);
           });
         }}
+      />
+
+      {/* ── Internal / Test Account Exclusion ── */}
+      <InternalExclusionsSection
+        domains={internalDomains}
+        emails={internalEmails}
+        defaultDomains={data?.internalExclusions?.defaultDomains || []}
+        defaultEmails={data?.internalExclusions?.defaultEmails || []}
+        message={internalMessage}
+        onSave={saveInternalExclusions}
       />
 
       {SERVICE_ORDER.map((serviceName) => {

@@ -205,28 +205,6 @@ export async function PUT(
         updateData.verified = true;
         updateData.verifiedAt = new Date();
         updateData.verifiedBy = session.email;
-
-        // Generate login URL and send approval email
-        const loginToken = generateProviderLoginToken(provider.email);
-        const appUrl = getAppUrl();
-        const loginUrl = `${appUrl}/providers/verify?token=${loginToken}`;
-
-        await sendProviderApprovedEmail({
-          to: provider.email,
-          companyName: provider.companyName,
-          contactName: provider.contactName,
-          loginUrl,
-          applicationType: provider.applicationType,
-        });
-
-        // Create notification
-        await prisma.providerNotification.create({
-          data: {
-            providerId: provider.id,
-            type: "approval",
-            subject: `Your ${getBrandName()} Provider Application Has Been Approved`,
-          },
-        });
       }
 
       if (updates.status === "suspended") {
@@ -239,32 +217,62 @@ export async function PUT(
     }
 
     // Handle rejection (keeping status as pending but marking reason)
-    if (updates.rejectionReason && provider.status === "pending") {
+    const isRejecting = !!(updates.rejectionReason && provider.status === "pending");
+    if (isRejecting) {
       updateData.status = "rejected";
-
-      // Send rejection email
-      await sendProviderRejectedEmail({
-        to: provider.email,
-        companyName: provider.companyName,
-        contactName: provider.contactName,
-        reason: updates.rejectionReason,
-      });
-
-      // Create notification
-      await prisma.providerNotification.create({
-        data: {
-          providerId: provider.id,
-          type: "rejection",
-          subject: `Your ${getBrandName()} Provider Application Status`,
-        },
-      });
     }
 
-    // Update provider
+    // Update provider first — the DB write is the source of truth and must not be
+    // gated on notification delivery (PA-301).
     const updatedProvider = await prisma.serviceProvider.update({
       where: { id },
       data: updateData,
     });
+
+    // Notify — fire-and-forget so an email/notification failure can't roll back
+    // an approval or rejection that already landed.
+    if (updates.status === "active" && provider.status === "pending") {
+      const loginToken = generateProviderLoginToken(provider.email);
+      const appUrl = getAppUrl();
+      const loginUrl = `${appUrl}/providers/verify?token=${loginToken}`;
+
+      sendProviderApprovedEmail({
+        to: provider.email,
+        companyName: provider.companyName,
+        contactName: provider.contactName,
+        loginUrl,
+        applicationType: provider.applicationType,
+      }).catch((err) => console.error("[Admin] Provider approval email failed:", err));
+
+      prisma.providerNotification
+        .create({
+          data: {
+            providerId: provider.id,
+            type: "approval",
+            subject: `Your ${getBrandName()} Provider Application Has Been Approved`,
+          },
+        })
+        .catch((err) => console.error("[Admin] Provider approval notification failed:", err));
+    }
+
+    if (isRejecting) {
+      sendProviderRejectedEmail({
+        to: provider.email,
+        companyName: provider.companyName,
+        contactName: provider.contactName,
+        reason: updates.rejectionReason,
+      }).catch((err) => console.error("[Admin] Provider rejection email failed:", err));
+
+      prisma.providerNotification
+        .create({
+          data: {
+            providerId: provider.id,
+            type: "rejection",
+            subject: `Your ${getBrandName()} Provider Application Status`,
+          },
+        })
+        .catch((err) => console.error("[Admin] Provider rejection notification failed:", err));
+    }
 
     // Handle Token Factory revenue share update
     if (updates.tokenRevenueSharePercent !== undefined) {

@@ -132,52 +132,61 @@ export function compressRecipe(slug: string): { archivePath: string; fileSize: n
 // --- TUS Upload to HAI Admin Panel ---
 
 /**
- * Upload a recipe archive to HAI admin panel via TUS protocol.
- * Returns the recipe_id.
- *
- * Flow:
- * 1. Login to admin panel
- * 2. Check for existing template → delete if found
- * 3. TUS POST (init) → get upload URL
- * 4. TUS PATCH (upload data)
- * 5. List recipes → find newly uploaded recipe_id
+ * Look up a recipe-template ID by name (and optionally version) in the HAI
+ * admin templates list. Returns null if the list can't be read or nothing
+ * matches. NOTE: this list is permission-filtered server-side, so a recipe that
+ * exists (and blocks upload via HAI's global 409 uniqueness check) can still be
+ * absent here — see uploadRecipe / PA-132.
  */
-export async function uploadRecipe(slug: string): Promise<number> {
-  const { token, url: adminUrl } = await loginToAdmin();
+async function findTemplateId(adminUrl: string, token: string, slug: string, version?: string): Promise<number | null> {
+  const resp = await fetch(`${adminUrl}/api/recipes/templates`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!resp.ok) return null;
+  const all = (await resp.json()) as Array<{ id: number; name: string; version?: string }>;
+  const match = all.find((t) => t.name === slug && (version === undefined || t.version === version));
+  return match ? match.id : null;
+}
 
-  // Compress recipe (archive is written to a temp dir)
-  const { archivePath, fileSize, tmpDir } = compressRecipe(slug);
-
-  try {
-  // Check for existing template and delete if found
+/**
+ * Best-effort delete of a visible existing template with this name so a
+ * re-upload is clean. Throws on a real delete failure (surfacing e.g. the
+ * pod-association "FAILURE" so the admin sees why); a no-op if nothing visible
+ * matches.
+ */
+async function deleteExistingTemplate(adminUrl: string, token: string, slug: string): Promise<void> {
   const templatesResp = await fetch(`${adminUrl}/api/recipes/templates`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (templatesResp.ok) {
-    const templates = (await templatesResp.json()) as Array<{ id: number; name: string }>;
-    const existing = templates.find((t) => t.name === slug);
-    if (existing) {
-      console.log(`[Recipes] Found existing template ${slug} (ID: ${existing.id}), deleting...`);
-      const delResp = await fetch(`${adminUrl}/api/recipes/templates/${existing.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      });
-      if (!delResp.ok) {
-        const errBody = await delResp.text();
-        if (errBody.includes("FAILURE")) {
-          throw new Error(`Cannot delete existing recipe "${slug}" — it may have associated pods. Remove them first.`);
-        }
-        throw new Error(`Failed to delete existing recipe "${slug}" (${delResp.status}): ${errBody}`);
-      }
-      console.log(`[Recipes] Deleted existing template ${slug}`);
+  if (!templatesResp.ok) return;
+  const templates = (await templatesResp.json()) as Array<{ id: number; name: string }>;
+  const existing = templates.find((t) => t.name === slug);
+  if (!existing) return;
+  console.log(`[Recipes] Found existing template ${slug} (ID: ${existing.id}), deleting...`);
+  const delResp = await fetch(`${adminUrl}/api/recipes/templates/${existing.id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+  });
+  if (!delResp.ok) {
+    const errBody = await delResp.text();
+    if (errBody.includes("FAILURE")) {
+      throw new Error(`Cannot delete existing recipe "${slug}" — it may have associated pods. Remove them first.`);
     }
+    throw new Error(`Failed to delete existing recipe "${slug}" (${delResp.status}): ${errBody}`);
   }
+  console.log(`[Recipes] Deleted existing template ${slug}`);
+}
 
-  // TUS upload: init
+/**
+ * TUS init + data upload for one (slug, version). Returns the admin template ID
+ * on success, or null when TUS init returns 409 (that name+version already
+ * exists) so the caller can decide how to recover.
+ */
+async function tusInitAndUpload(adminUrl: string, token: string, slug: string, version: string, archivePath: string, fileSize: number): Promise<number | null> {
   const b64 = (s: string) => Buffer.from(s).toString("base64");
   const uploadMetadata = [
     `recipe_name ${b64(slug)}`,
-    `version ${b64("latest")}`,
+    `version ${b64(version)}`,
     `description ${b64(slug)}`,
     `category ${b64("gpuaas")}`,
     `hide ${b64("false")}`,
@@ -187,7 +196,7 @@ export async function uploadRecipe(slug: string): Promise<number> {
     `type ${b64("application/x-gzip")}`,
   ].join(",");
 
-  console.log(`[Recipes] TUS init: uploading ${fileSize} bytes...`);
+  console.log(`[Recipes] TUS init: uploading ${fileSize} bytes (${slug} v${version})...`);
   const initResp = await fetch(`${adminUrl}/api/recipes/templates/upload/`, {
     method: "POST",
     headers: {
@@ -198,23 +207,8 @@ export async function uploadRecipe(slug: string): Promise<number> {
     },
   });
 
+  if (initResp.status === 409) return null;
   if (!initResp.ok && initResp.status !== 201) {
-    if (initResp.status === 409) {
-      // Recipe name already exists in HAI (delete didn't fully clean up or was skipped).
-      // Look it up in admin templates and reuse its ID to keep the flow idempotent.
-      console.warn(`[Recipes] TUS init 409 — recipe "${slug}" already exists, looking up existing ID...`);
-      const retemplatesResp = await fetch(`${adminUrl}/api/recipes/templates`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (retemplatesResp.ok) {
-        const all = (await retemplatesResp.json()) as Array<{ id: number; name: string }>;
-        const found = all.find((t) => t.name === slug);
-        if (found) {
-          console.log(`[Recipes] Reusing existing recipe "${slug}" (ID: ${found.id})`);
-          return found.id;
-        }
-      }
-    }
     throw new Error(`TUS init failed (${initResp.status}): ${await initResp.text()}`);
   }
 
@@ -242,25 +236,70 @@ export async function uploadRecipe(slug: string): Promise<number> {
   if (!patchResp.ok && patchResp.status !== 204) {
     throw new Error(`TUS upload failed (${patchResp.status}): ${await patchResp.text()}`);
   }
+  console.log(`[Recipes] Upload complete for ${slug} v${version}`);
 
-  console.log(`[Recipes] Upload complete for ${slug}`);
-
-  // Find the newly uploaded recipe ID from admin panel templates list
-  // (user panel /service/recipes may lag behind the admin panel)
-  const postUploadResp = await fetch(`${adminUrl}/api/recipes/templates`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!postUploadResp.ok) {
-    throw new Error(`Failed to list templates after upload (${postUploadResp.status})`);
+  // Find the just-uploaded template ID from the admin list (match name+version
+  // so we get exactly the row we uploaded, even if other versions are visible).
+  const id = await findTemplateId(adminUrl, token, slug, version);
+  if (id === null) {
+    throw new Error(`Recipe "${slug}" (v${version}) was uploaded but not found in admin templates list.`);
   }
-  const allTemplates = (await postUploadResp.json()) as Array<{ id: number; name: string }>;
-  const uploaded = allTemplates.find((t) => t.name === slug);
-  if (!uploaded) {
-    throw new Error(`Recipe "${slug}" was uploaded but not found in admin templates list.`);
+  return id;
+}
+
+/**
+ * Upload a recipe archive to HAI admin panel via TUS protocol.
+ * Returns the recipe_id.
+ *
+ * Flow:
+ * 1. Login to admin panel
+ * 2. Delete an existing (visible) template if found
+ * 3. TUS upload as version "latest"
+ * 4. On 409, reuse the recipe if it's visible; otherwise (PA-132) re-upload
+ *    under a unique version to recover from a stale, role-invisible recipe
+ * 5. Poll the user panel until the recipe syncs there
+ */
+export async function uploadRecipe(slug: string): Promise<number> {
+  const { token, url: adminUrl } = await loginToAdmin();
+
+  // Compress recipe (archive is written to a temp dir)
+  const { archivePath, fileSize, tmpDir } = compressRecipe(slug);
+
+  try {
+  // Best-effort delete of an existing (visible) template so the re-upload is clean.
+  await deleteExistingTemplate(adminUrl, token, slug);
+
+  // Upload as version "latest". Returns null when TUS init 409s (a
+  // "<slug>/latest" template already exists in HAI).
+  let recipeId = await tusInitAndUpload(adminUrl, token, slug, "latest", archivePath, fileSize);
+
+  if (recipeId === null) {
+    // First, try to reuse the conflicting recipe from the admin list — works
+    // when it's visible to this admin role (e.g. a benign upload race).
+    recipeId = await findTemplateId(adminUrl, token, slug, "latest");
+
+    if (recipeId === null) {
+      // PA-132: the conflicting recipe is INVISIBLE to this admin role. HAI's
+      // TUS 409 duplicate check is global (name+version), but
+      // GET /api/recipes/templates is permission-filtered — a local recipe only
+      // grants read to AdminRole and its original uploader, so historical/seeded
+      // recipes created without that AdminRole read grant block re-upload yet
+      // can't be seen, deleted, or ID'd from here. Re-upload under a unique
+      // version to mint a fresh, role-visible template so setup proceeds.
+      // (Server-side root cause tracked in HAI-8960.)
+      const recoveryVersion = `latest-${Date.now()}`;
+      console.warn(`[Recipes] "${slug}" already exists but is invisible to this admin role (PA-132) — re-uploading as version "${recoveryVersion}".`);
+      recipeId = await tusInitAndUpload(adminUrl, token, slug, recoveryVersion, archivePath, fileSize);
+      if (recipeId === null) {
+        throw new Error(
+          `TUS init failed (409): recipe "${slug}" already exists in HAI but is not visible to this admin role, ` +
+          `and a unique-version re-upload also conflicted. A stale recipe template likely needs removing server-side.`,
+        );
+      }
+    }
   }
 
-  const recipeId = uploaded.id;
-  console.log(`[Recipes] Recipe ${slug} uploaded, admin ID: ${recipeId}. Waiting for user panel sync...`);
+  console.log(`[Recipes] Recipe ${slug} ready, admin ID: ${recipeId}. Waiting for user panel sync...`);
 
   // Poll user panel until recipe is visible there (required for service creation)
   const MAX_POLL_ATTEMPTS = 30;

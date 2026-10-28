@@ -9,7 +9,6 @@ import {
   Users,
   RefreshCw,
   Database,
-  HardDrive,
   Activity,
   MapPin,
   Layers,

@@ -50,7 +50,7 @@ fi
 source venv/bin/activate
 
 # Install PyTorch FIRST (required by axolotl's setup.py)
-pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 # Install build dependencies
 pip install --quiet packaging ninja wheel setuptools
@@ -112,7 +112,7 @@ fi
 source venv/bin/activate
 
 # Install PyTorch
-pip install --quiet --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu128
+pip install --quiet torch==2.11.0+cu128 torchvision==0.26.0+cu128 torchaudio==2.11.0+cu128 --index-url https://download.pytorch.org/whl/cu128
 
 # Install requirements
 pip install --quiet -r requirements.txt

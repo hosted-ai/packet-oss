@@ -139,4 +139,23 @@ export class ApiError extends Error {
   static badRequest(message: string, details?: Record<string, unknown>) {
     return new ApiError(ErrorCodes.INVALID_REQUEST, message, 400, details);
   }
+
+  // Maps a `hostedaiRequest` failure (message format: "Hosted.ai API error (<status>): <msg>")
+  // back to a real client-facing status instead of flattening every upstream
+  // failure into an opaque 500 — e.g. "pod not found" should read as 404, not
+  // "An internal error occurred".
+  static fromUpstream(err: unknown, fallbackMessage = "Upstream request failed") {
+    if (err instanceof Error) {
+      const match = err.message.match(/^Hosted\.ai API error \((\d+)\): ([\s\S]+)$/);
+      if (match) {
+        const status = Number(match[1]);
+        const message = match[2];
+        if (status >= 400 && status < 500) {
+          return new ApiError(ErrorCodes.INVALID_REQUEST, message, status);
+        }
+        return new ApiError(ErrorCodes.EXTERNAL_SERVICE_ERROR, message, 502);
+      }
+    }
+    return ApiError.internal(fallbackMessage);
+  }
 }

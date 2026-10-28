@@ -2,14 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as sshKeys from '@/lib/ssh-keys';
 
 // Mock PrismaClient
-const mockPrisma = {
-  sSHKey: {
-    findMany: vi.fn(),
-    findFirst: vi.fn(),
-    create: vi.fn(),
-    delete: vi.fn(),
-  },
-};
 
 // Mock the lazy prisma initialization
 vi.mock('@/lib/ssh-keys', async () => {

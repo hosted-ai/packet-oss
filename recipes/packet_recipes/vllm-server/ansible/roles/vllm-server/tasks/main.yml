@@ -25,7 +25,7 @@
 
 - name: Install vLLM via pip
   ansible.builtin.pip:
-    name: vllm
+    name: vllm==0.26.0
     virtualenv: /opt/vllm
   retries: 3
   delay: 10

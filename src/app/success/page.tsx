@@ -47,7 +47,6 @@ function SuccessContent() {
     let attempts = 0;
     const maxAttempts = 15; // 30 seconds at 2s intervals
     let stopped = false;
-    let intervalId: ReturnType<typeof setInterval>;
 
     const poll = async () => {
       if (stopped) return;
@@ -60,17 +59,17 @@ function SuccessContent() {
           clearInterval(intervalId);
           setAccountReady(true);
           setDashboardUrl(data.dashboardUrl);
-          if (typeof (window as any).lintrk === "function") {
-            (window as any).lintrk("track", { conversion_id: 24436340 });
+          if (typeof window.lintrk === "function") {
+            window.lintrk("track", { conversion_id: 24436340 });
           }
           // Growify v2 conversion — new signup with first payment
           try {
             const amountDollars = (data.amountCents || 0) / 100;
             const price = amountDollars > 0 ? amountDollars : 50;
             const nameParts = (data.name || "").split(" ");
-            const w = window as any;
+            const w = window;
             w.grpQueue = w.grpQueue || [];
-            if (!w.grp) { w.grp = function() { w.grpQueue.push(arguments); }; }
+            if (!w.grp) { w.grp = function(...args: unknown[]) { w.grpQueue?.push(args); }; }
             w.grp('conversion', {
               userEmail: data.email || email || '',
               userFirstName: nameParts[0] || '',
@@ -106,8 +105,8 @@ function SuccessContent() {
       }
     };
 
+    const intervalId = setInterval(poll, 2000);
     poll();
-    intervalId = setInterval(poll, 2000);
 
     return () => {
       stopped = true;

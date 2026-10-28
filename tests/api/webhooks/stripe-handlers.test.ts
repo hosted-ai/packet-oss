@@ -53,6 +53,7 @@ const {
     podMetadata: {
       findMany: vi.fn(),
       delete: vi.fn(),
+      updateMany: vi.fn(),
     },
     gpuProduct: { findUnique: vi.fn() },
     voucher: { findUnique: vi.fn(), update: vi.fn() },
@@ -66,7 +67,7 @@ const {
     unsuspendTeam: vi.fn(),
     changeTeamPackage: vi.fn(),
     syncTeamsToDefaultPolicy: vi.fn(),
-    unsubscribeFromPool: vi.fn(),
+    deleteInstance: vi.fn(),
     ensureDefaultPolicies: vi.fn(),
     ensureRoles: vi.fn(),
   },
@@ -92,7 +93,10 @@ vi.mock("@/lib/prisma", () => ({ prisma: prismaMock }));
 vi.mock("@/lib/hostedai", () => hostedaiMock);
 vi.mock("@/lib/lifecycle", () => lifecycleMock);
 vi.mock("@/lib/email", () => ({ sendWelcomeEmail: vi.fn() }));
-vi.mock("@/lib/customer-auth", () => ({ generateCustomerToken: vi.fn(() => "cust-token") }));
+vi.mock("@/lib/customer-auth", () => ({
+  generateCustomerToken: vi.fn(() => "cust-token"),
+  createLoginLink: vi.fn(async () => "cust-token"), // PA-380
+}));
 // isPro false keeps the handlers away from the dynamic pipedrive import.
 vi.mock("@/lib/edition", () => ({ isPro: () => false }));
 vi.mock("@/lib/referral", () => ({
@@ -171,6 +175,7 @@ beforeEach(() => {
   prismaMock.processedStripeEvent.upsert.mockResolvedValue({});
   prismaMock.podMetadata.findMany.mockResolvedValue([]);
   prismaMock.podMetadata.delete.mockResolvedValue({});
+  prismaMock.podMetadata.updateMany.mockResolvedValue({ count: 0 });
   // Every fire-and-forget promise the handlers .catch() on must resolve.
   mockCacheCustomer.mockResolvedValue(undefined);
   mockCheckReferral.mockResolvedValue({ processed: false });
@@ -352,24 +357,45 @@ describe("handleSubscriptionCanceled", () => {
     expect(prismaMock.podMetadata.findMany).not.toHaveBeenCalled();
   });
 
-  it("terminates the subscription's monthly pods and deletes their metadata", async () => {
+  it("terminates the subscription's monthly pods (HAI instance) and deletes their metadata", async () => {
     stripeMock.customers.retrieve.mockResolvedValue(
       makeCustomer({ metadata: { hostedai_team_id: TEAM_ID } })
     );
     prismaMock.podMetadata.findMany.mockResolvedValue([
-      { id: 7, subscriptionId: "pod-sub-1", poolId: "pool-1" },
-      { id: 8, subscriptionId: "pod-sub-2", poolId: "pool-2" },
+      { id: 7, subscriptionId: "instance-i-1", instanceId: "i-1", poolId: "pool-1" },
+      { id: 8, subscriptionId: "instance-i-2", instanceId: "i-2", poolId: null },
     ]);
 
     await deliver(canceledEvent());
 
     expect(prismaMock.podMetadata.findMany).toHaveBeenCalledWith({
-      where: { stripeSubscriptionId: "sub_1", billingType: "monthly" },
+      where: {
+        stripeSubscriptionId: "sub_1",
+        billingType: "monthly",
+        managedBy: { not: "engine" },
+      },
     });
-    expect(hostedaiMock.unsubscribeFromPool).toHaveBeenCalledWith("pod-sub-1", TEAM_ID, "pool-1");
-    expect(hostedaiMock.unsubscribeFromPool).toHaveBeenCalledWith("pod-sub-2", TEAM_ID, "pool-2");
+    // PA-347: monthly pods are instance-model — poolId is a revenue-attribution
+    // tag only, never a real pool subscription, so termination must call
+    // deleteInstance regardless of whether poolId happens to be set.
+    expect(hostedaiMock.deleteInstance).toHaveBeenCalledWith("i-1");
+    expect(hostedaiMock.deleteInstance).toHaveBeenCalledWith("i-2");
     expect(prismaMock.podMetadata.delete).toHaveBeenCalledTimes(2);
     expect(lifecycleMock.recordChurn).toHaveBeenCalledWith(CUSTOMER_ID);
+  });
+
+  it("still deletes metadata (no orphaned tracking row) when a pod has no instanceId", async () => {
+    stripeMock.customers.retrieve.mockResolvedValue(
+      makeCustomer({ metadata: { hostedai_team_id: TEAM_ID } })
+    );
+    prismaMock.podMetadata.findMany.mockResolvedValue([
+      { id: 9, subscriptionId: "instance-i-3", instanceId: null, poolId: null },
+    ]);
+
+    await deliver(canceledEvent());
+
+    expect(hostedaiMock.deleteInstance).not.toHaveBeenCalled();
+    expect(prismaMock.podMetadata.delete).toHaveBeenCalledWith({ where: { id: 9 } });
   });
 
   it("suspends the team when no active subscriptions remain", async () => {
@@ -458,13 +484,11 @@ describe("handlePaymentFailed", () => {
     expect(stripeMock.customers.retrieve).not.toHaveBeenCalled();
   });
 
-  it("terminates monthly pods for the failed subscription", async () => {
+  it("starts the 24h grace clock and does NOT terminate pods on the first failure (PA-361)", async () => {
     stripeMock.customers.retrieve.mockResolvedValue(
       makeCustomer({ metadata: { hostedai_team_id: TEAM_ID } })
     );
-    prismaMock.podMetadata.findMany.mockResolvedValue([
-      { id: 9, subscriptionId: "pod-sub-9", poolId: "pool-9" },
-    ]);
+    prismaMock.podMetadata.updateMany.mockResolvedValue({ count: 1 });
 
     await deliver(
       failedEvent({
@@ -472,11 +496,19 @@ describe("handlePaymentFailed", () => {
       })
     );
 
-    expect(prismaMock.podMetadata.findMany).toHaveBeenCalledWith({
-      where: { stripeSubscriptionId: "sub_failed", billingType: "monthly" },
+    // Stamps paymentFailedAt only where it is still null, so Stripe's retry
+    // storm can't reset the window — the clock runs from the first failure.
+    expect(prismaMock.podMetadata.updateMany).toHaveBeenCalledWith({
+      where: {
+        stripeSubscriptionId: "sub_failed",
+        billingType: "monthly",
+        paymentFailedAt: null,
+      },
+      data: { paymentFailedAt: expect.any(Date) },
     });
-    expect(hostedaiMock.unsubscribeFromPool).toHaveBeenCalledWith("pod-sub-9", TEAM_ID, "pool-9");
-    expect(prismaMock.podMetadata.delete).toHaveBeenCalledWith({ where: { id: 9 } });
+    // Pods survive the first failed payment — the cron terminates them later.
+    expect(hostedaiMock.deleteInstance).not.toHaveBeenCalled();
+    expect(prismaMock.podMetadata.delete).not.toHaveBeenCalled();
   });
 
   it("NEVER suspends the team on payment failure (PA-76)", async () => {
@@ -556,6 +588,29 @@ describe("handlePaymentSucceeded", () => {
     await deliver(succeededEvent());
 
     expect(hostedaiMock.unsuspendTeam).toHaveBeenCalledWith(TEAM_ID);
+  });
+
+  it("clears the grace clock for the subscription's monthly pods on a recovered payment (PA-361)", async () => {
+    stripeMock.customers.retrieve.mockResolvedValue(
+      makeCustomer({ metadata: { hostedai_team_id: TEAM_ID } })
+    );
+    prismaMock.podMetadata.updateMany.mockResolvedValue({ count: 1 });
+
+    await deliver(
+      succeededEvent({
+        parent: { subscription_details: { subscription: "sub_recovered" } },
+      })
+    );
+
+    // A payment recovered within the window cancels the pending termination.
+    expect(prismaMock.podMetadata.updateMany).toHaveBeenCalledWith({
+      where: {
+        stripeSubscriptionId: "sub_recovered",
+        billingType: "monthly",
+        paymentFailedAt: { not: null },
+      },
+      data: { paymentFailedAt: null },
+    });
   });
 
   it("still returns 200 when unsuspend fails (logged, Stripe must not retry forever)", async () => {

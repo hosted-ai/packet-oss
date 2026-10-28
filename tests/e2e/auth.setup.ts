@@ -17,7 +17,7 @@ import { test as setup, expect } from "@playwright/test";
 
 const authFile = "./tests/e2e/.auth/user.json";
 
-setup("authenticate", async ({ page, request }) => {
+setup("authenticate", async ({ page }) => {
   const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
   const testEmail = process.env.TEST_USER_EMAIL;
   const testToken = process.env.TEST_AUTH_TOKEN;

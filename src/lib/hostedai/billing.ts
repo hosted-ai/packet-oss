@@ -39,7 +39,7 @@ export async function getTeamBillingSummary(
     });
 
     const text = await response.text();
-    console.log("Team billing API response status:", response.status, "body:", text);
+    console.log("Team billing API response status:", response.status, `(${text.length}B)`);
 
     if (!text) {
       console.log("Billing API returned empty response");
@@ -112,7 +112,7 @@ export async function getTeamBillingSummaryV2(
     });
 
     const text = await response.text();
-    console.log("Team billing summary API response status:", response.status, "body:", text);
+    console.log("Team billing summary API response status:", response.status, `(${text.length}B)`);
 
     if (!text) {
       console.log("Billing summary API returned empty response");
@@ -130,7 +130,7 @@ export async function getTeamBillingSummaryV2(
 
       return data;
     } catch {
-      console.log("Billing summary API returned non-JSON response:", text);
+      console.log("Billing summary API returned non-JSON response:", text.slice(0, 500));
       return { total_cost: 0, total_hours: 0, pool_hours: 0 };
     }
   } catch (error) {

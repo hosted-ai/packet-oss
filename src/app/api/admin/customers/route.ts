@@ -1,28 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
-import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
+import { getActivePodCountsByTeam } from "@/lib/admin-cache";
+import { fetchCustomerGroups, type CustomerGroup } from "@/lib/admin-customer-groups";
 
 type SortField = "email" | "name" | "teamId" | "productId" | "walletBalance" | "activeGPUs" | "created";
 type SortDir = "asc" | "desc";
 
 const VALID_SORT_FIELDS: SortField[] = ["email", "name", "teamId", "productId", "walletBalance", "activeGPUs", "created"];
 
-// Map frontend field names to Prisma columns
-const SORT_FIELD_MAP: Record<string, string> = {
-  email: "email",
-  name: "name",
-  teamId: "teamId",
-  productId: "productId",
-  walletBalance: "balanceCents",
-  created: "stripeCreatedAt",
-};
-
-// PA-180: the table only shows email + name to admins. teamId is a UUID and
-// `id` is the opaque Stripe customer id — short numeric queries like "88"
-// were matching hex pairs inside UUIDs and returning rows the admin couldn't
-// correlate with their query. Only widen the search to those columns when
-// the query actually looks like an id of that shape.
+// The table shows only email and name, and short numeric queries matched hex pairs
+// inside UUIDs, so widen to id/teamId only when the query looks like one.
 function buildSearchOr(search: string) {
   const looksLikeStripeId = /^cus_/i.test(search);
   const looksLikeUuidFragment = search.length >= 8 && /^[0-9a-f-]+$/i.test(search);
@@ -33,6 +20,43 @@ function buildSearchOr(search: string) {
     ...(looksLikeStripeId ? [{ id: { contains: search } }] : []),
     ...(looksLikeUuidFragment ? [{ teamId: { contains: search } }] : []),
   ];
+}
+
+interface CustomerRow {
+  id: string;
+  email: string | null;
+  name: string | null;
+  created: number;
+  teamId?: string;
+  productId?: string;
+  billingType?: string;
+  walletBalance: number;
+  activeGPUs: number;
+  customerIds: string[];
+}
+
+const text = (value: string | null | undefined) => (value ?? "").toLowerCase();
+
+// Every comparator falls through to created DESC then the Stripe id, so ties —
+// a page full of zero balances — always slice into the same pages.
+function compareRows(a: CustomerRow, b: CustomerRow, sortBy: SortField, sortDir: SortDir) {
+  let cmp = 0;
+  switch (sortBy) {
+    case "walletBalance":
+      cmp = a.walletBalance - b.walletBalance;
+      break;
+    case "activeGPUs":
+      cmp = a.activeGPUs - b.activeGPUs;
+      break;
+    case "created":
+      cmp = a.created - b.created;
+      break;
+    default:
+      cmp = text(a[sortBy]).localeCompare(text(b[sortBy]));
+  }
+
+  if (cmp !== 0) return sortDir === "asc" ? cmp : -cmp;
+  return b.created - a.created || a.id.localeCompare(b.id);
 }
 
 export async function GET(request: NextRequest) {
@@ -56,82 +80,39 @@ export async function GET(request: NextRequest) {
       : "created";
     const sortDir: SortDir = searchParams.get("sortDir") === "asc" ? "asc" : "desc";
 
-    // For activeGPUs sort, use the cached activePods field
-    if (sortBy === "activeGPUs") {
-      const allCached = await prisma.customerCache.findMany({
-        where: {
-          isDeleted: false,
-          ...(search ? { OR: buildSearchOr(search) } : {}),
-        },
-      });
+    // The live per-team count beats the 12h snapshot: a team absent from a
+    // SUCCESSFUL fetch has 0 active, so fall back only when the fetch fails.
+    const liveByTeam = await getActivePodCountsByTeam().catch(() => null);
 
-      const mapped = allCached.map((c) => ({
-        id: c.id,
-        email: c.email,
-        name: c.name ?? null,
-        created: Math.floor(c.stripeCreatedAt.getTime() / 1000),
-        teamId: c.teamId || undefined,
-        productId: c.productId || undefined,
-        billingType: c.billingType || undefined,
-        walletBalance: -(c.balanceCents || 0),
-        activeGPUs: c.activePods,
-      }));
+    // Each of the account's teams is counted once, however many Stripe records
+    // carry it; the snapshot is per record, so take the account's largest.
+    const resolveActiveGPUs = (group: CustomerGroup) =>
+      liveByTeam
+        ? group.teamIds.reduce((sum, teamId) => sum + (liveByTeam.get(teamId) ?? 0), 0)
+        : Math.max(...group.rows.map((r) => r.activePods));
 
-      mapped.sort((a, b) => {
-        const cmp = (a.activeGPUs || 0) - (b.activeGPUs || 0);
-        return sortDir === "asc" ? cmp : -cmp;
-      });
+    const groups = await fetchCustomerGroups(search ? buildSearchOr(search) : null);
 
-      const total = mapped.length;
-      const startIndex = (page - 1) * limit;
-      const paginatedCustomers = mapped.slice(startIndex, startIndex + limit);
-
-      return NextResponse.json({
-        customers: paginatedCustomers,
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      });
-    }
-
-    // Standard DB-sorted query
-    const prismaSort = SORT_FIELD_MAP[sortBy] || "stripeCreatedAt";
-
-    // walletBalance sort is inverted: walletBalance = -balanceCents
-    const effectiveSortDir = sortBy === "walletBalance"
-      ? (sortDir === "asc" ? "desc" : "asc")
-      : sortDir;
-
-    const where: Prisma.CustomerCacheWhereInput = {
-      isDeleted: false,
-      ...(search ? { OR: buildSearchOr(search) } : {}),
-    };
-
-    const [cachedCustomers, total] = await Promise.all([
-      prisma.customerCache.findMany({
-        where,
-        orderBy: { [prismaSort]: effectiveSortDir },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.customerCache.count({ where }),
-    ]);
-
-    const customers = cachedCustomers.map((c) => ({
-      id: c.id,
-      email: c.email,
-      name: c.name ?? null,
-      created: Math.floor(c.stripeCreatedAt.getTime() / 1000),
-      teamId: c.teamId || undefined,
-      productId: c.productId || undefined,
-      billingType: c.billingType || undefined,
-      walletBalance: -(c.balanceCents || 0),
-      activeGPUs: c.activePods,
+    const rows: CustomerRow[] = groups.map((group) => ({
+      id: group.primary.id,
+      email: group.primary.email,
+      name: group.primary.name ?? null,
+      created: Math.floor(group.primary.stripeCreatedAt.getTime() / 1000),
+      teamId: group.primary.teamId || group.teamIds[0] || undefined,
+      productId: group.productId || undefined,
+      billingType: group.billingType || undefined,
+      walletBalance: -(group.primary.balanceCents || 0),
+      activeGPUs: resolveActiveGPUs(group),
+      customerIds: group.customerIds,
     }));
 
+    rows.sort((a, b) => compareRows(a, b, sortBy, sortDir));
+
+    const total = rows.length;
+    const startIndex = (page - 1) * limit;
+
     return NextResponse.json({
-      customers,
+      customers: rows.slice(startIndex, startIndex + limit),
       total,
       page,
       limit,

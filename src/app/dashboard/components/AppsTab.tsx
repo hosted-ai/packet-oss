@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { LaunchGPUModal } from "./LaunchGPUModal";
+import { useWalletTopup } from "@/hooks/useWalletTopup";
 
 interface App {
   slug: string;
@@ -29,16 +30,6 @@ interface App {
   billingType?: string | null;
 }
 
-interface AvailableProduct {
-  id: string;
-  name: string;
-  pricePerHourCents: number;
-  vramGb: number | null;
-  cudaCores: number | null;
-  available: boolean;
-  regions: Array<{ id: number; region_name: string }>;
-}
-
 interface InstalledApp {
   id: string;
   appSlug: string;
@@ -64,10 +55,13 @@ interface Subscription {
 interface AppsTabProps {
   token: string;
   subscriptions: Subscription[];
-  onRefresh: () => void;
+  /** Called after a "Deploy on New GPU" succeeds — switches to the GPU tab
+   *  and starts the provisioning poll in the parent. */
+  onDeployed?: (podName: string, appName: string) => void;
 }
 
-export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
+export function AppsTab({ token, subscriptions, onDeployed }: AppsTabProps) {
+  const { topupLoading, handleTopup } = useWalletTopup(token);
   const [apps, setApps] = useState<App[]>([]);
   const [installedBySubscription, setInstalledBySubscription] = useState<Record<string, InstalledApp[]>>({});
   const [loading, setLoading] = useState(true);
@@ -77,17 +71,15 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
   const [selectedSubscription, setSelectedSubscription] = useState<string>("all");
   // Deploy modal state
   const [deployApp, setDeployApp] = useState<App | null>(null);
-  const [availableProducts, setAvailableProducts] = useState<AvailableProduct[]>([]);
-  const [walletBalanceCents, setWalletBalanceCents] = useState<number>(0);
-  const [loadingProducts, setLoadingProducts] = useState(false);
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
-  const [selectedRegionId, setSelectedRegionId] = useState<number | null>(null);
-  const [deploying, setDeploying] = useState(false);
   const [deployError, setDeployError] = useState<string | null>(null);
+  const [deployingAppName, setDeployingAppName] = useState<string | null>(null);
 
-  // Filter active subscriptions with running pods
-  const activeSubscriptions = subscriptions.filter(
-    s => (s.status === "active" || s.status === "subscribed") && s.pods?.some(p => p.pod_status === "Running")
+  // Memoised because the status effect below iterates it and so depends on it.
+  const activeSubscriptions = useMemo(
+    () => subscriptions.filter(
+      s => (s.status === "active" || s.status === "subscribed") && s.pods?.some(p => p.pod_status === "Running")
+    ),
+    [subscriptions],
   );
 
   // Fetch available apps
@@ -109,6 +101,9 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
     }
     fetchApps();
   }, [token]);
+
+  // Depending on the map itself would re-run the effect that sets it.
+  const hasInstalling = Object.values(installedBySubscription).flat().some(a => a.status === "installing");
 
   // Fetch installed apps for all subscriptions
   useEffect(() => {
@@ -137,12 +132,11 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
     }
 
     // Poll for installing apps
-    const hasInstalling = Object.values(installedBySubscription).flat().some(a => a.status === "installing");
     if (hasInstalling) {
       const interval = setInterval(fetchAllInstalled, 5000);
       return () => clearInterval(interval);
     }
-  }, [token, activeSubscriptions.length, installing]);
+  }, [token, activeSubscriptions, installing, hasInstalling]);
 
   const handleDismiss = async (subscriptionId: string, appSlug: string) => {
     try {
@@ -166,94 +160,14 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
     }
   };
 
-  const openDeployModal = async (app: App) => {
+  const openDeployModal = (app: App) => {
     setDeployApp(app);
-    setSelectedProductId(null);
-    setSelectedRegionId(null);
     setDeployError(null);
-    setDeploying(false);
-    setAvailableProducts([]);
-    setLoadingProducts(true);
-
-    try {
-      const res = await fetch("/api/apps/deploy-options", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        const products: AvailableProduct[] = data.products || [];
-        setAvailableProducts(products);
-        setWalletBalanceCents(data.walletBalanceCents || 0);
-        // Auto-select first available product
-        const firstAvailable = products.find(p => p.available);
-        if (firstAvailable) {
-          setSelectedProductId(firstAvailable.id);
-          if (firstAvailable.regions.length > 0) {
-            setSelectedRegionId(firstAvailable.regions[0].id);
-          }
-        }
-      } else {
-        setDeployError("Failed to load GPU options");
-      }
-    } catch {
-      setDeployError("Failed to load GPU options");
-    } finally {
-      setLoadingProducts(false);
-    }
   };
 
   const closeDeployModal = () => {
     setDeployApp(null);
     setDeployError(null);
-  };
-
-  // When product selection changes, auto-select first region
-  const selectProduct = (productId: string) => {
-    setSelectedProductId(productId);
-    const product = availableProducts.find(p => p.id === productId);
-    if (product && product.regions.length > 0) {
-      setSelectedRegionId(product.regions[0].id);
-    } else {
-      setSelectedRegionId(null);
-    }
-  };
-
-  const handleDeploy = async () => {
-    if (!deployApp || !selectedProductId) return;
-    setDeploying(true);
-    setDeployError(null);
-
-    try {
-      const response = await fetch("/api/apps/deploy", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          appId: deployApp.id,
-          product_id: selectedProductId,
-          region_id: selectedRegionId,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (data.needsFunding) {
-          throw new Error(`Insufficient balance. Need $${(data.requiredCents / 100).toFixed(2)}, have $${(data.availableCents / 100).toFixed(2)}. Please fund your wallet.`);
-        }
-        throw new Error(data.error || "Failed to deploy app");
-      }
-
-      // Success — close modal and refresh to see the new pod
-      closeDeployModal();
-      onRefresh();
-    } catch (err) {
-      setDeployError(err instanceof Error ? err.message : "Failed to deploy app");
-    } finally {
-      setDeploying(false);
-    }
   };
 
   const handleInstall = async (subscriptionId: string, appSlug: string) => {
@@ -475,6 +389,26 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
         </div>
       )}
 
+      {/* Deploying-in-progress banner — shown while the deploy API call runs
+          after the modal closes. Cleared when onDeploy completes or errors. */}
+      {deployingAppName && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700 flex items-center gap-2">
+          <svg className="w-4 h-4 animate-spin shrink-0" fill="none" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+          </svg>
+          Deploying {deployingAppName}… Your GPU will appear in the dashboard shortly.
+        </div>
+      )}
+
+      {/* The deploy modal closes optimistically, so a deploy failure has to
+          surface here or the click looks like it silently did nothing. */}
+      {deployError && (
+        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-700">
+          {deployError}
+        </div>
+      )}
+
       {/* Available Apps Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredApps.map(app => {
@@ -615,31 +549,44 @@ export function AppsTab({ token, subscriptions, onRefresh }: AppsTabProps) {
         onClose={closeDeployModal}
         token={token}
         onSuccess={() => {
+          // Modal closes here (optimistic), but onDeploy hasn't run yet.
+          // Show deploying banner; the actual refresh fires after onDeploy completes.
+          if (deployApp) setDeployingAppName(deployApp.name);
           closeDeployModal();
-          onRefresh();
         }}
-        onError={(msg) => setDeployError(msg)}
+        onError={(msg) => {
+          setDeployingAppName(null);
+          setDeployError(msg);
+        }}
+        onTopup={handleTopup}
+        topupLoading={topupLoading}
         deployContext={deployApp ? {
           type: "app",
           title: `Deploy ${deployApp.name}`,
           subtitle: deployApp.description,
           modelId: deployApp.id,
           onDeploy: async (params) => {
-            const res = await fetch("/api/apps/deploy", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${token}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                appId: deployApp.id,
-                product_id: params.product_id,
-                region_id: params.region_id,
-              }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-              throw new Error(data.error || "Failed to deploy app");
+            try {
+              const res = await fetch("/api/apps/deploy", {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  appId: deployApp.id,
+                  product_id: params.product_id,
+                  region_id: params.region_id,
+                }),
+              });
+              const data = await res.json();
+              if (!res.ok) {
+                throw new Error(data.error || "Failed to deploy app");
+              }
+              // Switch to GPU tab and start provisioning poll (mirrors main LaunchGPUModal flow)
+              onDeployed?.(data.name || deployApp.slug, deployApp.name);
+            } finally {
+              setDeployingAppName(null);
             }
           },
         } : undefined}

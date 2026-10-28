@@ -113,10 +113,12 @@ export function useLiveCostTicker({
   // Calculate current balance
   const costPerSecond = totalHourlyRate / 3600; // hourly rate to per-second
   const costSoFar = elapsedSeconds * costPerSecond * 100; // in cents
-  const currentBalance = Math.max(0, serverBalance - costSoFar);
+  // PA-339: do NOT clamp at 0 — a running instance draining into debt must keep
+  // showing the growing negative balance, not silently flatline at $0.00.
+  const currentBalance = serverBalance - costSoFar;
 
-  // Format balance
-  const formattedBalance = `$${(currentBalance / 100).toFixed(2)}`;
+  // Format balance with commas, preserving sign ("-$2.45" when in arrears)
+  const formattedBalance = `${currentBalance < 0 ? "-" : ""}$${(Math.abs(currentBalance) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   // Calculate time remaining
   const hoursRemaining = totalHourlyRate > 0

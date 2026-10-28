@@ -1,29 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyCustomerToken } from "@/lib/customer-auth";
+import { getAuthenticatedCustomer } from "@/lib/auth/helpers";
 import { getActivityEvents } from "@/lib/activity";
 
-// GET - Get activity events for a customer
+// GET - Get activity events for the operating account
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get("authorization")?.replace("Bearer ", "");
-
-    if (!token) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const payload = verifyCustomerToken(token);
-    if (!payload) {
-      return NextResponse.json(
-        { error: "Invalid or expired token" },
-        { status: 401 }
-      );
-    }
+    const auth = await getAuthenticatedCustomer(request);
+    if (auth instanceof NextResponse) return auth;
 
     // Get limit from query params
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get("limit") || "50", 10);
 
-    const events = await getActivityEvents(payload.customerId, limit);
+    // The where clause inside getActivityEvents is the whole access decision, so
+    // this argument must be the account the writers attribute events to.
+    const events = await getActivityEvents(auth.accountId, limit);
 
     return NextResponse.json({ events });
   } catch (error) {

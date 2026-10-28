@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-interface ExposedService {
+export interface ExposedService {
   id: number;
   service_name: string;
   port: number;
@@ -19,7 +19,7 @@ interface ServiceForm {
   service_name: string;
   port: string;
   protocol: 'TCP' | 'UDP';
-  service_type: string; // TCP: 'http'|'https', UDP: 'NodePort'|'loadbalancer'
+  service_type: string; // TCP: 'http'|'https'|'none', UDP: 'NodePort'|'loadbalancer'
 }
 
 interface GPUCardServicesProps {
@@ -141,16 +141,6 @@ export function GPUCardServices({
     }
   };
 
-  const handleEditService = (service: ExposedService) => {
-    setEditingServiceId(service.id);
-    setServiceForm({
-      service_name: service.service_name,
-      port: service.port.toString(),
-      protocol: service.protocol as 'TCP' | 'UDP',
-      service_type: service.service_type || 'http',
-    });
-    setShowExposeServiceForm(true);
-  };
 
   return (
     <div className="border-t border-[var(--line)]">
@@ -237,7 +227,9 @@ export function GPUCardServices({
                     <>
                       <option value="http">HTTP</option>
                       <option value="https">HTTPS</option>
-                      <option value="NodePort">Raw TCP (no prefix)</option>
+                      {/* PA-627: HAI's PodExposedServiceType enum has no "NodePort" —
+                          "none" is the real raw-TCP value and always 400'd before. */}
+                      <option value="none">Raw TCP (no prefix)</option>
                     </>
                   ) : (
                     <>
@@ -361,7 +353,7 @@ export function GPUCardServices({
         )}
 
         {!loadingServices && exposedServices.length === 0 && !showExposeServiceForm && (
-          <p className="text-xs text-zinc-400 py-2">No services exposed yet. Click "Expose Port" to make a service accessible.</p>
+          <p className="text-xs text-zinc-400 py-2">No services exposed yet. Click &quot;Expose Port&quot; to make a service accessible.</p>
         )}
       </div>
     </div>

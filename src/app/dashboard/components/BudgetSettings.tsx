@@ -113,7 +113,7 @@ export function BudgetSettings({ token }: BudgetSettingsProps) {
       } else {
         setMessage({ type: "error", text: data.error || "Failed to save budget settings" });
       }
-    } catch (error) {
+    } catch {
       setMessage({ type: "error", text: "Failed to save budget settings" });
     } finally {
       setSaving(false);

@@ -6,9 +6,9 @@ import {
   sendMidnightStatusEmail,
   type DailySnapshot,
 } from "@/lib/email/templates/midnight-status";
+import { computeMrrCents, computeChargesBetween } from "@/lib/stripe-metrics";
+import { getStatusEmailTo } from "@/lib/branding";
 import type { CustomerCache } from "@prisma/client";
-
-const STATUS_EMAIL_TO = "partners@hosted.ai";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -47,14 +47,10 @@ async function collectSnapshot(
     (c) => c.stripeCreatedAt >= dayStart && c.stripeCreatedAt <= dayEnd
   ).length;
 
-  // Stripe charges (wallet deposits) this day
-  const charges = await stripe.charges.list({
-    created: { gte: dayStartUnix, lte: dayEndUnix },
-    limit: 100,
-  });
-  const successfulCharges = charges.data.filter((c) => c.status === "succeeded" && !c.refunded);
-  const walletDeposits = successfulCharges.length;
-  const walletRevenueCents = successfulCharges.reduce((sum, c) => sum + c.amount, 0);
+  // Stripe charges (wallet deposits) this day — paginated + net of refunds (the old
+  // inline version capped at 100 and truncated on days with >100 charges).
+  const { count: walletDeposits, netRevenueCents: walletRevenueCents } =
+    await computeChargesBetween(stripe, dayStartUnix, dayEndUnix);
 
   // Total customers as of end of day
   const totalCustomers = allCustomers.filter((c) => c.stripeCreatedAt <= dayEnd).length;
@@ -122,35 +118,14 @@ async function collectSnapshot(
   };
 }
 
-// ── MRR Calculator ─────────────────────────────────────────────────────────
-
-async function calculateMRR(
-  allCustomers: CustomerCache[],
-  stripe: Awaited<ReturnType<typeof getStripe>>
-): Promise<number> {
-  // MRR = Stripe recurring subscriptions only (monthly contracts)
-  const subscriptions = await stripe.subscriptions.list({ status: "active", limit: 100 });
-  let mrrCents = 0;
-  for (const sub of subscriptions.data) {
-    for (const item of sub.items.data) {
-      if (item.price.recurring?.interval === "month") {
-        mrrCents += (item.price.unit_amount || 0) * (item.quantity || 1);
-      } else if (item.price.recurring?.interval === "year") {
-        mrrCents += Math.round(((item.price.unit_amount || 0) * (item.quantity || 1)) / 12);
-      }
-    }
-  }
-
-  return mrrCents;
-}
-
 // ── Route Handler ──────────────────────────────────────────────────────────
 
 /**
  * POST /api/cron/midnight-status-email
  *
  * Collects daily KPIs, compares to the same day last week,
- * includes 7-day trend history, and emails the report to partners@hosted.ai.
+ * includes 7-day trend history, and emails the report to the configured
+ * status recipient (STATUS_EMAIL_TO — see getStatusEmailTo).
  *
  * Authentication: Requires CRON_SECRET header or Authorization bearer token.
  * Schedule: Run at midnight UTC daily via external cron (e.g. Vercel Cron, GitHub Actions).
@@ -198,17 +173,22 @@ export async function POST(request: NextRequest) {
       weekHistory.push(snapshot);
     }
 
-    // Calculate current MRR (live value)
-    const mrrCents = await calculateMRR(allCustomers, stripe);
-    // We don't have historical MRR, so approximate from last week's total customer balance ratio
-    const previousMrrCents = lastWeekSameDay.totalCustomers > 0
-      ? Math.round(mrrCents * (lastWeekSameDay.totalCustomers / today.totalCustomers))
-      : mrrCents;
+    // Calculate current MRR (live value, paginated via the shared helper — the old inline
+    // version read only the first 100 active subs and undercounted past that).
+    const mrrCents = await computeMrrCents(stripe);
+    // Previous MRR = the REAL same-day-last-week value from the daily AdminStatsSnapshot
+    // (mrr_cents), not a fabricated customer-count ratio. Falls back to the current value
+    // (→ 0% change) when that day was never snapshotted.
+    const lastWeekSnapshot = await prisma.adminStatsSnapshot.findUnique({
+      where: { date: dateStr(lastWeekDate) },
+    });
+    const previousMrrCents = lastWeekSnapshot?.mrrCents ?? mrrCents;
 
     console.log("[Midnight Status] All snapshots collected. Sending email...");
 
+    const statusEmailTo = getStatusEmailTo();
     await sendMidnightStatusEmail({
-      to: STATUS_EMAIL_TO,
+      to: statusEmailTo,
       today,
       lastWeekSameDay,
       weekHistory,
@@ -216,11 +196,11 @@ export async function POST(request: NextRequest) {
       previousMrrCents,
     });
 
-    console.log(`[Midnight Status] Email sent to ${STATUS_EMAIL_TO}`);
+    console.log(`[Midnight Status] Email sent to ${statusEmailTo}`);
 
     return NextResponse.json({
       success: true,
-      sentTo: STATUS_EMAIL_TO,
+      sentTo: statusEmailTo,
       date: today.date,
       snapshot: {
         newSignups: today.newSignups,

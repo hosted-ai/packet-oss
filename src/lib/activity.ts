@@ -5,6 +5,7 @@ export type ActivityEventType =
   // Account events
   | "account_created"
   | "account_login"
+  | "account_logout"
   | "login_link_requested"
   | "settings_updated"
   | "two_factor_enabled"
@@ -262,6 +263,10 @@ export function logAccountLogin(
 ): Promise<ActivityEvent> {
   const desc = isTeamMember ? `Team member logged in: ${email}` : `Logged in`;
   return logActivity(customerId, "account_login", desc, { email, isTeamMember });
+}
+
+export function logAccountLogout(customerId: string, email?: string): Promise<ActivityEvent> {
+  return logActivity(customerId, "account_logout", "Logged out", email ? { email } : undefined);
 }
 
 export function logLoginLinkRequested(

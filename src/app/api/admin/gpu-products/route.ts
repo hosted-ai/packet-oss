@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken } from "@/lib/admin";
 import { prisma } from "@/lib/prisma";
+import { getStripe } from "@/lib/stripe";
+import { SELLABLE_WHERE } from "@/lib/product-availability";
 
 interface GpuProductInput {
   name: string;
@@ -25,6 +27,7 @@ interface GpuProductInput {
   vramGb?: number;
   cudaCores?: number;
   gpuFamily?: string | null;
+  supportsSharedStorage?: boolean;
   serviceId?: string | null;
   categoryIds?: string[];
 }
@@ -109,6 +112,86 @@ async function validateServiceForProduct(
   return { service: svc };
 }
 
+/**
+ * Two active products must never share one Stripe price: the customer-facing
+ * modal shows both at their own (possibly differing) `pricePerMonthCents`,
+ * but Stripe Checkout charges whatever the shared price object actually is —
+ * so the displayed and charged amounts silently diverge (PA-350).
+ */
+async function validateStripePriceUnique(
+  stripePriceId: string,
+  excludeProductId?: string
+): Promise<{ error: string } | null> {
+  const conflict = await prisma.gpuProduct.findFirst({
+    where: {
+      stripePriceId,
+      ...SELLABLE_WHERE,
+      ...(excludeProductId ? { id: { not: excludeProductId } } : {}),
+    },
+    select: { id: true, name: true },
+  });
+  if (conflict) {
+    return { error: `This Stripe price is already linked to active product "${conflict.name}". Two active products can't share one Stripe price — customers would see mismatched pricing at checkout.` };
+  }
+  return null;
+}
+
+// Past due and trialing subscribers are still entitled, so they still hold the row open.
+const LIVE_SUBSCRIPTION_STATUSES = ["active", "trialing", "past_due"] as const;
+
+// Stripe has no product filter on subscriptions, so the product's prices are enumerated
+// and queried one by one; scanning the platform and matching client-side reads 0.
+async function countLiveSubscribersInStripe(
+  stripePriceId: string | null,
+  stripeProductId: string | null
+): Promise<number> {
+  if (!stripePriceId && !stripeProductId) return 0;
+  const stripe = await getStripe();
+
+  const priceIds = new Set<string>();
+  if (stripePriceId) priceIds.add(stripePriceId);
+  if (stripeProductId) {
+    // A price recreated under the same product leaves grandfathered subscriptions the
+    // row's own price id cannot see, and those subscribers are the ones most at risk.
+    const prices = await stripe.prices.list({ product: stripeProductId, limit: 100 });
+    for (const p of prices.data) priceIds.add(p.id);
+  }
+
+  const seen = new Set<string>();
+  for (const priceId of priceIds) {
+    for (const status of LIVE_SUBSCRIPTION_STATUSES) {
+      const page = await stripe.subscriptions.list({ price: priceId, status, limit: 100 });
+      for (const sub of page.data) seen.add(sub.id);
+    }
+  }
+  return seen.size;
+}
+
+// The platform's own record of who is subscribed: it cannot page out, and it does not
+// depend on the row's Stripe ids still matching what the subscribers actually hold.
+async function countLiveSubscribersInHistory(pricePerMonthCents: number | null): Promise<number> {
+  if (!pricePerMonthCents) return 0;
+  const rows = await prisma.subscriptionHistory.findMany({
+    where: { priceCents: pricePerMonthCents, endedAt: null },
+    select: { stripeCustomerId: true },
+  });
+  return new Set(rows.map((r: { stripeCustomerId: string }) => r.stripeCustomerId)).size;
+}
+
+// Every read that offers a subscriber a redeploy resolves through this row. Either source
+// can read low alone, so the larger of the two is what the guard refuses on.
+async function countLiveSubscribers(existing: {
+  stripePriceId: string | null;
+  stripeProductId: string | null;
+  pricePerMonthCents: number | null;
+}): Promise<number> {
+  const [inStripe, inHistory] = await Promise.all([
+    countLiveSubscribersInStripe(existing.stripePriceId, existing.stripeProductId),
+    countLiveSubscribersInHistory(existing.pricePerMonthCents),
+  ]);
+  return Math.max(inStripe, inHistory);
+}
+
 export async function GET(request: NextRequest) {
   try {
     const sessionToken = request.cookies.get("admin_session")?.value;
@@ -159,7 +242,11 @@ export async function POST(request: NextRequest) {
 
     const adminEmail = session.email;
     const body = await request.json();
-    const { action, id, ...data } = body as { action: string; id?: string } & Partial<GpuProductInput>;
+    const { action, id, force, ...data } = body as {
+      action: string;
+      id?: string;
+      force?: boolean;
+    } & Partial<GpuProductInput>;
 
     switch (action) {
       case "create": {
@@ -174,6 +261,13 @@ export async function POST(request: NextRequest) {
         const result = await validateServiceForProduct(data.serviceId);
         if ("error" in result) {
           return NextResponse.json({ error: result.error }, { status: 400 });
+        }
+
+        if (data.stripePriceId && (data.active ?? true)) {
+          const priceError = await validateStripePriceUnique(data.stripePriceId);
+          if (priceError) {
+            return NextResponse.json({ error: priceError.error }, { status: 400 });
+          }
         }
 
         const product = await prisma.gpuProduct.create({
@@ -193,6 +287,7 @@ export async function POST(request: NextRequest) {
             vramGb: data.vramGb || null,
             cudaCores: data.cudaCores || null,
             gpuFamily: data.gpuFamily || null,
+            supportsSharedStorage: data.supportsSharedStorage ?? true,
             serviceId: data.serviceId ?? null,
             categories: data.categoryIds?.length
               ? { connect: data.categoryIds.map(id => ({ id })) }
@@ -261,6 +356,53 @@ export async function POST(request: NextRequest) {
           }
         }
 
+        // Validate stripePriceId uniqueness only if this update would newly
+        // create the conflict — either the price is changing, or the product
+        // is being (re)activated — so editing unrelated fields on an
+        // already-duplicated row (pre-existing bad data) isn't blocked.
+        const priceOrActiveChanging =
+          (data.stripePriceId !== undefined && data.stripePriceId !== existing.stripePriceId) ||
+          (data.active !== undefined && data.active !== existing.active);
+        if (priceOrActiveChanging) {
+          const effectiveStripePriceId = data.stripePriceId !== undefined ? data.stripePriceId : existing.stripePriceId;
+          const effectiveActive = data.active !== undefined ? data.active : existing.active;
+          if (effectiveStripePriceId && effectiveActive) {
+            const priceError = await validateStripePriceUnique(effectiveStripePriceId, id);
+            if (priceError) {
+              return NextResponse.json({ error: priceError.error }, { status: 400 });
+            }
+          }
+        }
+
+        // Withdrawing a monthly product from sale is not the same as ending its
+        // subscriptions, so it is refused unless the caller says it is intended.
+        const deactivatingMonthly =
+          data.active === false &&
+          existing.active &&
+          (data.billingType ?? existing.billingType) === "monthly";
+        if (deactivatingMonthly && !force) {
+          const subscribers = await countLiveSubscribers({
+            stripePriceId:
+              data.stripePriceId !== undefined ? data.stripePriceId : existing.stripePriceId,
+            stripeProductId:
+              data.stripeProductId !== undefined ? data.stripeProductId : existing.stripeProductId,
+            pricePerMonthCents:
+              data.pricePerMonthCents !== undefined
+                ? data.pricePerMonthCents
+                : existing.pricePerMonthCents,
+          });
+          if (subscribers > 0) {
+            return NextResponse.json(
+              {
+                error: `"${existing.name}" has ${subscribers} live subscription${subscribers === 1 ? "" : "s"}. Deactivating it removes their redeploy option while they keep paying. Cancel or migrate them first, or resend with force: true to withdraw it from sale anyway.`,
+                liveSubscribers: subscribers,
+                requiresForce: true,
+              },
+              { status: 409 }
+            );
+          }
+        }
+
         const updateData: Record<string, unknown> = { updatedBy: adminEmail };
         if (data.name !== undefined) updateData.name = data.name;
         if (data.description !== undefined) updateData.description = data.description || null;
@@ -277,6 +419,7 @@ export async function POST(request: NextRequest) {
         if (data.vramGb !== undefined) updateData.vramGb = data.vramGb || null;
         if (data.cudaCores !== undefined) updateData.cudaCores = data.cudaCores || null;
         if (data.gpuFamily !== undefined) updateData.gpuFamily = data.gpuFamily || null;
+        if (data.supportsSharedStorage !== undefined) updateData.supportsSharedStorage = data.supportsSharedStorage;
         if (data.serviceId !== undefined) updateData.serviceId = data.serviceId || null;
 
         // Many-to-many categories: use `set` to replace all connections
@@ -358,6 +501,23 @@ export async function POST(request: NextRequest) {
       case "delete": {
         if (!id) {
           return NextResponse.json({ error: "Product ID is required" }, { status: 400 });
+        }
+
+        // Deleting the row strands subscribers harder than deactivating it does —
+        // there is nothing left to reactivate — so it takes the same guard.
+        const doomed = await prisma.gpuProduct.findUnique({ where: { id } });
+        if (doomed?.billingType === "monthly" && !force) {
+          const subscribers = await countLiveSubscribers(doomed);
+          if (subscribers > 0) {
+            return NextResponse.json(
+              {
+                error: `"${doomed.name}" has ${subscribers} live subscription${subscribers === 1 ? "" : "s"}. Deleting it strands them with no way to redeploy while they keep paying. Cancel or migrate them first, or resend with force: true to delete it anyway.`,
+                liveSubscribers: subscribers,
+                requiresForce: true,
+              },
+              { status: 409 }
+            );
+          }
         }
 
         await prisma.gpuProduct.delete({ where: { id } });

@@ -28,18 +28,6 @@ interface CustomersTabProps {
   onPageChange: (page: number) => void;
 }
 
-function formatRelativeTime(unix: number): string {
-  const now = Date.now() / 1000;
-  const diff = now - unix;
-
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`;
-  if (diff < 31536000) return `${Math.floor(diff / 2592000)}mo ago`;
-  return `${Math.floor(diff / 31536000)}y ago`;
-}
-
 export function CustomersTab({
   customers,
   search,
@@ -165,7 +153,7 @@ export function CustomersTab({
                   className="hover:bg-gray-50 cursor-pointer"
                   onClick={() => onSelectCustomer(customer.id)}
                 >
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3" title={(customer.customerIds ?? [customer.id]).join("\n")}>
                     <p className="font-medium text-[#0b0f1c]">{customer.name || "\u2014"}</p>
                     <p className="text-sm text-[#5b6476]">{customer.email}</p>
                   </td>

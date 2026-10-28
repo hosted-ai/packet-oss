@@ -90,6 +90,7 @@ export async function GET(
       where: { stripeCustomerId: customerId },
       select: {
         bareMetalEnabled: true,
+        internalNotes: true,
         suspended: true,
         suspendedAt: true,
         suspendedReason: true,
@@ -168,6 +169,7 @@ export async function GET(
       } : null,
       activityEvents,
       bareMetalEnabled: customerSettings?.bareMetalEnabled ?? false,
+      internalNotes: customerSettings?.internalNotes ?? null,
       suspension: {
         suspended: customerSettings?.suspended ?? false,
         suspendedAt: customerSettings?.suspendedAt ?? null,
